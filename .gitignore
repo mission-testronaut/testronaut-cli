@@ -1,0 +1,7 @@
+node_modules/
+*.html
+*.log
+*.png
+*.jpg
+*.jpeg
+.env
