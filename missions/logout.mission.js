@@ -3,7 +3,7 @@ import { loginMission } from './login.mission.js';
 
 export const logoutMission = `
     Locate and click the Logout button or link.
-    The selector may be something like [data-testid="logout"] or a visible text node like "Logout" or hidden under an avatar or username.
+    The selector may be something like [data-testid="logout"] or a visible text node like "Logout" or "Sign out" or hidden under an avatar or username.
     After clicking, use 'check_text' to confirm you've returned to the login screen.
     You may need to use 'expand_menu' on a selector such as '[data-testid="user-dropdown-trigger"]'.
     After logging out, use 'check_text' to verify that "${process.env.AFTER_LOGOUT_CHECK}" appears on the page.
