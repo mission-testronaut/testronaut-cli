@@ -2,14 +2,10 @@ import OpenAI from 'openai';
 import toolsSchema from '../tools/toolSchema.js';
 import { CHROME_TOOL_MAP } from '../tools/chromeBrowser.js';
 import fs from 'fs';
-import { type } from 'os';
-import { finalResponseHandler } from '../tools/turnLoopUtils.js';
-import { tokenEstimate } from '../tools/tokenControl.js';
+import { finalResponseHandler, wait } from '../tools/turnLoopUtils.js';
+import { tokenEstimate, tokeUseCoolOff } from '../tools/tokenControl.js';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-const TOKEN_LIMIT_PER_MIN = 90000;
-const TOKEN_BACKOFF_MS = 60000;
 
 let totalTokensUsed = 0;
 let turnTimestamps = [];
@@ -49,101 +45,6 @@ const pushDOMAssistant = async (browser, messages, agentMemory, { skipIfLastTool
   });
 }
 
-// const pushDOMAssistant = async (browser, messages, { skipIfLastTool } = {}) => {
-//   if (skipIfLastTool && skipIfLastTool.includes(messages.at(-1)?.name)) {
-//     console.log(`[skip] Skipping DOM push after redundant tool: ${messages.at(-1)?.name}`);
-//     return;
-//   }
-
-//   let focusHint = null;
-//   try {
-//     const hintResp = await openai.chat.completions.create({
-//       model: 'gpt-4o',
-//       messages,
-//       tools: [
-//         {
-//           type: 'function',
-//           function: {
-//             name: 'get_dom_focus_hint',
-//             description: 'Suggests what areas of the DOM to focus on given current agent context',
-//             parameters: {
-//               type: 'object',
-//               properties: {},
-//             },
-//             required: [],
-//           },
-//         },
-//       ],
-//     });
-//     const usage = hintResp.usage;
-//     if (usage) {
-//       console.log(`📊 Token Usage For Hint → Prompt: ${usage.prompt_tokens}, Completion: ${usage.completion_tokens}, Total: ${usage.total_tokens}`);
-//       totalTokensUsed += usage?.total_tokens || 0;
-//       console.log(`📈 Running Total Tokens Used: ${totalTokensUsed}`);
-//     }
-//     const hintToolCall = hintResp.choices[0].message.tool_calls?.[0];
-//     if (hintToolCall && hintToolCall.function?.arguments) {
-//       const parsed = JSON.parse(hintToolCall.function.arguments);
-//       if (parsed.focus) {
-//         focusHint = parsed.focus;
-//         console.log(`🎯 DOM Focus Hint: ${focusHint}`);
-//       }
-//     }
-//   } catch (err) {
-//     console.warn('⚠️ Failed to retrieve focus hint:', err.message);
-//   }
-
-//   const domCallId = `get_dom_${Date.now()}`;
-//   messages.push({
-//     role: 'assistant',
-//     tool_calls: [
-//       {
-//         id: domCallId,
-//         type: 'function',
-//         function: {
-//           name: 'get_dom',
-//           arguments: JSON.stringify({ limit: 100000, exclude: true, focus: focusHint }),
-//         },
-//       },
-//     ],
-//   });
-
-//   const domHtml = await CHROME_TOOL_MAP.get_dom(browser, {
-//     limit: 100000,
-//     exclude: true,
-//     focus: focusHint
-//   });
- //   await tokenEstimate('gpt-4o', domHtml);
-//   messages.push({
-//     role: 'tool',
-//     tool_call_id: domCallId,
-//     name: 'get_dom',
-//     type: 'function',
-//     content: typeof domHtml === 'string' ? domHtml : JSON.stringify(domHtml),
-//   });
-// };
-
-
-// const finalResponseHandler = (msg) => {
-//   const final = msg.content?.trim().toLowerCase();
-//   if (final?.startsWith('success')) {
-//     console.log('\n┏━ FINAL AGENT RESPONSE ━━━━━━━━━━━━━━━━━━━');
-//     console.log(msg.content);
-//     console.log('┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-//     return true;
-//   }
-//   if (final?.startsWith('failure')) {
-//     console.log('\n┏━ FINAL AGENT RESPONSE ━━━━━━━━━━━━━━━━━━━');
-//     console.log(msg.content);
-//     console.log('┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-//     return false;
-//   }
-//   return null;
-// }
-
-const wait = (ms) => new Promise(res => setTimeout(res, ms));
-
-
 export const turnLoop = async (browser, messages, maxTurns, currentTurn = 0, retryCount = 0) => {
   let agentMemory = {
     lastMenuExpanded: false
@@ -156,18 +57,9 @@ export const turnLoop = async (browser, messages, maxTurns, currentTurn = 0, ret
     const now = Date.now();
     turnTimestamps = turnTimestamps.filter(ts => now - ts < 60000);
 
-    // if (totalTokensUsed > TOKEN_LIMIT_PER_MIN || turnTimestamps.length >= 5) {
-    if (totalTokensUsed > TOKEN_LIMIT_PER_MIN) {
-      console.warn(`⚠️ Token throttle risk → Waiting ${TOKEN_BACKOFF_MS / 1000}s to cool off...`);
-      await wait(TOKEN_BACKOFF_MS);
-      totalTokensUsed = 0; // Reset token count after backoff
-      turnTimestamps = []; // Reset timestamps after backoff
-      console.log('✅ Backoff complete, resuming...');
-      return await turnLoop(browser, messages, maxTurns, turn);
-    }
+    if (await tokeUseCoolOff(totalTokensUsed, turnTimestamps)) {return await turnLoop(browser, messages, maxTurns, turn)}
 
     let response;
-    
     try {
       response = await openai.chat.completions.create({
         model: 'gpt-4o',
@@ -189,7 +81,6 @@ export const turnLoop = async (browser, messages, maxTurns, currentTurn = 0, ret
       } else if (err.status === 400) {
         console.error('❌ Bad request:', err.message);
         console.log("current tools", toolsSchema);
-        // console.log("messages", messages);
         return false;
       } else {
         throw err;

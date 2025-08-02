@@ -14,3 +14,5 @@ export const finalResponseHandler = (msg) => {
   }
   return null;
 }
+
+export const wait = (ms) => new Promise(res => setTimeout(res, ms));
