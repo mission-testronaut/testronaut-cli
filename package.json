@@ -1,6 +1,6 @@
 {
   "name": "testronaut",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "main": "./runner/testronaut.js",
   "bin": {
     "testronaut": "./bin/cli.js"
@@ -16,7 +16,7 @@
     "start": "node ./bin/cli.js"
   },
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "description": "",
   "dependencies": {
     "@dqbd/tiktoken": "^1.0.21",
