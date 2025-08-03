@@ -1,15 +1,21 @@
 import { runMissions } from '../runner/testronaut.js';
 import { loginMission } from './login.mission.js';
 import { logoutMission } from './logout.mission.js';
+import { startPublicChatMission } from './startPublicChat.mission.js';
 
-export const startPublicChatMission = `Start a chat by clicking the first chat button under the public libraries.
-To confirm if a chat has started a text field with the place holder text "Chat with an AI" should appear.
+export const chatMission = 
+`Input the text "give me the main categories for compliance for AER" into the text field with the placeholder text "Chat with an AI".
+Then submit the message.
+You will likely need to wait several seconds for a response (about 30 seconds).
+The response will appear in the text response section of the page.
+the response will be a thoughtfull response from an LLM.
+Check if this response was sent and if it was related to the question asked.
 If found, report SUCCESS. Otherwise, report FAILURE.`
 
 export async function executeDashboardMission() {
   await runMissions({
-    preMission: loginMission,
-    mission: startPublicChatMission,
+    preMission: [loginMission, startPublicChatMission],
+    mission: chatMission,
     postMission: logoutMission,
   });
 }
