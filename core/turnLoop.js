@@ -2,8 +2,17 @@ import OpenAI from 'openai';
 import toolsSchema from '../tools/toolSchema.js';
 import { CHROME_TOOL_MAP } from '../tools/chromeBrowser.js';
 import fs from 'fs';
-import { finalResponseHandler, wait } from '../tools/turnLoopUtils.js';
-import { tokenEstimate, tokeUseCoolOff } from '../tools/tokenControl.js';
+import { 
+  finalResponseHandler, 
+  wait, 
+  validateAndInsertMissingToolResponses 
+} from '../tools/turnLoopUtils.js';
+import { 
+  tokenEstimate, 
+  tokenUseCoolOff, 
+  recordTokenUsage, 
+  pruneOldTokenUsage 
+} from '../tools/tokenControl.js';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -54,10 +63,32 @@ export const turnLoop = async (browser, messages, maxTurns, currentTurn = 0, ret
     console.log(`\n🔄 Turn ${turn + 1}/${maxTurns}`);
     // console.log("current tools", toolsSchema);
 
-    const now = Date.now();
-    turnTimestamps = turnTimestamps.filter(ts => now - ts < 60000);
+    // const now = Date.now();
+    // turnTimestamps = turnTimestamps.filter(ts => now - ts < 60000);
 
-    if (await tokeUseCoolOff(totalTokensUsed, turnTimestamps)) {return await turnLoop(browser, messages, maxTurns, turn)}
+    // Recalculate the rolling window before checking cooldown
+    const pruned = pruneOldTokenUsage(turnTimestamps);
+    turnTimestamps = pruned.turnTimestamps;
+    totalTokensUsed = pruned.totalTokensUsed;
+
+    // Cool off check
+    const cooldownResult = await tokenUseCoolOff(totalTokensUsed, turnTimestamps);
+    totalTokensUsed = cooldownResult.totalTokensUsed;
+    turnTimestamps = cooldownResult.turnTimestamps;
+    if (cooldownResult.shouldBackoff) {
+      return await turnLoop(browser, messages, maxTurns, turn);
+    }
+    // if (await tokenUseCoolOff(totalTokensUsed, turnTimestamps)) {return await turnLoop(browser, messages, maxTurns, turn)}
+
+    const isValid = validateAndInsertMissingToolResponses(messages, {
+      insertPlaceholders: true, // safe fallback behavior
+    });
+    
+    if (!isValid) {
+      console.error('❌ Tool call structure invalid and no placeholders inserted.');
+      return false;
+    }
+    // console.log(JSON.stringify(messages, null, 2));
 
     let response;
     try {
@@ -88,12 +119,22 @@ export const turnLoop = async (browser, messages, maxTurns, currentTurn = 0, ret
     }
     console.log('Response received from OpenAI');
     const usage = response.usage;
+    // if (usage) {
+    //   console.log(`📊 Token Usage This Turn → Prompt: ${usage.prompt_tokens}, Completion: ${usage.completion_tokens}, Total: ${usage.total_tokens}`);
+    //   totalTokensUsed += usage?.total_tokens || 0;
+    //   turnTimestamps.push(now);
+    //   console.log(`📈 Running Total Tokens Used: ${totalTokensUsed}`);
+    // }
     if (usage) {
-      console.log(`📊 Token Usage This Turn → Prompt: ${usage.prompt_tokens}, Completion: ${usage.completion_tokens}, Total: ${usage.total_tokens}`);
-      totalTokensUsed += usage?.total_tokens || 0;
-      turnTimestamps.push(now);
-      console.log(`📈 Running Total Tokens Used: ${totalTokensUsed}`);
+      const tokensUsed = usage.total_tokens || 0;
+      console.log(`📊 Token Usage This Turn → Total: ${tokensUsed}`);
+      recordTokenUsage(turnTimestamps, tokensUsed);
+      const pruned = pruneOldTokenUsage(turnTimestamps);
+      turnTimestamps = pruned.turnTimestamps;
+      totalTokensUsed = pruned.totalTokensUsed;
+      console.log(`📈 Running Total Tokens Used (Rolling 60s): ${totalTokensUsed}`);
     }
+    
     const msg = response.choices[0].message;
 
     if (msg.tool_calls?.length) {
