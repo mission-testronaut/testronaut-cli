@@ -43,7 +43,7 @@ import { runMissions } from 'testronaut';
 
 export const loginMission = `
 Click on the login button.
-Fill in the username and password fields.
+Fill in the username field with ${process.env.USERNAME} and password field with ${process.env.PASSWORD}.
 Submit the form.
 Wait for the dashboard to appear.
 Report SUCCESS if the dashboard is loaded, otherwise report FAILURE.
@@ -55,6 +55,9 @@ export async function executeMission() {
   });
 }
 ```
+
+Pass in credentials using an .env file
+
 You can chain multiple phases:
 
 ```
