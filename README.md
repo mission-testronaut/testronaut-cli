@@ -42,7 +42,7 @@ Create a file in your missions/ directory, e.g. missions/login.mission.js:
 import { runMissions } from 'testronaut';
 
 export const loginMission = `
-Click on the login button.
+Visit ${process.env.URL}.
 Fill in the username field with ${process.env.USERNAME} and password field with ${process.env.PASSWORD}.
 Submit the form.
 Wait for the dashboard to appear.
@@ -56,7 +56,14 @@ export async function executeMission() {
 }
 ```
 
-Pass in credentials using an .env file
+Pass in credentials using an .env file. The .env file should also include your Open AI API key (permissions to the completions endpoint required):
+
+```
+OPENAI_API_KEY=sk-proj-############
+URL=https://example.com/login
+USERNAME=example@example.com
+PASSWORD=********
+```
 
 You can chain multiple phases:
 
