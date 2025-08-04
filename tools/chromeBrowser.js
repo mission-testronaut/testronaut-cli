@@ -92,7 +92,7 @@ export class ChromeBrowser {
         await el.click();
         await this.page.screenshot({ path: `screenshot_after_click_${Date.now()}.png` });
         await this.page.waitForTimeout(5000);
-        await this.page.screenshot({ path: `screenshot_after_waiting_click_${Date.now()}.png` });
+        // await this.page.screenshot({ path: `screenshot_after_waiting_click_${Date.now()}.png` });
         return `clicked text "${text}"`;
         
       }
@@ -149,10 +149,10 @@ export class ChromeBrowser {
     await this.page.waitForTimeout(delayMs);
 
     const expandedDom = await this.page.content();
-    const filename = `expand_menu_dump_${Date.now()}.html`;
+    const filename = `missions/mission_reports/expand_menu_dump_${Date.now()}.html`;
     fs.writeFileSync(filename, expandedDom);
     console.log(`[expand_menu] → Dumped DOM after expand click to ${filename}`);
-    await this.page.screenshot({ path: `screenshot_expand_menu_${Date.now()}.png` });
+    await this.page.screenshot({ path: `missions/mission_reports/screenshot_expand_menu_${Date.now()}.png` });
 
     return `expanded menu using ${selector}`;
   }

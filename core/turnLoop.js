@@ -43,7 +43,7 @@ const pushDOMAssistant = async (browser, messages, agentMemory, { skipIfLastTool
 
   const domHtml = await CHROME_TOOL_MAP.get_dom(browser, { limit: 100000, exclude: true }, agentMemory);
   await tokenEstimate('gpt-4o', domHtml);
-  fs.writeFileSync(`debug-expanded-${Date.now()}.html`, domHtml);
+  fs.writeFileSync(`missions/mission_reports/debug-expanded-${Date.now()}.html`, domHtml);
 
   messages.push({
     role: 'tool',
@@ -171,7 +171,7 @@ export const turnLoop = async (browser, messages, maxTurns, currentTurn = 0, ret
         const truncated = result.length > 100 ? result.slice(0, 100) + '…' : result;
 
         if (result.length > 100) {
-          const logFile = `tool-result-${Date.now()}.log`;
+          const logFile = `missions/mission_reports/tool-result-${Date.now()}.log`;
           fs.writeFileSync(logFile, result);
           console.log(`[tool ] ← ${truncated} (full output written to ${logFile})`);
         } else {
@@ -197,7 +197,7 @@ export const turnLoop = async (browser, messages, maxTurns, currentTurn = 0, ret
             focus: [], // or try focusing on ['main'] to keep it light
           }, agentMemory);
           await tokenEstimate('gpt-4o', domHtml);
-          fs.writeFileSync(`debug-expanded-${Date.now()}.html`, domHtml);
+          fs.writeFileSync(`missions/mission_reports/debug-expanded-${Date.now()}.html`, domHtml);
           await pushDOMAssistant(browser, messages, agentMemory, {
             skipIfLastTool: ['get_dom', 'check_text']
           });
