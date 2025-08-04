@@ -2,11 +2,42 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { initializeTestronautProject } from './init.js';
+import { createWelcomeMission } from './createWelcomeMission.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const args = process.argv.slice(2);
 const missionsDir = path.resolve(process.cwd(), 'missions');
+
+const HELP_TEXT = `
+🧑‍🚀 testronaut - Autonomous Agent Mission Runner
+
+Usage:
+  npx testronaut                 Run all missions in the ./missions directory
+  npx testronaut <file>         Run a specific mission file (e.g., login.mission.js)
+
+Options:
+  --init                    Scaffold project folders and a welcome mission
+  --help                    Show this help message
+
+Examples:
+  npx testronaut
+  npx testronaut login.mission.js
+  npx testronaut --init
+`;
+
+
+if (args.includes('--init')) {
+  await initializeTestronautProject();
+  await createWelcomeMission();
+  process.exit(0);
+}
+
+if (args.includes('--help')) {
+  console.log(HELP_TEXT);
+  process.exit(0);
+}
 
 if (!fs.existsSync(missionsDir)) {
   console.error('❌ No `missions` directory found.');

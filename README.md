@@ -20,9 +20,13 @@
 ```
 npm install -g testronaut
 ```
-Or use with npx:
+Then initialize with npx, following the instructions:
 ```
-npx testronaut
+npx testronaut --init
+```
+run the welcome mission:
+```
+npx testronaut welcome.mission.js
 ```
 📁 Directory Structure
 Your project should include a missions/ folder with mission files like:
@@ -98,7 +102,7 @@ testronaut
 Run a specific file:
 
 ```
-testronaut missions/login.mission.js
+testronaut login.mission.js
 ```
 
 🧰 Available Helpers

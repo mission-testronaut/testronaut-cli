@@ -1,0 +1,35 @@
+import fs from 'fs';
+import path from 'path';
+
+export const createWelcomeMission = async () => {
+  const missionsDir = path.join(process.cwd(), 'missions');
+  const welcomePath = path.join(missionsDir, 'welcome.mission.js');
+
+  if (fs.existsSync(welcomePath)) {
+    console.log('✅ welcome.mission.js already exists');
+    return;
+  }
+
+  const content = `import { runMissions } from 'testronaut';
+
+const welcomeGoal = \`
+Welcome to Testronaut!
+
+This is your first mission.
+All we ask is that you confirm this setup is working correctly.
+
+To complete this mission, report SUCCESS immediately.
+If you cannot reach this message, report FAILURE.
+\`;
+
+export async function executeMission() {
+  await runMissions({
+    mission: welcomeGoal
+  });
+}
+
+`;
+
+  fs.writeFileSync(welcomePath, content);
+  console.log('🚀 Created missions/welcome.mission.js');
+}

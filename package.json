@@ -1,6 +1,6 @@
 {
   "name": "testronaut",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "main": "./runner/testronaut.js",
   "bin": {
     "testronaut": "./bin/cli.js"
@@ -23,6 +23,7 @@
     "cheerio": "^1.1.0",
     "dotenv": "^17.2.0",
     "openai": "^5.10.2",
-    "playwright": "^1.54.1"
+    "playwright": "^1.54.1",
+    "prompts": "^2.4.2"
   }
 }
