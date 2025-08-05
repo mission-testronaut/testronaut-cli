@@ -12,8 +12,8 @@ export const tokenEstimate = async (model, text) => {
 }
 
 export const tokenUseCoolOff = async (totalTokensUsed, turnTimestamps) => {
-  console.log("total tokens used: ", totalTokensUsed);
-  console.log("turnTimestamps: ", turnTimestamps);
+  // console.log("total tokens used: ", totalTokensUsed);
+  // console.log("turnTimestamps: ", turnTimestamps);
   
   if (totalTokensUsed > TOKEN_LIMIT_PER_MIN) {
     const msToWait = await getDynamicBackoffMs(turnTimestamps);
