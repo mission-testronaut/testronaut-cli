@@ -90,7 +90,7 @@ export class ChromeBrowser {
       if (innerText.includes(text)) {
         await el.scrollIntoViewIfNeeded().catch(() => {});
         await el.click();
-        await this.page.screenshot({ path: `screenshot_after_click_${Date.now()}.png` });
+        await this.page.screenshot({ path: `missions/mission_reports/screenshot_after_click_${Date.now()}.png` });
         await this.page.waitForTimeout(5000);
         // await this.page.screenshot({ path: `screenshot_after_waiting_click_${Date.now()}.png` });
         return `clicked text "${text}"`;
@@ -119,7 +119,7 @@ export class ChromeBrowser {
         console.log(`[click_text] → Clicking visible element with bounding box`, box);
         await el.click();
         await this.page.waitForTimeout(delayMs);
-        await this.page.screenshot({ path: `screenshot_after_click_${Date.now()}.png` });
+        await this.page.screenshot({ path: `missions/mission_reports/screenshot_after_click_${Date.now()}.png` });
         return `clicked visible text "${text}"`;
       }
     }
