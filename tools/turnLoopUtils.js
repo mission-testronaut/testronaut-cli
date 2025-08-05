@@ -34,6 +34,9 @@ export function validateAndInsertMissingToolResponses(messages, options = {}) {
         );
 
         if (!hasResponse) {
+          console.warn(
+            `⚠️ Missing response for tool_call_id: ${expectedId}, function: ${toolCall.function.name}, from assistant message index: ${i}`
+          );
           missingResponses.push(expectedId);
 
           if (insertPlaceholders) {

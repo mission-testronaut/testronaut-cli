@@ -92,6 +92,17 @@ export const turnLoop = async (browser, messages, maxTurns, currentTurn = 0, ret
 
     let response;
     try {
+      // console.log(
+      //   '🔍 Verifying message structure before OpenAI call:\n',
+      //   messages.map(m => ({
+      //     role: m.role,
+      //     name: m.name,
+      //     tool_call_id: m.tool_call_id,
+      //     tool_calls: m.tool_calls?.map(t => t.id),
+      //     content: m.content?.slice?.(0, 100), // truncate for readability
+      //   }))
+      // );
+      
       response = await openai.chat.completions.create({
         model: 'gpt-4o',
         messages,
@@ -148,6 +159,7 @@ export const turnLoop = async (browser, messages, maxTurns, currentTurn = 0, ret
         console.log(`[model] → ${fnName}`, args);
         console.log('Calling tool:', fnName);
         let result;
+        let errorMessage = null;
         try {
           console.log("agentMemory: ", agentMemory);
           result = await CHROME_TOOL_MAP[fnName](browser, args, agentMemory);
@@ -165,8 +177,12 @@ export const turnLoop = async (browser, messages, maxTurns, currentTurn = 0, ret
             result = JSON.stringify(result ?? '');
           }
         } catch (err) {
-          result = `ERROR: ${err.message}`;
+          errorMessage = `ERROR: ${err.message}`;
+          result = errorMessage;
         }
+
+        // 🔍 Diagnostic: log whether this tool call succeeded or failed
+        console.log(`[tool ] ← ${fnName} result:`, errorMessage ? '❌ Failed' : '✅ Success');
 
         const truncated = result.length > 100 ? result.slice(0, 100) + '…' : result;
 
