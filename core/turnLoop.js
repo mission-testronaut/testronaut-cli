@@ -43,7 +43,7 @@ const pushDOMAssistant = async (browser, messages, agentMemory, { skipIfLastTool
 
   const domHtml = await CHROME_TOOL_MAP.get_dom(browser, { limit: 100000, exclude: true }, agentMemory);
   await tokenEstimate('gpt-4o', domHtml);
-  fs.writeFileSync(`missions/mission_reports/debug-expanded-${Date.now()}.html`, domHtml);
+  // fs.writeFileSync(`missions/mission_reports/debug-expanded-${Date.now()}.html`, domHtml);
 
   messages.push({
     role: 'tool',
@@ -103,6 +103,24 @@ export const turnLoop = async (browser, messages, maxTurns, currentTurn = 0, ret
       //   }))
       // );
       
+      const unrespondedCalls = messages.filter(
+        (msg, i) =>
+          msg.role === 'assistant' &&
+          msg.tool_calls?.length &&
+          !msg.tool_calls.every(call =>
+            messages.slice(i + 1).some(
+              m => m.role === 'tool' && m.tool_call_id === call.id
+            )
+          )
+      );
+      
+      if (unrespondedCalls.length) {
+        console.error('🛑 Detected assistant tool calls without matching tool responses:');
+        console.dir(unrespondedCalls, { depth: 5 });
+        return false;
+      }
+      
+
       response = await openai.chat.completions.create({
         model: 'gpt-4o',
         messages,
@@ -123,6 +141,7 @@ export const turnLoop = async (browser, messages, maxTurns, currentTurn = 0, ret
       } else if (err.status === 400) {
         console.error('❌ Bad request:', err.message);
         console.log("current tools", toolsSchema);
+        console.log("messages: ", messages)
         return false;
       } else {
         throw err;
@@ -148,20 +167,31 @@ export const turnLoop = async (browser, messages, maxTurns, currentTurn = 0, ret
     
     const msg = response.choices[0].message;
 
+    // if (!msg.tool_calls?.length) {
+    //   console.error('❌ Assistant message had empty or missing tool_calls array');
+    //   return false;
+    // }   
+
     if (msg.tool_calls?.length) {
       console.log('Processing tool calls...');
-      messages.push(msg);
+      // messages.push(msg);
+      const toolResponses = [];
       let lastToolName = null;
+
       for (const call of msg.tool_calls) {
+        const toolCallId = call.id;
+        // const hasResponse = messages.some(m =>
+        //   m.role === 'tool' && m.tool_call_id === toolCallId
+        // );
         const fnName = call.function.name;
         lastToolName = fnName;
         const args = JSON.parse(call.function.arguments || '{}');
         console.log(`[model] → ${fnName}`, args);
-        console.log('Calling tool:', fnName);
+        // console.log('Calling tool:', fnName);
         let result;
         let errorMessage = null;
         try {
-          console.log("agentMemory: ", agentMemory);
+          // console.log("agentMemory: ", agentMemory);
           result = await CHROME_TOOL_MAP[fnName](browser, args, agentMemory);
 
           // Smart DOM-ready wait after major actions like click
@@ -186,21 +216,30 @@ export const turnLoop = async (browser, messages, maxTurns, currentTurn = 0, ret
 
         const truncated = result.length > 100 ? result.slice(0, 100) + '…' : result;
 
-        if (result.length > 100) {
-          const logFile = `missions/mission_reports/tool-result-${Date.now()}.log`;
-          fs.writeFileSync(logFile, result);
-          console.log(`[tool ] ← ${truncated} (full output written to ${logFile})`);
-        } else {
+        // if (result.length > 100) {
+        //   // const logFile = `missions/mission_reports/tool-result-${Date.now()}.log`;
+        //   // fs.writeFileSync(logFile, result);
+        //   console.log(`[tool ] ← ${truncated} (full output written to ${logFile})`);
+        // } else {
           console.log(`[tool ] ← ${truncated}`);
-        }
+        // }
 
-        messages.push({
+        // messages.push({
+        //   role: 'tool',
+        //   tool_call_id: call.id,
+        //   name: fnName,
+        //   type: 'function',
+        //   content: result,
+        // });
+
+        toolResponses.push({
           role: 'tool',
           tool_call_id: call.id,
           name: fnName,
           type: 'function',
           content: result,
         });
+
         if (fnName === 'expand_menu') {
           agentMemory.lastMenuExpanded = true;
         }
@@ -213,13 +252,23 @@ export const turnLoop = async (browser, messages, maxTurns, currentTurn = 0, ret
             focus: [], // or try focusing on ['main'] to keep it light
           }, agentMemory);
           await tokenEstimate('gpt-4o', domHtml);
-          fs.writeFileSync(`missions/mission_reports/debug-expanded-${Date.now()}.html`, domHtml);
+          // fs.writeFileSync(`missions/mission_reports/debug-expanded-${Date.now()}.html`, domHtml);
           await pushDOMAssistant(browser, messages, agentMemory, {
             skipIfLastTool: ['get_dom', 'check_text']
           });
           console.log(`[auto] → DOM size after ${fnName}: ${domHtml.length} chars`);
         }
-      }
+
+
+        
+        // if (!hasResponse) {
+          //   console.error(`❌ Tool call ${toolCallId} for ${call.function.name} was not followed by a response`);
+          //   return false;
+          // }
+        }
+        
+      // Only after ALL tool responses are ready
+      messages.push(msg, ...toolResponses);
 
       continue;
     }
