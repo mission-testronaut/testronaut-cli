@@ -25,7 +25,7 @@ If you cannot reach this message, report FAILURE.
 export async function executeMission() {
   await runMissions({
     mission: welcomeGoal
-  });
+  }, 'Welcome Mission!');
 }
 
 `;
