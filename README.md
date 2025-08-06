@@ -47,7 +47,8 @@ import { runMissions } from 'testronaut';
 
 export const loginMission = `
 Visit ${process.env.URL}.
-Fill in the username field with ${process.env.USERNAME} and password field with ${process.env.PASSWORD}.
+Fill the username field with ${process.env.USERNAME}. 
+Fill the password field with ${process.env.PASSWORD}.
 Submit the form.
 Wait for the dashboard to appear.
 Report SUCCESS if the dashboard is loaded, otherwise report FAILURE.
@@ -56,7 +57,7 @@ Report SUCCESS if the dashboard is loaded, otherwise report FAILURE.
 export async function executeMission() {
   await runMissions({
     mission: loginMission
-  });
+  }, "Login Mission");
 }
 ```
 
@@ -89,7 +90,7 @@ export async function executeMission() {
     preMission: [loginMission, navigateToContactFormMission],
     mission: fillContactFormMission,
     postMission: logoutMission,
-  });
+  }, "Fill Contact Form Mission");
 }
 ```
 
@@ -97,12 +98,12 @@ export async function executeMission() {
 Run all missions in the missions/ directory:
 
 ```
-testronaut
+npx testronaut
 ```
 Run a specific file:
 
 ```
-testronaut login.mission.js
+npx testronaut login.mission.js
 ```
 
 🧰 Available Helpers
@@ -121,6 +122,9 @@ mission(name, fn) and objective(desc, workflow)
 runSuite(objectives)
 ```
 – Executes all registered test objectives
+
+### 📋 Reports
+HTML and JSON reports automatically created in the ```missions/mission_reports/``` directory for each testronaut run
 
 ### 🧪 Under the Hood
 Uses Playwright for browser automation
@@ -141,4 +145,4 @@ Now you can use testronaut in any local project.
 ### 📄 License
 MIT
 
-🤖 Built with ❤️ by Shane Fast
+🤖 Built with ❤️ by [Shane Fast](https://github.com/scfast)
