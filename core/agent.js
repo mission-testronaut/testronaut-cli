@@ -29,14 +29,14 @@ import { turnLoop } from './turnLoop.js';
 //   }
 // }
 
-export async function runAgent(goals, maxTurns = 20) {
+export async function runAgent(goals, missionName, maxTurns = 20, ) {
   const browser = new ChromeBrowser();
   await browser.start();
+  const startTime = Date.now();
 
   try {
     for (const goal of goals) {
-      console.log(`\n🚀 Running Agent with goal:\n${goal}\n`);
-
+      // console.log(`\n🚀 Running Agent with goal:\n${goal}\n`);
       const messages = [
         {
           role: 'system',
@@ -59,12 +59,28 @@ export async function runAgent(goals, maxTurns = 20) {
       const success = await turnLoop(browser, messages, maxTurns);
       if (!success) {
         console.log('🛑 Agent stopped due to failed goal.\n');
-        return false;
+        const endTime = Date.now();
+        return {
+          missionName: missionName,
+          status: 'failed',
+          steps: [ /* tool steps or key moments */ ],
+          startTime: startTime,
+          endTime: endTime,
+        }
+        ;
       }
     }
 
     console.log('✅ All goals completed successfully.\n');
-    return true;
+    const endTime = Date.now();
+    return {
+      missionName: missionName,
+      status: 'passed',
+      steps: [ /* tool steps or key moments */ ],
+      startTime: startTime,
+      endTime: endTime,
+    }
+    ;
 
   } finally {
     await browser.close();

@@ -48,7 +48,7 @@ export async function launch(preMissionSetup) {
 //   console.log('\n✅ Mission flow complete.');
 // }
 
-export async function runMissions({ preMission, mission, postMission }) {
+export async function runMissions({ preMission, mission, postMission }, missionName) {
   const normalizeToArray = (x) => (Array.isArray(x) ? x : x ? [x] : []);
   
   const pre = normalizeToArray(preMission);
@@ -58,17 +58,17 @@ export async function runMissions({ preMission, mission, postMission }) {
   const goals = [];
 
   if (pre.length) {
-    console.log('\n🧭 Running pre-mission setup:', pre);
+    // console.log('\n🧭 Running pre-mission setup:', pre);
     goals.push(...pre.map(fn => ({ goal: fn, label: 'pre-mission' })));
   }
 
   if (main.length) {
-    console.log('\n🧭 Running main mission(s):', main);
+    // console.log('\n🧭 Running main mission(s):', main);
     goals.push(...main.map(fn => ({ goal: fn, label: 'mission' })));
   }
 
   if (post.length) {
-    console.log('\n🧭 Running post-mission cleanup:', post);
+    // console.log('\n🧭 Running post-mission cleanup:', post);
     goals.push(...post.map(fn => ({ goal: fn, label: 'post-mission' })));
   }
 
@@ -77,11 +77,12 @@ export async function runMissions({ preMission, mission, postMission }) {
     goals.map(g => `${g.label}: ${g.goal?.name ?? g.goal}`)
   );
   
-  const success = await runAgent(goals);
+  const success = await runAgent(goals, missionName);
   if (!success) {
     console.log(`❌ Aborting after failed goal.`);
     return;
   }
-
   console.log('\n✅ Mission flow complete.');
+  return success;
+
 }

@@ -4,11 +4,16 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { initializeTestronautProject } from './init.js';
 import { createWelcomeMission } from './createWelcomeMission.js';
+import { generateHtmlReport } from '../tools/generateHtmlReport.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const args = process.argv.slice(2);
 const missionsDir = path.resolve(process.cwd(), 'missions');
+
+const allResults = [];
+const runId = `run_${Date.now()}`;
+const startTime = new Date();
 
 const HELP_TEXT = `
 🧑‍🚀 testronaut - Autonomous Agent Mission Runner
@@ -50,7 +55,11 @@ const runFile = async (filePath) => {
     const missionsModule = await import(`file://${modulePath}`);
 
     if (typeof missionsModule.executeMission === 'function') {
-      await missionsModule.executeMission(); // or call a named export like `executeMissions()`
+      const result = await missionsModule.executeMission();
+      allResults.push({
+        file: filePath,
+        result
+      });
     }
   } catch (err) {
     console.error(`❌ Error running mission: ${filePath}`);
@@ -70,3 +79,32 @@ if (args.length > 0) {
     await runFile(file);
   }
 }
+
+const endTime = new Date();
+
+const flatMissions = allResults.flatMap(entry => {
+  const result = entry.result;
+  const missions = Array.isArray(result) ? result : [result]; // normalize
+  return missions.map(m => ({
+    ...m,
+    file: entry.file
+  }));
+});
+
+
+const report = {
+  runId,
+  startTime: startTime.toISOString(),
+  endTime: endTime.toISOString(),
+  summary: {
+    totalMissions: flatMissions.length,
+    passed: flatMissions.filter(m => m.status === 'passed').length,
+    failed: flatMissions.filter(m => m.status === 'failed').length,
+  },
+  missions: flatMissions
+};
+
+const outputDir = './missions/mission_reports';
+fs.mkdirSync(outputDir, { recursive: true });
+fs.writeFileSync(`${outputDir}/${runId}.json`, JSON.stringify(report, null, 2));
+generateHtmlReport(report, `${outputDir}/${runId}.html`);
