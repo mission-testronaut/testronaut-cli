@@ -149,9 +149,9 @@ export class ChromeBrowser {
     await this.page.waitForTimeout(delayMs);
 
     const expandedDom = await this.page.content();
-    const filename = `missions/mission_reports/expand_menu_dump_${Date.now()}.html`;
-    fs.writeFileSync(filename, expandedDom);
-    console.log(`[expand_menu] → Dumped DOM after expand click to ${filename}`);
+    // const filename = `missions/mission_reports/expand_menu_dump_${Date.now()}.html`;
+    // fs.writeFileSync(filename, expandedDom);
+    // console.log(`[expand_menu] → Dumped DOM after expand click to ${filename}`);
     await this.page.screenshot({ path: `missions/mission_reports/screenshot_expand_menu_${Date.now()}.png` });
 
     return `expanded menu using ${selector}`;
