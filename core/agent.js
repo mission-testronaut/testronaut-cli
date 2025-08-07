@@ -6,10 +6,13 @@ export async function runAgent(goals, missionName, maxTurns = 20, ) {
   const browser = new ChromeBrowser();
   await browser.start();
   const startTime = Date.now();
+  let result;
 
   try {
+    const missionResults = [];
     for (const goal of goals) {
       // console.log(`\n🚀 Running Agent with goal:\n${goal}\n`);
+      const steps = [];
       const messages = [
         {
           role: 'system',
@@ -29,31 +32,55 @@ export async function runAgent(goals, missionName, maxTurns = 20, ) {
         { role: 'user', content: goal.goal },
       ];
 
-      const success = await turnLoop(browser, messages, maxTurns);
-      if (!success) {
-        console.log('🛑 Agent stopped due to failed goal.\n');
-        const endTime = Date.now();
-        return {
-          missionName: missionName,
-          status: 'failed',
-          steps: [ /* tool steps or key moments */ ],
-          startTime: startTime,
-          endTime: endTime,
+      result = await turnLoop(
+        browser, 
+        messages, 
+        maxTurns, 
+        0, /* currentTurn */
+        0, /* retryCount */
+        null, /* currentStep */
+        {
+          steps,          // 👈 pass in
+          missionName,    // 👈 pass in (for tagging)
         }
-        ;
+      );
+      
+      missionResults.push({
+        missionName,
+        status: result.success ? 'passed' : 'failed',
+        steps: JSON.parse(JSON.stringify(steps)), // 👈 deep-clone to avoid refs
+        startTime: Date.now() - 1, // set real values if you have them
+        endTime: Date.now(),
+      });
+
+      if (!result.success) {
+        console.log('🛑 Agent stopped due to failed goal.\n');
+        return missionResults;
       }
+
+      // if (!result.success) {
+      //   console.log('🛑 Agent stopped due to failed goal.\n');
+      //   const endTime = Date.now();
+      //   return {
+      //     missionName: missionName,
+      //     status: 'failed',
+      //     steps: result.steps,
+      //     startTime: startTime,
+      //     endTime: endTime,
+      //   };
+      // }
     }
 
     console.log('✅ All goals completed successfully.\n');
-    const endTime = Date.now();
-    return {
-      missionName: missionName,
-      status: 'passed',
-      steps: [ /* tool steps or key moments */ ],
-      startTime: startTime,
-      endTime: endTime,
-    }
-    ;
+    // const endTime = Date.now();
+    return missionResults;
+    // return {
+    //   missionName: missionName,
+    //   status: 'passed',
+    //   steps: result.steps,
+    //   startTime: startTime,
+    //   endTime: endTime,
+    // };
 
   } finally {
     await browser.close();

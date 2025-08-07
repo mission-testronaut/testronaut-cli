@@ -4,13 +4,13 @@ export const finalResponseHandler = (msg) => {
     console.log('\n┏━ FINAL AGENT RESPONSE ━━━━━━━━━━━━━━━━━━━');
     console.log(msg.content);
     console.log('┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    return true;
+    return { finalMessage: msg.content, success: true};
   }
   if (final?.startsWith('failure')) {
     console.log('\n┏━ FINAL AGENT RESPONSE ━━━━━━━━━━━━━━━━━━━');
     console.log(msg.content);
     console.log('┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    return false;
+    return { finalMessage: msg.content, success: false};
   }
   return null;
 }

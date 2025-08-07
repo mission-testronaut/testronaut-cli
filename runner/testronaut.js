@@ -47,6 +47,15 @@ export async function runMissions({ preMission, mission, postMission }, missionN
     console.log(`❌ Aborting after failed goal.`);
     return;
   }
+  // console.log("success[0]: ", success[0]);
+  // console.log("success[0].steps.length: ", success[0].steps.length);
+  // console.log("success[0].steps[success[0].steps.length - 1].result: ", success[0].steps[success[0].steps.length - 1].result)
+  const missionStatus = success[0].steps[success[0].steps.length - 1].result;
+  // console.log("missionStatus: ", missionStatus)
+  if (missionStatus.toLowerCase().includes('failure')) {
+    // console.log("we detected the failure!")
+    success[0].status = 'failed';
+  }
   console.log('\n✅ Mission flow complete.');
   return success;
 }

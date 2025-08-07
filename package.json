@@ -1,6 +1,6 @@
 {
   "name": "testronaut",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "main": "./runner/testronaut.js",
   "bin": {
     "testronaut": "./bin/cli.js"
@@ -25,5 +25,12 @@
     "openai": "^5.10.2",
     "playwright": "^1.54.1",
     "prompts": "^2.4.2"
-  }
+  },
+  "keywords": [
+    "cli",
+    "testing",
+    "automation",
+    "node",
+    "qa"
+  ]
 }
