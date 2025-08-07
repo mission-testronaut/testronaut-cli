@@ -90,9 +90,7 @@ export class ChromeBrowser {
       if (innerText.includes(text)) {
         await el.scrollIntoViewIfNeeded().catch(() => {});
         await el.click();
-        await this.page.screenshot({ path: `missions/mission_reports/screenshot_after_click_${Date.now()}.png` });
         await this.page.waitForTimeout(5000);
-        await this.page.screenshot({ path: `screenshot_after_waiting_click_${Date.now()}.png` });
         return `clicked text "${text}"`;
         
       }
@@ -119,7 +117,6 @@ export class ChromeBrowser {
         console.log(`[click_text] → Clicking visible element with bounding box`, box);
         await el.click();
         await this.page.waitForTimeout(delayMs);
-        await this.page.screenshot({ path: `missions/mission_reports/screenshot_after_click_${Date.now()}.png` });
         return `clicked visible text "${text}"`;
       }
     }
@@ -147,11 +144,18 @@ export class ChromeBrowser {
     await this.page.waitForSelector(selector, { timeout: 30_000 });
     await this.page.click(selector);
     await this.page.waitForTimeout(delayMs);
-    await this.page.screenshot({ path: `missions/mission_reports/screenshot_expand_menu_${Date.now()}.png` });
-
     return `expanded menu using ${selector}`;
   }
 
+  async screenshot({ name = 'screenshot' }) {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const screenshotPath = `missions/mission_reports/screenshots/${name}_${timestamp}.png`;
+  
+    await this.page.screenshot({ path: screenshotPath });
+  
+    // ✅ Return relative path for HTML report
+    return `Screenshot saved at: ./screenshots/${name}_${timestamp}.png`;
+  }
   
   
   async close() {
@@ -173,7 +177,6 @@ export const CHROME_TOOL_MAP = {
       return await browser.click_text(args);
     }
   },
-  
   expand_menu: (b, args) => b.expand_menu(args),
-  // click_text: (b, args) => b.click_text(args),
+  screenshot: (b, args) => b.screenshot(args),
 };

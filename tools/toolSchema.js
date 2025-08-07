@@ -155,7 +155,25 @@ const toolsSchema = [
         required: ['chunkIndex', 'totalChunks']
       }
     }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'screenshot',
+      description: 'Takes a screenshot of the current page',
+      parameters: {
+        type: 'object',
+        properties: {
+          label: {
+            type: 'string',
+            description: 'Optional label for the screenshot filename',
+          },
+        },
+        required: [],
+      },
+    },
   }
+  
     
 ];
 
