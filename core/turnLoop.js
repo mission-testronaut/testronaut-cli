@@ -61,10 +61,6 @@ export const turnLoop = async (browser, messages, maxTurns, currentTurn = 0, ret
   
   for (let turn = currentTurn; turn < maxTurns; turn++) {
     console.log(`\n🔄 Turn ${turn + 1}/${maxTurns}`);
-    // console.log("current tools", toolsSchema);
-
-    // const now = Date.now();
-    // turnTimestamps = turnTimestamps.filter(ts => now - ts < 60000);
 
     // Recalculate the rolling window before checking cooldown
     const pruned = pruneOldTokenUsage(turnTimestamps);
@@ -78,31 +74,18 @@ export const turnLoop = async (browser, messages, maxTurns, currentTurn = 0, ret
     if (cooldownResult.shouldBackoff) {
       return await turnLoop(browser, messages, maxTurns, turn);
     }
-    // if (await tokenUseCoolOff(totalTokensUsed, turnTimestamps)) {return await turnLoop(browser, messages, maxTurns, turn)}
 
     const isValid = validateAndInsertMissingToolResponses(messages, {
-      insertPlaceholders: true, // safe fallback behavior
+      insertPlaceholders: true
     });
     
     if (!isValid) {
       console.error('❌ Tool call structure invalid and no placeholders inserted.');
       return false;
     }
-    // console.log(JSON.stringify(messages, null, 2));
 
     let response;
     try {
-      // console.log(
-      //   '🔍 Verifying message structure before OpenAI call:\n',
-      //   messages.map(m => ({
-      //     role: m.role,
-      //     name: m.name,
-      //     tool_call_id: m.tool_call_id,
-      //     tool_calls: m.tool_calls?.map(t => t.id),
-      //     content: m.content?.slice?.(0, 100), // truncate for readability
-      //   }))
-      // );
-      
       const unrespondedCalls = messages.filter(
         (msg, i) =>
           msg.role === 'assistant' &&
@@ -149,12 +132,6 @@ export const turnLoop = async (browser, messages, maxTurns, currentTurn = 0, ret
     }
     console.log('Response received from OpenAI');
     const usage = response.usage;
-    // if (usage) {
-    //   console.log(`📊 Token Usage This Turn → Prompt: ${usage.prompt_tokens}, Completion: ${usage.completion_tokens}, Total: ${usage.total_tokens}`);
-    //   totalTokensUsed += usage?.total_tokens || 0;
-    //   turnTimestamps.push(now);
-    //   console.log(`📈 Running Total Tokens Used: ${totalTokensUsed}`);
-    // }
     if (usage) {
       const tokensUsed = usage.total_tokens || 0;
       console.log(`📊 Token Usage This Turn → Total: ${tokensUsed}`);
@@ -167,11 +144,6 @@ export const turnLoop = async (browser, messages, maxTurns, currentTurn = 0, ret
     
     const msg = response.choices[0].message;
 
-    // if (!msg.tool_calls?.length) {
-    //   console.error('❌ Assistant message had empty or missing tool_calls array');
-    //   return false;
-    // }   
-
     if (msg.tool_calls?.length) {
       console.log('Processing tool calls...');
       // messages.push(msg);
@@ -180,9 +152,6 @@ export const turnLoop = async (browser, messages, maxTurns, currentTurn = 0, ret
 
       for (const call of msg.tool_calls) {
         const toolCallId = call.id;
-        // const hasResponse = messages.some(m =>
-        //   m.role === 'tool' && m.tool_call_id === toolCallId
-        // );
         const fnName = call.function.name;
         lastToolName = fnName;
         const args = JSON.parse(call.function.arguments || '{}');
@@ -194,15 +163,6 @@ export const turnLoop = async (browser, messages, maxTurns, currentTurn = 0, ret
           // console.log("agentMemory: ", agentMemory);
           result = await CHROME_TOOL_MAP[fnName](browser, args, agentMemory);
 
-          // Smart DOM-ready wait after major actions like click
-          // if (['click', 'click_text', 'fill'].includes(fnName)) {
-          //   try {
-          //     await browser.page.waitForLoadState?.('domcontentloaded', { timeout: 5000 });
-          //     await browser.page.waitForTimeout?.(2000); // allow animations/navigation
-          //   } catch (err) {
-          //     console.warn(`⚠️ DOM readiness wait failed after ${fnName}: ${err.message}`);
-          //   }
-          // }
           if (typeof result !== 'string') {
             result = JSON.stringify(result ?? '');
           }
@@ -211,7 +171,6 @@ export const turnLoop = async (browser, messages, maxTurns, currentTurn = 0, ret
           result = errorMessage;
         }
 
-        // 🔍 Diagnostic: log whether this tool call succeeded or failed
         console.log(`[tool ] ← ${fnName} result:`, errorMessage ? '❌ Failed' : '✅ Success');
 
         const truncated = result.length > 100 ? result.slice(0, 100) + '…' : result;
@@ -223,14 +182,6 @@ export const turnLoop = async (browser, messages, maxTurns, currentTurn = 0, ret
         // } else {
           console.log(`[tool ] ← ${truncated}`);
         // }
-
-        // messages.push({
-        //   role: 'tool',
-        //   tool_call_id: call.id,
-        //   name: fnName,
-        //   type: 'function',
-        //   content: result,
-        // });
 
         toolResponses.push({
           role: 'tool',
@@ -258,18 +209,9 @@ export const turnLoop = async (browser, messages, maxTurns, currentTurn = 0, ret
           });
           console.log(`[auto] → DOM size after ${fnName}: ${domHtml.length} chars`);
         }
-
-
         
-        // if (!hasResponse) {
-          //   console.error(`❌ Tool call ${toolCallId} for ${call.function.name} was not followed by a response`);
-          //   return false;
-          // }
-        }
-        
-      // Only after ALL tool responses are ready
+      }
       messages.push(msg, ...toolResponses);
-
       continue;
     }
 
