@@ -6,4 +6,4 @@ mission('Collegium Dashboard Login Test', () => {
   objective('should land on dashboard after login', dashboardWorkflow);
 });
 
-await launch(loginWorkflow); // Setup: login
+await launch(loginWorkflow);
