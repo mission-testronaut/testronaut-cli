@@ -18,6 +18,7 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 let totalTokensUsed = 0;
 let turnTimestamps = [];
+let shouldBackoff;
 
 const pushDOMAssistant = async (browser, messages, agentMemory, { skipIfLastTool } = {}) => {
   if (skipIfLastTool && skipIfLastTool.includes(messages.at(-1)?.name)) {
@@ -61,31 +62,22 @@ export const turnLoop = async (browser, messages, maxTurns, currentTurn = 0, ret
   
   for (let turn = currentTurn; turn < maxTurns; turn++) {
     console.log(`\n🔄 Turn ${turn + 1}/${maxTurns}`);
-
-    // Recalculate the rolling window before checking cooldown
-    const pruned = pruneOldTokenUsage(turnTimestamps);
-    turnTimestamps = pruned.turnTimestamps;
-    totalTokensUsed = pruned.totalTokensUsed;
-
-    // Cool off check
-    const cooldownResult = await tokenUseCoolOff(totalTokensUsed, turnTimestamps);
-    totalTokensUsed = cooldownResult.totalTokensUsed;
-    turnTimestamps = cooldownResult.turnTimestamps;
-    if (cooldownResult.shouldBackoff) {
-      return await turnLoop(browser, messages, maxTurns, turn);
-    }
-
-    const isValid = validateAndInsertMissingToolResponses(messages, {
-      insertPlaceholders: true
-    });
-    
-    if (!isValid) {
-      console.error('❌ Tool call structure invalid and no placeholders inserted.');
-      return false;
-    }
-
     let response;
     try {
+
+      // Recalculate the rolling window before checking cooldown
+      ({ turnTimestamps, totalTokensUsed } = pruneOldTokenUsage(turnTimestamps));
+
+      // Cool off check
+      ({ totalTokensUsed, turnTimestamps, shouldBackoff } = await tokenUseCoolOff(totalTokensUsed, turnTimestamps));
+      if(shouldBackoff) return await turnLoop(browser, messages, maxTurns, turn);
+
+      //Tool Validator
+      if (!validateAndInsertMissingToolResponses(messages, { insertPlaceholders: true })) {
+        console.error('❌ Tool call structure invalid and no placeholders inserted.');
+        return false;
+      }
+
       const unrespondedCalls = messages.filter(
         (msg, i) =>
           msg.role === 'assistant' &&
@@ -123,8 +115,8 @@ export const turnLoop = async (browser, messages, maxTurns, currentTurn = 0, ret
         return await turnLoop(browser, messages, maxTurns, turn, retryCount + 1);
       } else if (err.status === 400) {
         console.error('❌ Bad request:', err.message);
-        console.log("current tools", toolsSchema);
-        console.log("messages: ", messages)
+        // console.log("current tools", toolsSchema);
+        // console.log("messages: ", messages)
         return false;
       } else {
         throw err;
@@ -136,9 +128,8 @@ export const turnLoop = async (browser, messages, maxTurns, currentTurn = 0, ret
       const tokensUsed = usage.total_tokens || 0;
       console.log(`📊 Token Usage This Turn → Total: ${tokensUsed}`);
       recordTokenUsage(turnTimestamps, tokensUsed);
-      const pruned = pruneOldTokenUsage(turnTimestamps);
-      turnTimestamps = pruned.turnTimestamps;
-      totalTokensUsed = pruned.totalTokensUsed;
+      ({ turnTimestamps, totalTokensUsed } = pruneOldTokenUsage(turnTimestamps));
+
       console.log(`📈 Running Total Tokens Used (Rolling 60s): ${totalTokensUsed}`);
     }
     
@@ -146,12 +137,10 @@ export const turnLoop = async (browser, messages, maxTurns, currentTurn = 0, ret
 
     if (msg.tool_calls?.length) {
       console.log('Processing tool calls...');
-      // messages.push(msg);
       const toolResponses = [];
       let lastToolName = null;
 
       for (const call of msg.tool_calls) {
-        const toolCallId = call.id;
         const fnName = call.function.name;
         lastToolName = fnName;
         const args = JSON.parse(call.function.arguments || '{}');
@@ -172,16 +161,8 @@ export const turnLoop = async (browser, messages, maxTurns, currentTurn = 0, ret
         }
 
         console.log(`[tool ] ← ${fnName} result:`, errorMessage ? '❌ Failed' : '✅ Success');
-
         const truncated = result.length > 100 ? result.slice(0, 100) + '…' : result;
-
-        // if (result.length > 100) {
-        //   // const logFile = `missions/mission_reports/tool-result-${Date.now()}.log`;
-        //   // fs.writeFileSync(logFile, result);
-        //   console.log(`[tool ] ← ${truncated} (full output written to ${logFile})`);
-        // } else {
-          console.log(`[tool ] ← ${truncated}`);
-        // }
+        console.log(`[tool ] ← ${truncated}`);
 
         toolResponses.push({
           role: 'tool',
@@ -200,7 +181,7 @@ export const turnLoop = async (browser, messages, maxTurns, currentTurn = 0, ret
           const domHtml = await CHROME_TOOL_MAP.get_dom(browser, {
             limit: 100000,
             exclude: true,
-            focus: [], // or try focusing on ['main'] to keep it light
+            focus: [],
           }, agentMemory);
           await tokenEstimate('gpt-4o', domHtml);
           // fs.writeFileSync(`missions/mission_reports/debug-expanded-${Date.now()}.html`, domHtml);
