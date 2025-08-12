@@ -5,6 +5,8 @@ import { fileURLToPath } from 'url';
 import { initializeTestronautProject } from './init.js';
 import { createWelcomeMission } from './createWelcomeMission.js';
 import { generateHtmlReport } from '../tools/generateHtmlReport.js';
+import inquirer from 'inquirer';
+import fetch from 'node-fetch';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -21,6 +23,7 @@ const HELP_TEXT = `
 Usage:
   npx testronaut                 Run all missions in the ./missions directory
   npx testronaut <file>         Run a specific mission file (e.g., login.mission.js)
+  npx testronaut login          Log in and store session token
 
 Options:
   --init                    Scaffold project folders and a welcome mission
@@ -28,10 +31,9 @@ Options:
 
 Examples:
   npx testronaut
-  npx testronaut login.mission.js
+  npx testronaut login
   npx testronaut --init
 `;
-
 
 if (args.includes('--init')) {
   await initializeTestronautProject();
@@ -41,6 +43,12 @@ if (args.includes('--init')) {
 
 if (args.includes('--help')) {
   console.log(HELP_TEXT);
+  process.exit(0);
+}
+
+// Handle the login command
+if (args.includes('login')) {
+  await handleLogin();
   process.exit(0);
 }
 
@@ -91,7 +99,6 @@ const flatMissions = allResults.flatMap(entry => {
   }));
 });
 
-
 const report = {
   runId,
   startTime: startTime.toISOString(),
@@ -108,3 +115,64 @@ const outputDir = './missions/mission_reports';
 fs.mkdirSync(outputDir, { recursive: true });
 fs.writeFileSync(`${outputDir}/${runId}.json`, JSON.stringify(report, null, 2));
 generateHtmlReport(report, `${outputDir}/${runId}.html`);
+
+// Function to handle login and store session token
+async function handleLogin() {
+  // Check if API key is provided as an argument
+  let apiKey = args.find(arg => arg.startsWith('--apiKey='))?.split('=')[1];
+
+  // If API key is not provided, prompt the user for it
+  if (!apiKey) {
+    const responses = await inquirer.prompt([
+      {
+        type: 'password',
+        name: 'apiKey',
+        message: 'Enter your API key:',
+        mask: '*' 
+      }
+    ]);
+    apiKey = responses.apiKey;
+  }
+
+  // Create URLSearchParams to send as x-www-form-urlencoded
+  const formData = new URLSearchParams();
+  formData.append('apiKey', apiKey);
+  console.log('🔑 Authenticating with API key...');
+
+  // Call your authentication endpoint to get a session token
+  try {
+    const response = await fetch('http://localhost:3000/api/user/cli', {  // Replace with your actual URL
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: formData.toString(),
+    });
+
+    const data = await response.json();
+
+    if (data.error) {
+      console.error('❌ Authentication failed:', data.error);
+      process.exit(1);
+    }
+
+    // Define the config path
+    const configPath = path.resolve(process.cwd(), 'testronaut-config.json');
+    
+    // Read the existing config file
+    let config = {};
+    if (fs.existsSync(configPath)) {
+      config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    }
+
+    // Overwrite or add the sessionToken field
+    config.sessionToken = data.sessionToken;
+
+    // Write the updated config back to testronaut-config.json
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
+    console.log('✅ Login successful! Session token saved to testronaut-config.json.');
+  } catch (error) {
+    console.error('❌ Error during login:', error);
+    process.exit(1);
+  }
+}
