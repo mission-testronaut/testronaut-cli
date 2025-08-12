@@ -24,6 +24,7 @@ Usage:
   npx testronaut                 Run all missions in the ./missions directory
   npx testronaut <file>         Run a specific mission file (e.g., login.mission.js)
   npx testronaut login          Log in and store session token
+  npx testronaut upload         Upload the most recent report JSON
 
 Options:
   --init                    Scaffold project folders and a welcome mission
@@ -32,6 +33,7 @@ Options:
 Examples:
   npx testronaut
   npx testronaut login
+  npx testronaut upload
   npx testronaut --init
 `;
 
@@ -49,6 +51,12 @@ if (args.includes('--help')) {
 // Handle the login command
 if (args.includes('login')) {
   await handleLogin();
+  process.exit(0);
+}
+
+// Handle the upload command
+if (args.includes('upload')) {
+  await uploadReport();
   process.exit(0);
 }
 
@@ -174,5 +182,58 @@ async function handleLogin() {
   } catch (error) {
     console.error('❌ Error during login:', error);
     process.exit(1);
+  }
+}
+
+// Upload the most recent report
+async function uploadReport() {
+  const configPath = path.resolve(process.cwd(), 'testronaut-config.json');
+  if (!fs.existsSync(configPath)) {
+    console.error('❌ Configuration file not found.');
+    process.exit(1);
+  }
+
+  const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  const sessionToken = config.sessionToken;
+
+  if (!sessionToken) {
+    console.error('❌ No session token found.');
+    process.exit(1);
+  }
+
+  // Get the most recent report from the 'missions/mission_reports/' directory
+  const reportDir = path.resolve(process.cwd(), 'missions/mission_reports');
+  const files = fs.readdirSync(reportDir).filter(file => file.endsWith('.json'));
+
+  if (files.length === 0) {
+    console.error('❌ No report files found.');
+    process.exit(1);
+  }
+
+  // Sort files by timestamp (most recent first)
+  files.sort((a, b) => parseInt(b.split('_')[1]) - parseInt(a.split('_')[1]));
+  const latestReport = path.join(reportDir, files[0]);
+
+  // Read the content of the most recent report
+  const reportData = fs.readFileSync(latestReport, 'utf8');
+
+  // Upload the report using the session token
+  try {
+    const response = await fetch(`http://localhost:3000/api/user/cli/${sessionToken}`, { // Replace with your API endpoint
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: reportData,  // Sending the report JSON as the request body
+    });
+
+    const data = await response.json();
+    if (data.error) {
+      console.error('❌ Failed to upload the report:', data.error);
+    } else {
+      console.log('✅ Report uploaded successfully!');
+    }
+  } catch (error) {
+    console.error('❌ Error during upload:', error);
   }
 }
