@@ -4,6 +4,15 @@
 
 ---
 
+## 🌌 Join the Mission Control Community
+
+Got questions, ideas, or want to share your missions?  
+Join our Discord to connect with other Testronauts, get support, and help shape the framework’s future.  
+
+[![Join Discord](https://img.shields.io/badge/Join%20Us%20on%20Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/pBfdef92ba)
+
+---
+
 ## 🚀 Features
 
 - Run real-world UI flows using missions written as plain strings or functions
@@ -145,4 +154,15 @@ Now you can use testronaut in any local project.
 ### 📄 License
 MIT
 
+
+---
+
+## ☕ Support the Mission
 🤖 Built with ❤️ by [Shane Fast](https://github.com/scfast)
+
+If Testronaut has helped you save time or improve your testing, consider fueling the mission!  
+Your support helps cover hosting, development time, and the occasional coffee needed to debug at 2am.
+
+[![Donate](https://img.shields.io/badge/Donate-Coffee%20Fuel%20for%20Testronaut-ff813f?style=for-the-badge&logo=buy-me-a-coffee&logoColor=white)](https://buymeacoffee.com/testronaut)
+
+---
