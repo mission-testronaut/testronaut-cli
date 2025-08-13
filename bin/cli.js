@@ -149,7 +149,7 @@ async function handleLogin() {
 
   // Call your authentication endpoint to get a session token
   try {
-    const response = await fetch('http://testronaut.app/api/user/cli', {  // Replace with your actual URL
+    const response = await fetch('http://api.testronaut.app/api/user/cli', {  // Replace with your actual URL
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -219,7 +219,7 @@ async function uploadReport() {
 
   // Upload the report using the session token
   try {
-    const response = await fetch(`http://testronaut.app/api/user/cli/${sessionToken}`, { // Replace with your API endpoint
+    const response = await fetch(`http://api.testronaut.app/api/user/cli/${sessionToken}`, { // Replace with your API endpoint
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
