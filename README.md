@@ -58,8 +58,10 @@ export const loginMission = `
 Visit ${process.env.URL}.
 Fill the username field with ${process.env.USERNAME}. 
 Fill the password field with ${process.env.PASSWORD}.
+Take a screenshot.
 Submit the form.
 Wait for the dashboard to appear.
+Take another screenshot.
 Report SUCCESS if the dashboard is loaded, otherwise report FAILURE.
 `;
 
@@ -92,6 +94,7 @@ export const fillContactFormMission =
 Input the phone number (555)555-5555 into the phone number field.
 Click the submit button.
 Upon submission success there should be a toast notification indicating the form information was saved successfully.
+Take a screenshot.
 If found, report SUCCESS. Otherwise, report FAILURE.`
 
 export async function executeMission() {
@@ -154,6 +157,22 @@ Now you can use testronaut in any local project.
 ### 📄 License
 MIT
 
+--
+
+### 📊 Track Your Missions Over Time
+Want to see your test results evolve, spot trends, and keep all your reports in one place?  
+Sign up for **Mission Control** — your personal dashboard for Testronaut.
+
+With Mission Control you can:
+- 📈 Track your mission reports historically
+- 🔍 Drill into past runs with full step-by-step details
+- 🛠️ Compare results between different builds or environments
+- ☁️ Access reports from anywhere, without digging through local files
+
+Getting started is simple:
+1. [![Sign up for Mission Control](https://img.shields.io/badge/Sign%20Up%20for%20Mission%20Control-0A84FF?style=for-the-badge&logo=rocket&logoColor=white)](https://mission.testronaut.app)
+2. Link your account to Testronaut CLI
+3. Watch your mission history grow!
 
 ---
 
