@@ -26,15 +26,36 @@ export async function runMissions({ preMission, mission, postMission }, missionN
   const goals = [];
 
   if (pre.length) {
-    goals.push(...pre.map(fn => ({ goal: fn, label: 'pre-mission' })));
+    goals.push(
+      ...pre.map((fn, i) => ({
+        goal: fn,
+        label: 'pre-mission',              // legacy label
+        submissionType: 'premission',      // normalized
+        submissionName: fn?.name || `pre-${i + 1}`,
+      }))
+    );
   }
 
   if (main.length) {
-    goals.push(...main.map(fn => ({ goal: fn, label: 'mission' })));
+    goals.push(
+      ...main.map((fn, i) => ({
+        goal: fn,
+        label: 'mission',
+        submissionType: 'mission',
+        submissionName: fn?.name || `mission-${i + 1}`,
+      }))
+    );
   }
 
   if (post.length) {
-    goals.push(...post.map(fn => ({ goal: fn, label: 'post-mission' })));
+    goals.push(
+      ...post.map((fn, i) => ({
+        goal: fn,
+        label: 'post-mission',
+        submissionType: 'postmission',
+        submissionName: fn?.name || `post-${i + 1}`,
+      }))
+    );
   }
 
   console.log(

@@ -13,7 +13,9 @@ export function generateHtmlReport(report, outputPath) {
     status === 'passed' ? '✅ Passed' :
     status === 'failed' ? '❌ Failed' : (status || '—');
 
-  const missionBlock = (m, idx) => {
+  // const missionBlock = (m, idx) => {
+    // Render ONE submission (premission/mission/postmission)
+  const submissionBlock = (m, idx) => {
     const mDurationSec = m.endTime && m.startTime
       ? ((m.endTime - m.startTime) / 1000).toFixed(2)
       : '—';
@@ -37,15 +39,59 @@ export function generateHtmlReport(report, outputPath) {
       `;
     }).join('');
 
+    // Build a clearer title: "<mission> — premission: login"
+    const type = (m.submissionType || '').toLowerCase();
+    const typeLabel =
+      type === 'premission'   ? 'premission' :
+      type === 'postmission'  ? 'postmission' :
+      'mission';
+    const prettyTitle = `${esc(m.missionName || 'Mission')} — ${typeLabel}${m.submissionName ? `: ${esc(m.submissionName)}` : ''}`;
+
+
     return `
-      <details class="mission">
+      <details class="mission-submission">
         <summary>
-          <span class="name">${esc(m.missionName || path.basename(m.file || `mission_${idx+1}`))}</span>
+          <span class="name">${prettyTitle}</span>
           <span class="status ${m.status === 'passed' ? 'ok' : (m.status === 'failed' ? 'bad' : '')}">${badge(m.status)}</span>
-          <span class="meta">steps: ${steps.length} • duration: ${mDurationSec}s • file: ${esc(m.file || '')}</span>
-        </summary>
+          <span class="meta">steps: ${steps.length} • duration: ${mDurationSec}s</span>
         <div class="steps">
           ${stepItems || '<div class="empty">No steps recorded.</div>'}
+        </div>
+      </details>
+    `;
+  };
+
+  // Group submissions by missionName
+  const grouped = missions.reduce((acc, m) => {
+    const key = m.missionName || '(unnamed mission)';
+    (acc[key] ||= []).push(m);
+    return acc;
+  }, {});
+
+  // Compute overall status for a group (any failure => failed)
+  const groupStatus = (subs) => subs.some(s => s.status === 'failed') ? 'failed' : 'passed';
+
+  // Render a mission group with its submissions collapsed inside
+  const missionGroupBlock = (missionName, subs) => {
+    const status = groupStatus(subs);
+    const totalSteps = subs.reduce((n, s) => n + (Array.isArray(s.steps) ? s.steps.length : 0), 0);
+    const firstStart = Math.min(...subs.map(s => s.startTime || 0).filter(Boolean));
+    const lastEnd    = Math.max(...subs.map(s => s.endTime || 0).filter(Boolean));
+    const groupDur   = (firstStart && lastEnd) ? ((lastEnd - firstStart) / 1000).toFixed(2) : '—';
+
+    // consistent order: pre → mission → post
+    const order = { premission: 0, mission: 1, postmission: 2 };
+    subs.sort((a, b) => (order[(a.submissionType||'mission')] ?? 1) - (order[(b.submissionType||'mission')] ?? 1));
+
+    return `
+      <details class="mission-group">
+        <summary>
+          <span class="name">${esc(missionName)}</span>
+          <span class="status ${status === 'passed' ? 'ok' : 'bad'}">${badge(status)}</span>
+          <span class="meta">submissions: ${subs.length} • steps: ${totalSteps} • duration: ${groupDur}s</span>
+        </summary>
+        <div class="group-body">
+          ${subs.map(submissionBlock).join('')}
         </div>
       </details>
     `;
@@ -77,14 +123,24 @@ export function generateHtmlReport(report, outputPath) {
 
     details { background: var(--card); border:1px solid var(--border); border-radius:10px; margin:10px 0; }
     summary { cursor:pointer; padding:12px 14px; display:flex; align-items:center; gap:12px; }
-    .mission > summary { font-weight:600; }
+    .mission-group > summary { font-weight:700; }
+    .mission-submission > summary { font-weight:600; }
+    /* Better contrast on summaries */
+    .mission-submission > summary { background:#f3f4f6; }
+    .mission-submission > summary:hover { background:#e5e7eb; }
+    .mission-group > summary:hover { background:#f9fafb; }
+    /* Focus ring */
+    summary:focus-visible { outline: 2px solid #94a3b8; outline-offset: 2px; border-radius: 8px; }
+    /* Disclosure caret */
+    summary::marker { color: var(--muted); }
+    .group-body { padding: 0 10px 10px; }
     .name { flex:1; }
     .status.ok { color: var(--ok); }
     .status.bad { color: var(--bad); }
     .meta { color: var(--muted); font-size:12px; }
 
     .steps { padding: 0 14px 12px; }
-    .step summary { background: #fafafa; border-bottom:1px solid var(--border); border-radius: 10px 10px 0 0; }
+    .step summary { background: #f8fafc; border-bottom:1px solid var(--border); border-radius: 10px 10px 0 0; }
     .turn { font-weight:600; }
     .step-result.ok { color: var(--ok); }
     .step-result.bad { color: var(--bad); }
@@ -103,12 +159,24 @@ export function generateHtmlReport(report, outputPath) {
   </div>
 
   <div class="summary">
-    <div class="pill">Missions: ${esc(summary.totalMissions ?? missions.length)}</div>
-    <div class="pill ok">Passed: ${esc(summary.passed ?? missions.filter(m=>m.status==='passed').length)}</div>
-    <div class="pill bad">Failed: ${esc(summary.failed ?? missions.filter(m=>m.status==='failed').length)}</div>
+    ${(() => {
+      const groupNames = Object.keys(grouped);
+      const totals = groupNames.reduce((acc, name) => {
+        const st = groupStatus(grouped[name]);
+        acc.total += 1;
+        acc.passed += (st === 'passed') ? 1 : 0;
+        acc.failed += (st === 'failed') ? 1 : 0;
+        return acc;
+      }, { total: 0, passed: 0, failed: 0 });
+      return `
+        <div class="pill">Missions: ${esc(summary.totalMissions ?? totals.total)}</div>
+        <div class="pill ok">Passed: ${esc(summary.passed ?? totals.passed)}</div>
+        <div class="pill bad">Failed: ${esc(summary.failed ?? totals.failed)}</div>
+      `;
+    })()}
   </div>
 
-  ${missions.map(missionBlock).join('')}
+  ${Object.entries(grouped).map(([name, subs]) => missionGroupBlock(name, subs)).join('')}
 
 </body>
 </html>
