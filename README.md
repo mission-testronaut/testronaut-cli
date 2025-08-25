@@ -24,6 +24,22 @@ Join our Discord to connect with other Testronauts, get support, and help shape 
 
 ---
 
+## 📖 Documentation
+
+Looking for deeper guides, API references, and examples?  
+Head over to the official Testronaut Docs:
+
+[![Read the Docs](https://img.shields.io/badge/Read%20the%20Docs-2E8555?style=for-the-badge&logo=readthedocs&logoColor=white)](https://docs.testronaut.app)
+
+The docs cover:
+- Getting started step-by-step
+- Writing advanced missions
+- CLI options and configuration
+- Integrating with Mission Control
+- Troubleshooting & FAQs
+
+---
+
 ## 📦 Installation
 
 ```
