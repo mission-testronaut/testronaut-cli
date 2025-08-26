@@ -8,6 +8,12 @@ import { generateHtmlReport } from '../tools/generateHtmlReport.js';
 import inquirer from 'inquirer';
 import fetch from 'node-fetch';
 import crypto from 'crypto';
+import http from 'http';
+import { exec as execCmd } from 'child_process';
+import { promisify } from 'util';
+const exec = promisify(execCmd);
+import url from 'url';
+
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -30,6 +36,8 @@ Usage:
   npx testronaut <file>         Run a specific mission file (e.g., login.mission.js)
   npx testronaut login          Log in and store session token
   npx testronaut upload         Upload the most recent report JSON
+  npx testronaut serve        Serve & open the most recent HTML report (read-only)
+  npx testronaut view         Alias of 'serve'
 
 Options:
   --init                    Scaffold project folders and a welcome mission
@@ -39,6 +47,7 @@ Examples:
   npx testronaut
   npx testronaut login
   npx testronaut upload
+  npx testronaut serve
   npx testronaut --init
 `;
 
@@ -63,6 +72,14 @@ if (args.includes('login')) {
 if (args.includes('upload')) {
   await uploadReport();
   process.exit(0);
+}
+
+// Handle the serve/view command
+if (args.includes('serve') || args.includes('view')) {
+  await serveLatestReport();
+   // Keep process alive until user stops it
+  console.log('Press Ctrl+C to stop the server.');
+  await new Promise(() => {}); // ✅ never resolves; Ctrl+C will terminate
 }
 
 if (!fs.existsSync(missionsDir)) {
@@ -178,7 +195,7 @@ async function handleLogin() {
     const response = await fetch(`${apiBase}/api/user/cli`, {  // Replace with your actual URL
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded',
       },
       body: formData.toString(),
     });
@@ -370,4 +387,137 @@ async function uploadReport() {
   } else {
     console.log('✅ All screenshots uploaded.');
   }
+}
+
+
+function guessMimeType(p) {
+  const ext = path.extname(p).toLowerCase();
+  if (ext === '.html' || ext === '.htm') return 'text/html; charset=utf-8';
+  if (ext === '.json') return 'application/json; charset=utf-8';
+  if (ext === '.js') return 'text/javascript; charset=utf-8';
+  if (ext === '.css') return 'text/css; charset=utf-8';
+  if (ext === '.png') return 'image/png';
+  if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg';
+  if (ext === '.webp') return 'image/webp';
+  if (ext === '.gif') return 'image/gif';
+  if (ext === '.svg') return 'image/svg+xml';
+  return 'application/octet-stream';
+}
+
+function safeJoin(root, relUrlPath) {
+  // Prevent path traversal and keep within root
+  const decoded = decodeURIComponent(relUrlPath);
+  const clean = decoded.replace(/^\/+/, ''); // strip leading slash
+  const resolved = path.resolve(root, clean);
+  if (!resolved.startsWith(path.resolve(root))) {
+    return null; // attempted escape
+  }
+  return resolved;
+}
+
+async function openInBrowser(targetUrl) {
+  const platform = process.platform;
+  const quoted = `"${targetUrl}"`;
+  if (platform === 'darwin') return exec(`open ${quoted}`);
+  if (platform === 'win32') return exec(`start "" ${quoted}`);
+  return exec(`xdg-open ${quoted}`).catch(() => {}); // best-effort on Linux
+}
+
+function findLatestReportPair(reportDir) {
+  if (!fs.existsSync(reportDir)) return null;
+  const files = fs.readdirSync(reportDir).filter(f => f.endsWith('.html'));
+  if (!files.length) return null;
+
+  // Expecting run_<timestamp>.html — sort by numeric timestamp descending
+  files.sort((a, b) => {
+    const ta = parseInt(a.split('_')[1]) || 0;
+    const tb = parseInt(b.split('_')[1]) || 0;
+    return tb - ta;
+  });
+
+  const latestHtml = files[0];
+  const latestBase = path.basename(latestHtml, '.html');
+  const jsonCandidate = `${latestBase}.json`;
+
+  return {
+    htmlFile: latestHtml,
+    jsonFile: fs.existsSync(path.join(reportDir, jsonCandidate)) ? jsonCandidate : null,
+  };
+}
+
+async function serveLatestReport() {
+  const reportDir = path.resolve(process.cwd(), 'missions/mission_reports');
+
+  const latest = findLatestReportPair(reportDir);
+  if (!latest) {
+    console.error('❌ No HTML reports found in missions/mission_reports.');
+    process.exit(1);
+  }
+
+  const server = http.createServer((req, res) => {
+    try {
+      // Default route -> redirect to latest report
+      const parsed = url.parse(req.url || '/');
+      let pathname = parsed.pathname || '/';
+
+      if (pathname === '/' || pathname === '') {
+        res.statusCode = 302;
+        res.setHeader('Location', `/${latest.htmlFile}`);
+        res.end();
+        return;
+      }
+
+      const targetPath = safeJoin(reportDir, pathname);
+      if (!targetPath) {
+        res.statusCode = 400;
+        res.end('Bad Request');
+        return;
+      }
+
+      // If the path is a directory, try index.html (not expected, but harmless)
+      let toServe = targetPath;
+      if (fs.existsSync(toServe) && fs.statSync(toServe).isDirectory()) {
+        toServe = path.join(toServe, 'index.html');
+      }
+
+      if (!fs.existsSync(toServe) || !fs.statSync(toServe).isFile()) {
+        res.statusCode = 404;
+        res.end('Not Found');
+        return;
+      }
+
+      res.statusCode = 200;
+      res.setHeader('Content-Type', guessMimeType(toServe));
+      fs.createReadStream(toServe).pipe(res);
+    } catch (err) {
+      res.statusCode = 500;
+      res.end('Internal Server Error');
+    }
+  });
+
+  // Listen on a random free port
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+    
+    process.on('SIGINT', () => {
+      console.log('\n🛑 Shutting down…');
+      server.close(() => {
+        resolve();
+        process.exit(0);
+      });
+    });
+  });
+
+  const address = server.address();
+  const port = typeof address === 'object' && address ? address.port : 0;
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const reportUrl = `${baseUrl}/${latest.htmlFile}`;
+
+  console.log(`📄 Serving reports from: ${path.relative(process.cwd(), reportDir)}`);
+  console.log(`🔗 Opening latest: ${latest.htmlFile}`);
+  console.log(`🌐 ${reportUrl}`);
+
+  // Best-effort auto-open
+  await openInBrowser(reportUrl).catch(() => {});
 }
