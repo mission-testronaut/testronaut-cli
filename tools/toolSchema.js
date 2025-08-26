@@ -32,7 +32,7 @@ const toolsSchema = [
     type: 'function',
     function: {
       name: 'click',
-      description: 'Click a button or link by CSS selector',
+      description: 'Click a button or link by CSS selector. If this click opens an OAuth window/new tab, prefer using click_and_follow_popup instead.',
       parameters: {
         type: 'object',
         properties: {
@@ -172,7 +172,59 @@ const toolsSchema = [
         required: [],
       },
     },
+  },
+  {
+  type: 'function',
+  function: {
+    name: 'click_and_follow_popup',
+    description:
+      'Click a selector that opens a new tab/window (e.g., OAuth) and switch control to it. Falls back to same-tab navigation if no popup appears.',
+    parameters: {
+      type: 'object',
+      properties: {
+        selector: { type: 'string', description: 'CSS or text selector to click' },
+        expectedUrlHost: {
+          type: 'string',
+          description: "Optional hostname hint like 'accounts.google.com'"
+        },
+        timeoutMs: {
+          type: 'number',
+          default: 20000,
+          description: 'How long to wait for the popup or navigation'
+        }
+      },
+      required: ['selector']
+    }
   }
+},
+{
+  type: 'function',
+  function: {
+    name: 'switch_to_page',
+    description:
+      "Switch agent focus between known tabs/pages (e.g., back to 'main' or to the latest popup). Use a pageId previously returned by click_and_follow_popup to target a specific tab.",
+    parameters: {
+      type: 'object',
+      properties: {
+        target: {
+          type: 'string',
+          description: "One of: 'main', 'latest', or a pageId returned by click_and_follow_popup"
+        }
+      },
+      required: ['target']
+    }
+  }
+},
+{
+  type: 'function',
+  function: {
+    name: 'close_current_page',
+    description:
+      'Close the current tab/page and automatically switch back to another open page if available.',
+    parameters: { type: 'object', properties: {} }
+  }
+}
+
   
     
 ];

@@ -12,13 +12,76 @@ import fs from 'fs';
 export class ChromeBrowser {
   constructor() {
     this.browser = null;
+    this.context = null;
     this.page = null;
+
+    // simple registry
+    this.pages = [];      // [{ id, page }]
+    this.currentId = '';  // page id we currently control
+  }
+
+  _makePageId(page) {
+    // playwright's Page has a non-public guid in TS; fallback to random
+    return `p_${Math.random().toString(36).slice(2)}`;
+  }
+  _getCurrent() {
+    const cur = this.pages.find(p => p.id === this.currentId) ?? this.pages[this.pages.length - 1];
+    if (!cur) throw new Error('No active page in registry');
+    return cur;
+  }
+  _addAndFocus(page) {
+    const id = this._makePageId(page);
+    this.pages.push({ id, page });
+    this.currentId = id;
+    this.page = page;
+
+    page.on('close', () => {
+      // remove from registry
+      this.pages = this.pages.filter(p => p.id !== id);
+      // if we just lost the active page, pick a reasonable fallback
+      if (this.currentId === id) {
+        this.currentId = this.pages[this.pages.length - 1]?.id
+                      ?? this.pages[0]?.id
+                      ?? '';
+        this.page = this.currentId
+          ? this.pages.find(p => p.id === this.currentId).page
+          : null;
+      }
+    });
+
+    return id;
+  }
+
+  _switchTo(target) {
+    if (target === 'main') {
+      this.currentId = this.pages[0]?.id ?? '';
+    } else if (target === 'latest') {
+      this.currentId = this.pages[this.pages.length - 1]?.id ?? '';
+    } else {
+      const found = this.pages.find(p => p.id === target);
+      if (!found) throw new Error(`No page with id "${target}"`);
+      this.currentId = found.id;
+    }
+    const cur = this._getCurrent();
+    this.page = cur.page; // keep legacy this.page in sync
+    return this.currentId;
   }
 
   async start() {
     this.browser = await chromium.launch({ headless: true });
-    const context = await this.browser.newContext();
-    this.page = await context.newPage();
+    this.context = await this.browser.newContext();
+    const first = await this.context.newPage();
+    const id = this._addAndFocus(first);
+
+    // optional: keep registry in sync if pages are closed elsewhere
+    this.context.on('close', () => { this.pages = []; this.currentId = ''; });
+    first.on('close', () => {
+      this.pages = this.pages.filter(p => p.id !== id);
+      if (this.currentId === id) {
+        this.currentId = this.pages[this.pages.length - 1]?.id ?? this.pages[0]?.id ?? '';
+        this.page = this._getCurrent()?.page ?? null;
+      }
+    });
   }
 
   async navigate({ url }) {
@@ -125,6 +188,62 @@ export class ChromeBrowser {
   }
   
 
+  async click_and_follow_popup({ selector, expectedUrlHost, timeoutMs = 20_000 }) {
+    const cur = this._getCurrent(); // { id, page }
+    await cur.page.waitForSelector(selector, { timeout: 30_000 });
+
+    // Two possibilities:
+    // 1) Popup opens (context 'page' event)
+    // 2) Same-tab navigation (no popup)
+    const waitPopup = this.context.waitForEvent('page', { timeout: timeoutMs }).catch(() => null);
+    const waitNav   = cur.page.waitForNavigation({ timeout: timeoutMs }).catch(() => null);
+
+    // Trigger the click; whichever event resolves first will "win"
+    await Promise.allSettled([
+      (async () => { await cur.page.click(selector); })(),
+    ]);
+
+    const result = await Promise.race([waitPopup, waitNav]);
+
+    // Popup case: result is a Page (has .url() function)
+    if (result && typeof result.url === 'function') {
+      const popup = result;
+      await popup.waitForLoadState('domcontentloaded', { timeout: timeoutMs }).catch(() => {});
+      if (expectedUrlHost) {
+        try {
+          await popup.waitForURL(u => new URL(u).host.includes(expectedUrlHost), { timeout: timeoutMs });
+        } catch {/* best-effort only */}
+      }
+      const id = this._addAndFocus(popup);
+      return { ok: true, pageId: id, url: popup.url(), note: 'Switched to popup' };
+    }
+
+    // Same-tab case: stay on current page but ensure DOM is ready
+    await cur.page.waitForLoadState('domcontentloaded', { timeout: timeoutMs }).catch(() => {});
+    return { ok: true, pageId: this.currentId, url: cur.page.url(), note: 'No popup; same tab' };
+  }
+
+  async switch_to_page({ target }) {
+    const id = this._switchTo(target);  // 'main' | 'latest' | explicit id
+    const cur = this._getCurrent();
+    return { ok: true, pageId: id, url: cur.page.url() };
+  }
+
+  async close_current_page() {
+    const cur = this._getCurrent();
+    const closingId = cur.id;
+    await cur.page.close().catch(() => {});
+
+    this.pages = this.pages.filter(p => p.id !== closingId);
+    // choose a new current (latest, or main)
+    this.currentId = this.pages[this.pages.length - 1]?.id ?? this.pages[0]?.id ?? '';
+    this.page = this._getCurrent()?.page ?? null;
+
+    if (!this.currentId) return { ok: true, note: 'Closed last page; no pages remain' };
+    return { ok: true, pageId: this.currentId, note: 'Closed page and switched to another open page' };
+  }
+
+
   // async get_dom_focus_hint({ prompt }) {
   //   const lower = prompt.toLowerCase();
   //   const focus = [];
@@ -179,4 +298,7 @@ export const CHROME_TOOL_MAP = {
   },
   expand_menu: (b, args) => b.expand_menu(args),
   screenshot: (b, args) => b.screenshot(args),
+  click_and_follow_popup: (b, args) => b.click_and_follow_popup(args),
+  switch_to_page: (b, args) => b.switch_to_page(args),
+  close_current_page: (b, args) => b.close_current_page(args),
 };
