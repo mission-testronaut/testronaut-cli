@@ -54,6 +54,20 @@ Examples:
 if (args.includes('--init')) {
   await initializeTestronautProject();
   await createWelcomeMission();
+
+ console.log(`
+✅ Project initialized!
+
+Next steps:
+  1. Get an API key from your AI provider
+  2. Add it to your .env file as OPENAI_API_KEY
+  3. Run your first mission:
+       npx testronaut
+
+📚 Docs: https://docs.testronaut.app/docs/guides/cli-auth
+  `);
+
+
   process.exit(0);
 }
 
@@ -499,7 +513,7 @@ async function serveLatestReport() {
   await new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(0, '127.0.0.1', resolve);
-    
+
     process.on('SIGINT', () => {
       console.log('\n🛑 Shutting down…');
       server.close(() => {
