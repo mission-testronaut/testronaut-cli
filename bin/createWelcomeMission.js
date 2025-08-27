@@ -5,6 +5,11 @@ export const createWelcomeMission = async () => {
   const missionsDir = path.join(process.cwd(), 'missions');
   const welcomePath = path.join(missionsDir, 'welcome.mission.js');
 
+   // Ensure missions directory exists
+  if (!fs.existsSync(missionsDir)) {
+    fs.mkdirSync(missionsDir, { recursive: true });
+  }
+
   if (fs.existsSync(welcomePath)) {
     console.log('✅ welcome.mission.js already exists');
     return;
