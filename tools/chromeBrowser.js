@@ -1,4 +1,15 @@
-import { chromium } from 'playwright';
+// Keep browsers in project-local cache; matches ensureBrowsers()
+process.env.PLAYWRIGHT_BROWSERS_PATH = process.env.PLAYWRIGHT_BROWSERS_PATH || '0';
+
+// import { chromium } from 'playwright';
+import { createRequire } from 'module';
+const req = createRequire(process.cwd() + '/noop.js'); // resolve from user project
+async function loadPlaywright() {
+  try { return req('playwright'); } catch {}
+  try { return req('@playwright/test'); } catch {}
+  try { return req('playwright-core'); } catch {}
+  throw new Error('Playwright is not installed in this project. Run: npm i -D @playwright/test');
+}
 import * as cheerio from 'cheerio';
 import { 
   chunkBySection, 
@@ -8,6 +19,7 @@ import {
   removeObfuscatedClassNames, 
 } from './domControl.js';
 import fs from 'fs';
+import { ensureBrowsers } from '../tools/playwrightSetup.js';
 
 export class ChromeBrowser {
   constructor() {
@@ -68,7 +80,27 @@ export class ChromeBrowser {
   }
 
   async start() {
-    this.browser = await chromium.launch({ headless: true });
+    try {
+      const pw = await loadPlaywright();
+      this.browser = await pw.chromium.launch({ headless: true });    
+    } catch (err) {
+      const msg = String(err?.message || err);
+      const needsInstall =
+        msg.includes('Executable doesn\'t exist') ||
+        msg.includes('was just installed or updated') ||
+        msg.includes('looks like Playwright') ||
+        msg.includes('browserType.launch');
+
+      if (!needsInstall) throw err;
+
+      // Download the right browsers and retry once
+      console.log('🧩 Playwright browsers missing or stale. Installing…');
+      await ensureBrowsers({ browser: 'chromium', withDeps: true });
+
+      // Retry
+      const pw = await loadPlaywright();
+      return await pw.chromium.launch({ headless: true });
+    }
     this.context = await this.browser.newContext();
     const first = await this.context.newPage();
     const id = this._addAndFocus(first);

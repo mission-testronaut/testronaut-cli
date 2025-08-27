@@ -13,6 +13,10 @@ import { exec as execCmd } from 'child_process';
 import { promisify } from 'util';
 const exec = promisify(execCmd);
 import url from 'url';
+import { ensureBrowsers } from '../tools/playwrightSetup.js';
+
+// Keep PW browsers inside the project to avoid global cache skew
+process.env.PLAYWRIGHT_BROWSERS_PATH = process.env.PLAYWRIGHT_BROWSERS_PATH || '0';
 
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -55,7 +59,26 @@ if (args.includes('--init')) {
   await initializeTestronautProject();
   await createWelcomeMission();
 
- console.log(`
+  const { default: inquirer } = await import('inquirer');
+  const { doPw } = await inquirer.prompt([
+    { type: 'confirm', name: 'doPw', message: 'Install Playwright browsers now?', default: true }
+  ]);
+
+  if (doPw) {
+    // ensure @playwright/test exists so the installer can pin to its version
+    const present = await hasAny(['@playwright/test', 'playwright']);
+    if (!present) {
+      console.log('📦 Installing @playwright/test …');
+      const pm = pkgManagerForCwd();
+      await installDev(pm, '@playwright/test');
+      console.log('✅ @playwright/test installed.');
+    }
+
+    // install browsers pinned to local version, project-local cache
+    await ensureBrowsers({ browser: 'chromium', withDeps: true });
+  }
+
+  console.log(`
 ✅ Project initialized!
 
 Next steps:
@@ -66,7 +89,6 @@ Next steps:
 
 📚 Docs: https://docs.testronaut.app/docs/guides/cli-auth
   `);
-
 
   process.exit(0);
 }
@@ -178,6 +200,94 @@ async function parseJsonSafe(res, urlLabel) {
     throw new Error(`${urlLabel} returned no JSON body`);
   }
   return data;
+}
+
+function pkgManagerForCwd(cwd = process.cwd()) {
+  const has = (f) => fs.existsSync(path.join(cwd, f));
+  if (has('pnpm-lock.yaml')) return 'pnpm';
+  if (has('yarn.lock')) return 'yarn';
+  if (has('bun.lockb')) return 'bun';
+  return 'npm';
+}
+
+async function hasAny(modNames) {
+  try {
+    for (const m of modNames) {
+      // Use createRequire so ESM can resolve CJS packages relative to the project
+      const { createRequire } = await import('module');
+      const req = createRequire(path.join(process.cwd(), 'noop.js'));
+      req.resolve(m);
+      return m;
+    }
+  } catch {}
+  return null;
+}
+
+async function installDev(pkgMgr, pkg) {
+  const cmd =
+    pkgMgr === 'pnpm' ? `pnpm add -D ${pkg}` :
+    pkgMgr === 'yarn' ? `yarn add -D ${pkg}` :
+    pkgMgr === 'bun'  ? `bun add -d ${pkg}` :
+                        `npm i -D ${pkg}`;
+  await exec(cmd, { stdio: 'inherit' });
+}
+
+export async function ensurePlaywrightInstalled() {
+  // 1) Is playwright already present?
+  const present = await hasAny(['@playwright/test', 'playwright']);
+  if (!present) {
+    console.log('📦 @playwright/test not found. Installing…');
+    const pm = pkgManagerForCwd();
+    try {
+      await installDev(pm, '@playwright/test');
+      console.log('✅ @playwright/test installed.');
+    } catch (err) {
+      console.error('❌ Failed to install @playwright/test:', err?.message || err);
+      console.error('   Try installing manually and re-run init.');
+      return false;
+    }
+  }
+
+  // 2) Install browsers (skip in CI if desired)
+  if (process.env.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD === '1') {
+    console.log('⏭️  Skipping browser download (PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1).');
+    return true;
+  }
+
+  console.log('🧭 Ensuring Playwright browsers are installed…');
+
+  // Use npx with explicit package + -y to avoid prompts and PATH issues
+  // (works even if the local bin is not on PATH yet)
+  const installCmd = `npx -y playwright@latest install --with-deps`;
+
+  try {
+    await exec(installCmd, { stdio: 'inherit', env: process.env });
+    console.log('✅ Playwright browsers installed.');
+    return true;
+  } catch (err) {
+    // Some shells can’t find `playwright` even via npx. Fall back to package-runner:
+    // npm 7+: `npm exec`, yarn: `yarn playwright`, pnpm: `pnpm exec`
+    const pm = pkgManagerForCwd();
+    const fallback =
+      pm === 'pnpm' ? `pnpm exec playwright install --with-deps` :
+      pm === 'yarn' ? `yarn playwright install --with-deps` :
+      pm === 'bun'  ? `bunx playwright install --with-deps` :
+                      `npm exec --yes playwright@latest install --with-deps`;
+
+    console.log('⚠️  npx fallback:', err?.message || err);
+    console.log(`↩️  Retrying with: ${fallback}`);
+    try {
+      await exec(fallback, { stdio: 'inherit', env: process.env });
+      console.log('✅ Playwright browsers installed on retry.');
+      return true;
+    } catch (err2) {
+      console.error('❌ Failed to install Playwright browsers:', err2?.message || err2);
+      console.error('   Manual fix:');
+      console.error('     1) npm i -D @playwright/test');
+      console.error('     2) npx -y playwright@latest install --with-deps');
+      return false;
+    }
+  }
 }
 
 
