@@ -79,6 +79,432 @@ export class ChromeBrowser {
     return this.currentId;
   }
 
+    // ---- helpers: retries, wait, and locator resolution ----
+  async _withRetries(fn, { attempts = 3, baseMs = 250 } = {}) {
+    let lastErr;
+    for (let i = 0; i < attempts; i++) {
+      try {
+        return await fn();
+      } catch (err) {
+        lastErr = err;
+        // Exponential backoff: 250ms, 500ms, 1000ms...
+        await this.page.waitForTimeout(baseMs * Math.pow(2, i));
+      }
+    }
+    throw lastErr;
+  }
+
+  async _waitReadyForInteract(locator, { timeout = 3000 } = {}) {
+    // “Visible & enabled” is the sweet spot for flake reduction
+    await locator.first().waitFor({ state: 'visible', timeout });
+    // Extra: ensure it’s not disabled/covered
+    await locator.first().scrollIntoViewIfNeeded().catch(() => {});
+  }
+
+  _resolveLocator(selectorOrFn, fallbacks = []) {
+    // Accept: string CSS/XPath via page.locator, or a function (page) => Locator
+    const candidates = [
+      selectorOrFn,
+      ...fallbacks,
+    ].filter(Boolean);
+
+    const locators = candidates.map(c => {
+      if (typeof c === 'function') return c(this.page).first();
+      if (typeof c === 'string')  return this.page.locator(c).first();
+      // Unsupported type → ignore
+      return null;
+    }).filter(Boolean);
+
+    return locators;
+  }
+
+  // Generic frame access
+  _allFrames({ includeMain = true } = {}) {
+    const frames = this.page.frames();
+    if (includeMain) {
+      const main = this.page.mainFrame();
+      return [main, ...frames.filter(f => f !== main)];
+    }
+    return frames;
+  }
+
+  // Build candidate locator MAKERS (Page|Frame-aware)
+  _buildClickCandidates({ selector, text, role, attrs, scope, searchAllFrames }) {
+    const frames = searchAllFrames ? this._allFrames({ includeMain: true }) : [this.page.mainFrame()];
+    const makers = [];
+    const add = (fn) => fn && makers.push(fn);
+
+    for (const f of frames) {
+      const ctx = f; // <-- IMPORTANT: use Frame directly (or this.page for main)
+
+      const locInScope = (loc) => (scope ? ctx.locator(scope).locator(loc) : ctx.locator(loc));
+
+      // 1) Explicit selector/function first
+      if (selector) {
+        add(() => typeof selector === 'function' ? selector(ctx).first() : locInScope(selector).first());
+      }
+
+      // 2) Hints (all generic)
+      if (role && text) add(() => ctx.getByRole(role, { name: text }).first());
+      if (role && !text) add(() => ctx.getByRole(role).first());
+      if (text && !role) {
+        add(() => ctx.getByRole('button', { name: text }).first());
+        add(() => ctx.getByRole('link',   { name: text }).first());
+        add(() => ctx.getByText(text).locator('..').locator('button, a, [role="button"]').first());
+      }
+      if (attrs && Object.keys(attrs).length) {
+        const attrSel = Object.entries(attrs)
+          .map(([k,v]) => v === true ? `[${k}]` : `[${k}="${String(v)}"]`)
+          .join('');
+        if (attrSel) add(() => locInScope(attrSel).first());
+      }
+    }
+
+    const seen = new Set();
+    return makers.filter(fn => { const k = fn.toString(); if (seen.has(k)) return false; seen.add(k); return true; });
+  }
+
+
+  // Clickability check (visible, enabled, hit-testable)
+  async _isClickable(locator) {
+    try {
+      const vis = await locator.isVisible();
+      if (!vis) return false;
+      const [enabled, pe, display, visibility, bbox] = await Promise.all([
+        locator.isEnabled().catch(() => false),
+        locator.evaluate(el => getComputedStyle(el).pointerEvents).catch(() => 'auto'),
+        locator.evaluate(el => getComputedStyle(el).display).catch(() => 'block'),
+        locator.evaluate(el => getComputedStyle(el).visibility).catch(() => 'visible'),
+        locator.boundingBox().catch(() => null),
+      ]);
+      if (!enabled) return false;
+      if (pe === 'none' || display === 'none' || visibility === 'hidden') return false;
+      if (!bbox || bbox.width < 1 || bbox.height < 1) return false;
+      return true;
+    } catch { return false; }
+  }
+
+  async _withRetries(fn, { attempts = 3, baseMs = 250 } = {}) {
+    let lastErr;
+    for (let i = 0; i < attempts; i++) {
+      try { return await fn(); }
+      catch (err) {
+        lastErr = err;
+        await this.page.waitForTimeout(baseMs * Math.pow(2, i));
+      }
+    }
+    throw lastErr;
+  }
+
+  // Resolve a locator from string or function (page)=>Locator
+  _resolveAny(selectorOrFn, { page = this.page }) {
+    if (!selectorOrFn) return null;
+    return typeof selectorOrFn === 'function'
+      ? selectorOrFn(page).first()
+      : page.locator(String(selectorOrFn)).first();
+  }
+
+  // Wait for a single condition
+  async _waitOne(cond, { timeout = 8000, searchAllFrames = false } = {}) {
+    const page = this.page;
+    const frames = searchAllFrames ? [page.mainFrame(), ...page.frames().filter(f => f !== page.mainFrame())] : [page.mainFrame()];
+    const start = Date.now();
+
+    const left = () => Math.max(0, timeout - (Date.now() - start));
+
+    // URL-based
+    if (cond.urlIncludes) {
+      const re = cond.urlIncludes instanceof RegExp ? cond.urlIncludes : new RegExp(cond.urlIncludes.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+      return page.waitForURL(u => re.test(String(u)), { timeout: left() });
+    }
+    if (cond.urlExcludes) {
+      const re = cond.urlExcludes instanceof RegExp ? cond.urlExcludes : new RegExp(cond.urlExcludes.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+      return page.waitForURL(u => !re.test(String(u)), { timeout: left() });
+    }
+    if (cond.urlMatches) {
+      return page.waitForURL(cond.urlMatches, { timeout: left() });
+    }
+    if (cond.urlChangedFrom) {
+      const prev = cond.urlChangedFrom;
+      return page.waitForURL(u => String(u) !== String(prev), { timeout: left() });
+    }
+
+    // Function predicate
+    if (cond.predicate) {
+      return page.waitForFunction(cond.predicate, null, { timeout: left(), polling: 100 });
+    }
+
+    // Visibility/attachment on any frame
+    const stateMap = {
+      visible: 'visible',
+      hidden: 'hidden',
+      attached: 'attached',
+      detached: 'detached',
+    };
+    for (const key of Object.keys(stateMap)) {
+      if (cond[key]) {
+        const state = stateMap[key];
+        for (const f of frames) {
+          const p = f.page ? f.page() : page;
+          const loc = this._resolveAny(cond[key], { page: p });
+          if (!loc) continue;
+          try { await loc.waitFor({ state, timeout: left() }); return; } catch {/* try next frame */ }
+        }
+        // If we didn’t return from a frame, throw to trigger retry chain
+        throw new Error(`Timeout waiting for ${key}`);
+      }
+    }
+
+    // Fallback: no-op
+    return;
+  }
+
+  // Wait for composite conditions
+  async _waitUntil({ all = [], any = [], timeoutMs = 8000, searchAllFrames = false } = {}) {
+    if (!all.length && !any.length) return;
+
+    const deadline = Date.now() + timeoutMs;
+
+    // ALL: run sequentially (each with shared remainder timeout)
+    for (const c of all) {
+      const left = Math.max(0, deadline - Date.now());
+      await this._waitOne(c, { timeout: left, searchAllFrames });
+    }
+
+    // ANY: race the remaining time
+    if (any.length) {
+      const left = Math.max(0, deadline - Date.now());
+      await Promise.any(any.map(c => this._waitOne(c, { timeout: left, searchAllFrames })));
+    }
+  }
+
+  // Heuristics (override per call if you want)
+  DEFAULT_TRANSIENT_URL_RE = /(loading|redirect|callback|auth|sso|processing)/i;
+  DEFAULT_LOADER_SELECTORS = [
+    '[aria-busy="true"]',
+    '[role="progressbar"]',
+    '[aria-live="polite"][role="status"]',
+    '.loading,.loader,.spinner,.progress,.skeleton,.backdrop,.overlay',
+    '[data-loading="true"]',
+    '[data-busy="true"]',
+    '[data-state="loading"]',
+  ];
+
+  _allFrames({ includeMain = true } = {}) {
+    const frames = this.page.frames();
+    if (includeMain) {
+      const main = this.page.mainFrame();
+      return [main, ...frames.filter(f => f !== main)];
+    }
+    return frames;
+  }
+
+  async _frameHasVisible(frame, selector) {
+    // Visible = attached & not display:none/visibility:hidden & has size
+    return frame.evaluate((sel) => {
+      const els = Array.from(document.querySelectorAll(sel));
+      const isVisible = (el) => {
+        const cs = getComputedStyle(el);
+        if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') return false;
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      };
+      return els.some(isVisible);
+    }, selector).catch(() => false);
+  }
+
+  /**
+   * Wait until no loader selectors are visibly present across frames
+   * for a continuous quiet window (quietMs). Generic & overrideable.
+   */
+  async _waitLoaderGone({
+    selectors = this.DEFAULT_LOADER_SELECTORS,
+    searchAllFrames = true,
+    timeoutMs = 12000,
+    quietMs = 700,
+    pollMs = 120,
+  } = {}) {
+    const frames = searchAllFrames ? this._allFrames({ includeMain: true }) : [this.page.mainFrame()];
+    const start = Date.now();
+    let quietStart = 0;
+
+    const joined = selectors.join(',');
+
+    while (Date.now() - start < timeoutMs) {
+      let visible = false;
+      for (const f of frames) {
+        const vis = await this._frameHasVisible(f, joined);
+        if (vis) { visible = true; break; }
+      }
+
+      if (!visible) {
+        if (quietStart === 0) quietStart = Date.now();
+        if (Date.now() - quietStart >= quietMs) return; // success: no loader for quiet window
+      } else {
+        quietStart = 0; // reset quiet window
+      }
+      await this.page.waitForTimeout(pollMs);
+    }
+    // If timeout, let caller decide (don’t throw by default to keep tests moving)
+    throw new Error('Loader still visible after timeout');
+  }
+
+  /**
+   * Wait until the URL is past transient/bounce routes (e.g., loading/callback).
+   * If you just want “leave current url”, pass urlChangedFrom = true.
+   */
+  async _waitPastTransientUrls({
+    urlChangedFrom,                 // string | true
+    transientUrlRe = this.DEFAULT_TRANSIENT_URL_RE,
+    timeoutMs = 12000,
+    quietMs = 400,                  // require the non-transient URL to stick briefly
+  } = {}) {
+    const page = this.page;
+    const startUrl = urlChangedFrom === true ? page.url() : (urlChangedFrom || null);
+    const start = Date.now();
+    let stableStart = 0;
+
+    while (Date.now() - start < timeoutMs) {
+      const u = page.url();
+      const leftStart = !startUrl || u !== String(startUrl);
+      const notTransient = !transientUrlRe || !transientUrlRe.test(u);
+
+      if (leftStart && notTransient) {
+        if (stableStart === 0) stableStart = Date.now();
+        if (Date.now() - stableStart >= quietMs) return; // success
+      } else {
+        stableStart = 0;
+      }
+      await this.page.waitForTimeout(100);
+    }
+    // Don’t throw; caller can decide to continue with other guards
+    throw new Error('URL did not move past transient routes in time');
+  }
+
+  async _waitEnabled(locator, { timeoutMs = 2500, pollMs = 120 } = {}) {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      const enabled = await locator.isEnabled().catch(() => false);
+      if (enabled) return true;
+      await this.page.waitForTimeout(pollMs);
+    }
+    return false;
+  }
+
+  async _debugClickableSnapshot({ scope } = {}) {
+    const frames = this._allFrames({ includeMain: true });
+    const lines = [];
+    for (const [i,f] of frames.entries()) {
+      const ctx = f;
+      const root = scope ? ctx.locator(scope) : ctx;
+      const btns = await root.locator('button, [role="button"], a[href], input[type="submit"]').elementHandles();
+      const snippets = await Promise.all(btns.slice(0, 10).map(h => h.evaluate(el => {
+        const txt = (el.innerText || el.value || '').trim().slice(0,50);
+        return `<${el.tagName.toLowerCase()}> ${txt}`;
+      })));
+      lines.push(`frame[${i}] url=${f.url()} candidates=${snippets.join(' | ')}`);
+    }
+    console.log('[debug] clickables\n' + lines.join('\n'));
+  }
+
+  // Build candidates for text entry (Page|Frame-aware)
+  _buildFillCandidates({ selector, placeholder, role = 'textbox', attrs, scope, searchAllFrames }) {
+    const frames = searchAllFrames ? this._allFrames({ includeMain: true }) : [this.page.mainFrame()];
+    const makers = [];
+    const add = (fn) => fn && makers.push(fn);
+
+    for (const f of frames) {
+      const ctx = f; // Frame
+      const locInScope = (loc) => (scope ? ctx.locator(scope).locator(loc) : ctx.locator(loc));
+
+      // 1) Explicit selector/function first
+      if (selector) {
+        add(() => typeof selector === 'function' ? selector(ctx).first() : locInScope(selector).first());
+      }
+
+      // 2) Placeholder hint (semantic)
+      if (placeholder) {
+        add(() => ctx.getByPlaceholder(placeholder).first());
+        // common shapes if placeholder is on a different element than the input
+        add(() => locInScope(`[placeholder]`).filter({ hasText: placeholder }).first());
+      }
+
+      // 3) Role hint (textbox covers input/textarea/contenteditable)
+      if (role) {
+        add(() => ctx.getByRole(role).first());
+        if (placeholder) add(() => ctx.getByRole(role, { name: placeholder }).first());
+      }
+
+      // 4) Generic text-entry shapes
+      add(() => locInScope('input[type="text"], input[type="search"], input:not([type]), textarea').first());
+      add(() => locInScope('[contenteditable=""], [contenteditable="true"], [role="textbox"]').first());
+
+      // 5) Attribute filters
+      if (attrs && Object.keys(attrs).length) {
+        const attrSel = Object.entries(attrs)
+          .map(([k,v]) => v === true ? `[${k}]` : `[${k}="${String(v)}"]`)
+          .join('');
+        if (attrSel) add(() => locInScope(attrSel).first());
+      }
+    }
+
+    // de-dup
+    const seen = new Set();
+    return makers.filter(fn => { const k = fn.toString(); if (seen.has(k)) return false; seen.add(k); return true; });
+  }
+
+
+  async _waitEditable(locator, { timeoutMs = 2500, pollMs = 120 } = {}) {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      if (await locator.isEditable().catch(() => false)) return true;
+      await this.page.waitForTimeout(pollMs);
+    }
+    return false;
+  }
+
+  async _smartClearAndType(locator, text) {
+    // Try native fill first (clears automatically on inputs/textarea/contenteditable)
+    try {
+      await locator.fill(text, { timeout: 3000 });
+      return 'fill';
+    } catch {}
+
+    // Fallback: focus + select all + type
+    try {
+      await locator.focus({ timeout: 1500 }).catch(() => {});
+      // Select all on mac/linux/windows
+      await this.page.keyboard.down('Control').catch(()=>{});
+      await this.page.keyboard.press('KeyA').catch(()=>{});
+      await this.page.keyboard.up('Control').catch(()=>{});
+      await this.page.keyboard.press('Backspace').catch(()=>{});
+      await locator.type(text, { delay: 10, timeout: 4000 }); // human-ish typing helps some SPAs
+      return 'type';
+    } catch {}
+
+    // Last resort: set value via JS + dispatch events
+    try {
+      await locator.evaluate((el, value) => {
+        const isCE = el.isContentEditable || el.getAttribute('contenteditable') === '' || el.getAttribute('contenteditable') === 'true';
+        if (isCE) {
+          el.innerText = value;
+          el.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+        } else {
+          const proto = Object.getPrototypeOf(el);
+          const desc = Object.getOwnPropertyDescriptor(proto, 'value');
+          if (desc?.set) desc.set.call(el, value); else el.value = value;
+          el.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+        }
+      }, text);
+      return 'js';
+    } catch {}
+
+    throw new Error('Could not input text with any strategy');
+  }
+
+
   async start() {
     try {
       const pw = await loadPlaywright();
@@ -114,33 +540,205 @@ export class ChromeBrowser {
         this.page = this._getCurrent()?.page ?? null;
       }
     });
+    await first.addStyleTag({ content: `*{animation-duration:.001s!important;transition-duration:.001s!important}` }).catch(() => {});
   }
 
-  async navigate({ url }) {
-    await this.page.goto(url, { timeout: 30_000 });
+  async navigate({ url, loaderAware = true, loaderSelectors, transientUrlRe }) {
+    await this.page.goto(url, { timeout: 30_000, waitUntil: 'domcontentloaded' });
+    // Cheap global stabilization: make sure DOM is there & form container attached if present
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+    // If you expect a specific route like /sign-in, you can keep this generic and fast:
+    // await this.page.waitForURL(/\/sign-in/).catch(() => {});
+    // Defensive: ensure *something* form-like is attached (doesn't need to be visible)
+    await this.page.locator('form').first().waitFor({ state: 'attached', timeout: 3000 }).catch(() => {});
+
+    if (loaderAware) {
+      try { await this._waitPastTransientUrls({ urlChangedFrom: url, transientUrlRe }); } catch {}
+      try { await this._waitLoaderGone({ selectors: loaderSelectors }); } catch {}
+    }
     return `navigated to ${this.page.url()}`;
   }
 
-  async fill({ selector, text }) {
-    await this.page.waitForSelector(selector, { timeout: 30_000 });
-    await this.page.fill(selector, text);
-    return `filled ${selector}`;
-  }
 
-  async click({ selector, waitFor = 'domcontentloaded', delayMs = 2000 }) {
-    await this.page.waitForSelector(selector, { timeout: 30_000 });
-
-    const [res] = await Promise.all([
-      this.page.waitForLoadState(waitFor, { timeout: 10_000 }).catch(() => null),
-      this.page.click(selector),
-    ]);
-
-    if (delayMs) {
-      await this.page.waitForTimeout(delayMs);
+  /**
+   * Generic fill with retries and broad textbox detection.
+   * Accepts your existing { selector, text } and optional:
+   * { placeholder, role, attrs, scope, searchAllFrames, strategy, loaderAware }
+   */
+  async fill({
+    selector,
+    text,
+    placeholder,          // string | RegExp
+    role = 'textbox',     // generic default
+    attrs,
+    scope,
+    searchAllFrames = true,
+    strategy = 'auto',    // 'strict' -> selector only
+    loaderAware = true,   // if you added the loader helpers earlier
+  }) {
+    if (loaderAware) {
+      // Best effort: avoid typing while loader overlays block focus
+      try { await this._waitLoaderGone({ timeoutMs: 6000 }); } catch {}
     }
 
-    return `clicked ${selector} and waited ${delayMs}ms`;
+    const makeCandidates = () => {
+      if (strategy === 'strict') {
+        return this._buildFillCandidates({ selector, scope, searchAllFrames });
+      }
+      return this._buildFillCandidates({ selector, placeholder, role, attrs, scope, searchAllFrames });
+    };
+
+    return this._withRetries(async () => {
+      const makers = makeCandidates();
+      let chosen = null;
+
+      // re-resolve each attempt (survive rerenders)
+      for (const make of makers) {
+        const loc = make(); if (!loc) continue;
+        try {
+          await loc.scrollIntoViewIfNeeded().catch(() => {});
+          await loc.waitFor({ state: 'visible', timeout: 2000 });       // visible on screen
+          const enabled = await this._waitEnabled(loc, { timeoutMs: 2500 });
+          if (!enabled) continue;
+          const editable = await this._waitEditable(loc, { timeoutMs: 2500 });
+          if (!editable) continue;
+          chosen = loc; break;
+        } catch {
+          // try next
+        }
+      }
+      if (!chosen) {
+        // quick debug snapshot (optional)
+        // const html = await this.page.content(); fs.writeFileSync('debug_fill.html', html);
+        throw new Error('No editable textbox became ready');
+      }
+
+      const method = await this._smartClearAndType(chosen, text);
+      return `filled via ${method}`;
+    }, { attempts: 3, baseMs: 250 });
   }
+
+
+
+  /**
+   * @param {object} opts
+   * ...
+   * @param {object}          [opts.until]        // declarative post-action waits
+   * @param {Array<object>}   [opts.until.all]    // all must pass
+   * @param {Array<object>}   [opts.until.any]    // any may pass
+   * @param {number}          [opts.until.timeoutMs=8000]
+   * @param {boolean}         [opts.until.searchAllFrames=true]
+   * @param {boolean}         [opts.waitDomReady=true] // cheap settle
+   * @param {number}          [opts.delayMs=200]       // micro settle
+   */
+  async click({
+    selector, text, role, attrs, scope,
+    searchAllFrames = true,
+    strategy = 'auto',
+    waitFor,   
+    waitDomReady = true,
+    delayMs = 200,
+    until,
+    loaderAware = true,               // NEW
+    loaderSelectors,                  // NEW
+    transientUrlRe,                   // NEW
+    postClickTimeoutMs = 12000, 
+  }) {
+    const prevUrl = this.page.url();
+
+    // Build your candidates the way you already do (generic/hint-driven)
+    const makers = (strategy === 'strict')
+      ? this._buildClickCandidates({ selector, scope, searchAllFrames })
+      : this._buildClickCandidates({ selector, text, role, attrs, scope, searchAllFrames });
+
+    // choose & click (same as your generic version)
+    let chosen = null;
+    for (const make of makers) {
+      const loc = make(); if (!loc) continue;
+      try {
+        await loc.scrollIntoViewIfNeeded().catch(() => {});
+        await loc.waitFor({ state: 'visible', timeout: 2000 });
+
+        await loc.scrollIntoViewIfNeeded().catch(() => {});
+        await loc.waitFor({ state: 'visible', timeout: 2000 });
+
+        const becameEnabled = await this._waitEnabled(loc, { timeoutMs: 2500 });
+        if (!becameEnabled) {
+          // try next candidate; this one is still disabled after ~2.5s
+          continue;
+        }
+        if (await this._isClickable(loc)) {
+          chosen = loc;
+          break;
+        }
+
+        if (await this._isClickable(loc)) { chosen = loc; break; }
+      } catch {}
+    }
+    if (!chosen) {
+      await this._debugClickableSnapshot({ scope }).catch(()=>{});
+      await this.page.screenshot({ path: 'missions/mission_reports/screenshots/click_fail.png' }).catch(()=>{});
+      throw new Error('No clickable locator became ready');
+    }
+    // do the click (standard → hover+click → JS click)
+    try { await chosen.click({ timeout: 3000 }); }
+    catch {
+      try { await chosen.hover({ timeout: 1200 }).catch(()=>{}); await chosen.click({ timeout: 3000 }); }
+      catch { await chosen.evaluate(el => el.click()); }
+    }
+
+    // cheap settle so screenshots don't catch mid-paint
+    if (waitDomReady) await this.page.waitForLoadState('domcontentloaded', { timeout: 3000 }).catch(()=>{});
+    if (delayMs) await this.page.waitForTimeout(delayMs);
+
+    // --- Built-in stabilization for loader pages (generic) ---
+    if (loaderAware) {
+      const endBy = Date.now() + postClickTimeoutMs;
+
+      // 1) Move past transient URLs (loading/callback/redirect/etc.)
+      try {
+        await this._waitPastTransientUrls({
+          urlChangedFrom: true,
+          transientUrlRe: transientUrlRe ?? this.DEFAULT_TRANSIENT_URL_RE,
+          timeoutMs: Math.max(0, endBy - Date.now()),
+        });
+      } catch { /* best effort, don’t fail here */ }
+
+      // 2) Wait for loaders to vanish for a quiet window
+      try {
+        await this._waitLoaderGone({
+          selectors: loaderSelectors ?? this.DEFAULT_LOADER_SELECTORS,
+          searchAllFrames: true,
+          timeoutMs: Math.max(0, endBy - Date.now()),
+          quietMs: 700,
+        });
+      } catch { /* best effort, don’t fail here */ }
+    }
+
+    // 3) Your explicit declarative conditions (optional)
+
+
+    // declarative postconditions (e.g., loader disappears, route changes, dashboard visible)
+    if (until) {
+      // convenience: if they asked for urlChange without specifying from, use prevUrl
+      const normalized = {
+        ...until,
+        all: (until.all || []).map(c => c.urlChangedFrom === true ? { urlChangedFrom: prevUrl } : c),
+      };
+      await this._waitUntil({
+        all: normalized.all || [],
+        any: normalized.any || [],
+        timeoutMs: normalized.timeoutMs ?? 8000,
+        searchAllFrames: normalized.searchAllFrames ?? true,
+      });
+    }
+
+    const preview = await chosen.evaluate(el => el.outerHTML?.slice(0, 80)).catch(() => '<locator>');
+    return `clicked ${preview}`;
+  }
+
+
+
 
   async get_dom({ limit = 100000, exclude = true, focus = [] }, agentMemory = {}) {
     let html;
