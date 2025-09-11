@@ -504,11 +504,24 @@ export class ChromeBrowser {
     throw new Error('Could not input text with any strategy');
   }
 
+  _chromiumLaunchArgsForCI() {
+    const inCI = !!(process.env.CI || process.env.GITHUB_ACTIONS || process.env.TESTRONAUT_CI_CHROMIUM);
+    return inCI ? ['--no-sandbox', '--disable-setuid-sandbox'] : [];
+  }
+
 
   async start() {
     try {
       const pw = await loadPlaywright();
-      this.browser = await pw.chromium.launch({ headless: true });    
+      const launchArgs = [
+       '--disable-dev-shm-usage',
+       '--disable-gpu',
+       ...this._chromiumLaunchArgsForCI(),
+     ];
+      this.browser = await pw.chromium.launch({ 
+        headless: true,
+        args: launchArgs,
+      });    
     } catch (err) {
       const msg = String(err?.message || err);
       const needsInstall =
@@ -525,7 +538,16 @@ export class ChromeBrowser {
 
       // Retry
       const pw = await loadPlaywright();
-      return await pw.chromium.launch({ headless: true });
+      const launchArgs = [
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        ...this._chromiumLaunchArgsForCI(),
+      ];
+      this.browser = await pw.chromium.launch({
+        headless: true,
+        args: launchArgs,
+      });
+      // return await pw.chromium.launch({ headless: true });
     }
     this.context = await this.browser.newContext();
     const first = await this.context.newPage();
@@ -740,34 +762,97 @@ export class ChromeBrowser {
 
 
 
-  async get_dom({ limit = 100000, exclude = true, focus = [] }, agentMemory = {}) {
-    let html;
-    try {
-      html = await this.page.content();
-    } catch (err) {
-      console.warn('⚠️ get_dom retrying due to navigation:', err.message);
-      // Wait for navigation to settle
-      await this.page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
-      html = await this.page.content();
+  async get_dom(
+    { limit = 100000, exclude = true, focus = [], loadState = 'networkidle', timeout = 10000 } = {},
+    agentMemory = {}
+  ) {
+    // --- 1) Ensure we have a live page ---
+    const hasContext = !!this.context;
+
+    // Recover a page if missing/closed
+    const recoverPage = async () => {
+      if (hasContext) {
+        const pages = (this.context.pages?.() || []).filter(p => !p.isClosed?.());
+        if (pages.length) {
+          // Prefer the last page (often the active one / popup)
+          this.page = pages[pages.length - 1];
+          return;
+        }
+        // No pages at all in a live context -> make one
+        this.page = await this.context.newPage();
+        return;
+      }
+      // No context yet but a browser exists -> create context + page
+      if (this.browser?.newContext) {
+        this.context = await this.browser.newContext();
+        this.page = await this.context.newPage();
+        return;
+      }
+      throw new Error('No browser context/page available in get_dom().');
+    };
+
+    if (!this.page || this.page.isClosed?.()) {
+      await recoverPage();
     }
+
+    // --- 2) Try to reach a usable load state (best-effort) ---
+    try {
+      await this.page.waitForLoadState(loadState, { timeout });
+    } catch {
+      // Non-fatal: some apps never reach 'load', we’ll still try to read the DOM.
+    }
+
+    // If navigation changed active page (e.g., popup), reselect a live page
+    try {
+      const pages = this.context?.pages?.() || [];
+      if (pages.length && (this.page.isClosed?.() || !pages.includes(this.page))) {
+        this.page = pages[pages.length - 1];
+      }
+    } catch { /* ignore */ }
+
+    // --- 3) Get HTML content with a small retry on failure ---
+    let html = '';
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        html = await this.page.content();
+        if (html && html.trim()) break;
+      } catch (err) {
+        // First failure: try waiting for network to settle, then retry
+        if (attempt === 0) {
+          try { await this.page.waitForLoadState('networkidle', { timeout: 5000 }); } catch {}
+          // Also re-check active page (popups can swap)
+          try {
+            const pages = this.context?.pages?.() || [];
+            if (pages.length) this.page = pages[pages.length - 1];
+          } catch {}
+        } else {
+          // Second failure: bubble up a clearer message
+          throw new Error(`get_dom() failed to read page content: ${err?.message || err}`);
+        }
+      }
+    }
+
+    // Fallback to empty string if still nothing (keeps caller logic simple)
+    if (!html) html = '';
+
+    // --- 4) Optional DOM reduction/cleanup (your existing steps) ---
     let $ = cheerio.load(html);
-    
-    // Remove non-content tags
+
     if (exclude) {
       $ = await removeNonContentTags($);
-      // console.log('🔧 Non-content tags removed from DOM.');
       $ = await reduceRepeatedDivs($);
-      // console.log('🔧 Repeated divs reduced in DOM.');
+      // If you later re-enable:
       // $ = await removeObfuscatedClassNames($);
-      // console.log('🔧 Obfuscated class names removed from DOM.')
       // $ = await removeAutoGeneratedClasses($);
-      // console.log('🔧 Auto-generated classes removed from DOM.');
     }
-    // console.log('🔧 DOM cleaned up:', $);
+
+    // (Optional: If you'd like to use `focus`, you could filter here by selectors/keywords.)
+
+    // --- 5) Return trimmed HTML ---
     const finalHtml = $.html();
-    const trimmed = finalHtml.slice(0, limit);
-    return trimmed; 
+    return finalHtml.slice(0, limit);
   }
+
   
   async check_text({ text }) {
     const html = await this.page.content();
