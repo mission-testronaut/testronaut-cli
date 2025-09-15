@@ -174,59 +174,118 @@ const toolsSchema = [
     },
   },
   {
-  type: 'function',
-  function: {
-    name: 'click_and_follow_popup',
-    description:
-      'Click a selector that opens a new tab/window (e.g., OAuth) and switch control to it. Falls back to same-tab navigation if no popup appears.',
-    parameters: {
-      type: 'object',
-      properties: {
-        selector: { type: 'string', description: 'CSS or text selector to click' },
-        expectedUrlHost: {
-          type: 'string',
-          description: "Optional hostname hint like 'accounts.google.com'"
+    type: 'function',
+    function: {
+      name: 'click_and_follow_popup',
+      description:
+        'Click a selector that opens a new tab/window (e.g., OAuth) and switch control to it. Falls back to same-tab navigation if no popup appears.',
+      parameters: {
+        type: 'object',
+        properties: {
+          selector: { type: 'string', description: 'CSS or text selector to click' },
+          expectedUrlHost: {
+            type: 'string',
+            description: "Optional hostname hint like 'accounts.google.com'"
+          },
+          timeoutMs: {
+            type: 'number',
+            default: 20000,
+            description: 'How long to wait for the popup or navigation'
+          }
         },
-        timeoutMs: {
-          type: 'number',
-          default: 20000,
-          description: 'How long to wait for the popup or navigation'
-        }
-      },
-      required: ['selector']
+        required: ['selector']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'switch_to_page',
+      description:
+        "Switch agent focus between known tabs/pages (e.g., back to 'main' or to the latest popup). Use a pageId previously returned by click_and_follow_popup to target a specific tab.",
+      parameters: {
+        type: 'object',
+        properties: {
+          target: {
+            type: 'string',
+            description: "One of: 'main', 'latest', or a pageId returned by click_and_follow_popup"
+          }
+        },
+        required: ['target']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'close_current_page',
+      description:
+        'Close the current tab/page and automatically switch back to another open page if available.',
+      parameters: { type: 'object', properties: {} }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'upload_file',
+      description:
+        'Upload a file into an <input type="file"> or via a file chooser. Defaults to missions/files as the file source.',
+      parameters: {
+        type: 'object',
+        properties: {
+          selector: {
+            type: 'string',
+            description: 'CSS selector for the file input or a button that opens a file chooser'
+          },
+          fileName: {
+            type: 'string',
+            description: 'File name located in missions/files (e.g., "sample.pdf")'
+          },
+          useChooser: {
+            type: 'boolean',
+            default: false,
+            description: 'If true, click the selector and fulfill the file chooser instead of setInputFiles'
+          },
+          timeoutMs: {
+            type: 'number',
+            default: 15000
+          }
+        },
+        required: ['selector', 'fileName']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'download_file',
+      description:
+        'Download a file to missions/files. Either click a selector that triggers a download or fetch a direct URL.',
+      parameters: {
+        type: 'object',
+        properties: {
+          selector: {
+            type: 'string',
+            description: 'An element to click that triggers a download'
+          },
+          url: {
+            type: 'string',
+            description: 'Direct URL to download without clicking the page'
+          },
+          fileName: {
+            type: 'string',
+            description: 'Optional override for the saved filename'
+          },
+          timeoutMs: {
+            type: 'number',
+            default: 30000
+          }
+        },
+        // At least one of selector or url should be provided (enforced in code)
+        required: []
+      }
     }
   }
-},
-{
-  type: 'function',
-  function: {
-    name: 'switch_to_page',
-    description:
-      "Switch agent focus between known tabs/pages (e.g., back to 'main' or to the latest popup). Use a pageId previously returned by click_and_follow_popup to target a specific tab.",
-    parameters: {
-      type: 'object',
-      properties: {
-        target: {
-          type: 'string',
-          description: "One of: 'main', 'latest', or a pageId returned by click_and_follow_popup"
-        }
-      },
-      required: ['target']
-    }
-  }
-},
-{
-  type: 'function',
-  function: {
-    name: 'close_current_page',
-    description:
-      'Close the current tab/page and automatically switch back to another open page if available.',
-    parameters: { type: 'object', properties: {} }
-  }
-}
-
-  
-    
 ];
 
 export default toolsSchema;
