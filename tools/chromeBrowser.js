@@ -19,7 +19,25 @@ import {
   removeObfuscatedClassNames, 
 } from './domControl.js';
 import fs from 'fs';
+import path from 'path';
 import { ensureBrowsers } from '../tools/playwrightSetup.js';
+
+const FILES_DIR = path.join('missions', 'files');
+const REPORTS_DIR = path.join('missions', 'mission_reports');
+const FILES_LOG = path.join(REPORTS_DIR, 'files.jsonl');
+
+function ensureDir(p) {
+  try { fs.mkdirSync(p, { recursive: true }); } catch {}
+}
+
+function appendFileEvent(eventObj = {}) {
+  try {
+    ensureDir(REPORTS_DIR);
+    fs.appendFileSync(FILES_LOG, JSON.stringify(eventObj) + '\n', 'utf8');
+  } catch (e) {
+    console.warn('⚠️ Could not append file event:', e?.message);
+  }
+}
 
 export class ChromeBrowser {
   constructor() {
@@ -549,7 +567,13 @@ export class ChromeBrowser {
       });
       // return await pw.chromium.launch({ headless: true });
     }
-    this.context = await this.browser.newContext();
+
+    ensureDir(FILES_DIR); // ⬅️ make sure missions/files exists
+
+    this.context = await this.browser.newContext({
+      acceptDownloads: true // ⬅️ important for Playwright download handling
+    });
+    // this.context = await this.browser.newContext();
     const first = await this.context.newPage();
     const id = this._addAndFocus(first);
 
@@ -991,7 +1015,127 @@ export class ChromeBrowser {
     return `Screenshot saved at: ./screenshots/${name}_${timestamp}.png`;
   }
   
-  
+  async upload_file({ selector, fileName, useChooser = false, timeoutMs = 15000 }) {
+    if (!selector) throw new Error('upload_file: selector is required');
+    if (!fileName) throw new Error('upload_file: fileName is required');
+
+    ensureDir(FILES_DIR);
+    const filePath = path.resolve(FILES_DIR, fileName);
+    if (!fs.existsSync(filePath)) {
+      throw new Error(`upload_file: file not found at ${filePath}`);
+    }
+
+    await this.page.waitForSelector(selector, { timeout: timeoutMs });
+
+    let method = 'input';
+    if (useChooser) {
+      method = 'chooser';
+      const [fileChooser] = await Promise.all([
+        this.page.waitForEvent('filechooser', { timeout: timeoutMs }),
+        this.page.click(selector, { timeout: timeoutMs })
+      ]);
+      await fileChooser.setFiles(filePath);
+    } else {
+      const input = this.page.locator(selector).first();
+      await input.waitFor({ state: 'visible', timeout: timeoutMs }).catch(() => {});
+      await input.setInputFiles(filePath, { timeout: timeoutMs });
+    }
+
+    const stats = fs.statSync(filePath);
+    const payload = {
+      _testronaut_file_event: 'upload',
+      method,                       // 'input' | 'chooser'
+      fileName,
+      sourcePath: filePath,
+      bytes: stats.size,
+      selector,
+      ts: new Date().toISOString()
+    };
+
+    appendFileEvent(payload);
+    return JSON.stringify(payload);
+  }
+
+
+  async download_file({ selector, url, fileName, timeoutMs = 30000 }) {
+    ensureDir(FILES_DIR);
+
+    if (!selector && !url) {
+      throw new Error('download_file: provide either selector or url');
+    }
+
+    const sanitize = (name) => name.replace(/[\\/:*?"<>|]+/g, '_').trim();
+
+    // Mode 1: page click triggers a browser download
+    if (selector) {
+      await this.page.waitForSelector(selector, { timeout: timeoutMs });
+
+      const [download] = await Promise.all([
+        this.page.waitForEvent('download', { timeout: timeoutMs }),
+        this.page.click(selector)
+      ]);
+
+      const suggested = sanitize(download.suggestedFilename?.() || 'download.bin');
+      const targetPath = path.join(FILES_DIR, sanitize(fileName || suggested));
+      await download.saveAs(targetPath);
+
+      const stats = fs.statSync(targetPath);
+      const payload = {
+        _testronaut_file_event: 'download',
+        mode: 'click',
+        fileName: path.basename(targetPath),
+        destPath: targetPath,
+        bytes: stats.size,
+        selector,
+        url: null,
+        ts: new Date().toISOString()
+      };
+
+      appendFileEvent(payload);
+      return JSON.stringify(payload);
+    }
+
+    // Mode 2: direct URL fetch (no page interaction)
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`download_file: GET ${url} failed with ${res.status}`);
+    }
+
+    // Try to infer a filename if not provided
+    const cd = res.headers.get('content-disposition') || '';
+    let inferred = 'download.bin';
+    const match = /filename\*=UTF-8''([^;]+)|filename="([^"]+)"/i.exec(cd);
+    if (match) {
+      inferred = decodeURIComponent(match[1] || match[2]);
+    } else {
+      try {
+        const u = new URL(url);
+        const tail = u.pathname.split('/').filter(Boolean).pop();
+        if (tail) inferred = tail;
+      } catch {}
+    }
+
+    const targetPath = path.join(FILES_DIR, sanitize(fileName || inferred));
+    const buf = Buffer.from(await res.arrayBuffer());
+    fs.writeFileSync(targetPath, buf);
+
+    const stats = fs.statSync(targetPath);
+    const payload = {
+      _testronaut_file_event: 'download',
+      mode: 'url',
+      fileName: path.basename(targetPath),
+      destPath: targetPath,
+      bytes: stats.size,
+      selector: null,
+      url,
+      ts: new Date().toISOString()
+    };
+
+    appendFileEvent(payload);
+    return JSON.stringify(payload);
+  }
+
+
   async close() {
     await this.browser?.close();
   }
@@ -1016,4 +1160,6 @@ export const CHROME_TOOL_MAP = {
   click_and_follow_popup: (b, args) => b.click_and_follow_popup(args),
   switch_to_page: (b, args) => b.switch_to_page(args),
   close_current_page: (b, args) => b.close_current_page(args),
+  upload_file: (b, args) => b.upload_file(args),
+  download_file: (b, args) => b.download_file(args),
 };

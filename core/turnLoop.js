@@ -21,6 +21,14 @@ let turnTimestamps = [];
 let shouldBackoff;
 let steps = [];
 
+function formatBytes(n) {
+  if (!Number.isFinite(n)) return `${n}`;
+  const u = ['B','KB','MB','GB','TB'];
+  let i = 0, v = n;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${u[i]}`;
+}
+
 const pushDOMAssistant = async (browser, messages, agentMemory, { skipIfLastTool } = {}) => {
   if (skipIfLastTool && skipIfLastTool.includes(messages.at(-1)?.name)) {
     console.log(`[skip] Skipping DOM push after redundant tool: ${messages.at(-1)?.name}`);
@@ -186,6 +194,25 @@ export const turnLoop = async (
           errorMessage = `ERROR: ${err.message}`;
           result = errorMessage;
         }
+
+        // ------ Capture file upload/download events for mission report ------
+        try {
+          const maybeJson = JSON.parse(result);
+          if (maybeJson && maybeJson._testronaut_file_event) {
+            currentStep.files = currentStep.files || [];
+            currentStep.files.push(maybeJson);
+
+            if (maybeJson._testronaut_file_event === 'upload') {
+              const msgLine = `📤 Uploaded "${maybeJson.fileName}" (${formatBytes(maybeJson.bytes)}) via ${maybeJson.method}`;
+              currentStep.events.push(msgLine);
+              console.log(msgLine);
+            } else if (maybeJson._testronaut_file_event === 'download') {
+              const msgLine = `📥 Downloaded "${maybeJson.fileName}" (${formatBytes(maybeJson.bytes)}) via ${maybeJson.mode}`;
+              currentStep.events.push(msgLine);
+              console.log(msgLine);
+            }
+          }
+        } catch { /* not JSON / ignore */ }
 
         console.log(`[tool ] ← ${fnName} result:`, errorMessage ? '❌ Failed' : '✅ Success');
         currentStep.events.push(`[tool ] ← ${fnName} result: ${errorMessage ? '❌ Failed' : '✅ Success'}`)
