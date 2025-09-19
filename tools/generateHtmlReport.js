@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 
 export function generateHtmlReport(report, outputPath) {
-  const { runId, startTime, endTime, missions = [], summary = {} } = report;
+  const { runId, startTime, endTime, missions = [], summary = {}, llm = {} } = report;
   const durationSec =
     (startTime && endTime)
       ? ((new Date(endTime) - new Date(startTime)) / 1000).toFixed(2)
@@ -241,6 +241,7 @@ export function generateHtmlReport(report, outputPath) {
       <div><strong>Run ID:</strong> ${esc(runId ?? '—')}</div>
       <div><strong>Start:</strong> ${esc(startTime ?? '—')}</div>
       <div><strong>End:</strong> ${esc(endTime ?? '—')} • <strong>Duration:</strong> ${durationSec}s</div>
+      <div><strong>LLM:</strong> ${esc(llm.provider ?? '—')} • <strong>Model:</strong> ${esc(llm.model ?? '—')}</div>
     </div>
   </div>
 
@@ -248,6 +249,7 @@ export function generateHtmlReport(report, outputPath) {
     <div class="pill">Missions: ${esc(summary.totalMissions ?? totals.total)}</div>
     <div class="pill ok">Passed: ${esc(summary.passed ?? totals.passed)}</div>
     <div class="pill bad">Failed: ${esc(summary.failed ?? totals.failed)}</div>
+    <div class="pill">LLM: ${esc(llm.provider ?? '—')} • ${esc(llm.model ?? '')}</div>
   </div>
 
   <div class="container">

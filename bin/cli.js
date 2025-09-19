@@ -26,6 +26,27 @@ const apiBase = 'http://api.testronaut.app'; // Replace with your actual API bas
 
 
 const args = process.argv.slice(2);
+
+// Look for --model=<id> or --model <id>
+let modelOverride;
+const modelFlagIndex = args.findIndex(a => a === '--model' || a.startsWith('--model='));
+if (modelFlagIndex >= 0) {
+  if (args[modelFlagIndex].includes('=')) {
+    modelOverride = args[modelFlagIndex].split('=')[1];
+  } else if (args[modelFlagIndex + 1]) {
+    modelOverride = args[modelFlagIndex + 1];
+  }
+
+  if (modelOverride) {
+    process.env.TESTRONAUT_MODEL = modelOverride.trim();
+    console.log(`🧠 Model override: ${process.env.TESTRONAUT_MODEL}`);
+  }
+
+  // Remove flag & value from args so they don't look like mission filenames
+  args.splice(modelFlagIndex, modelOverride ? 2 : 1);
+}
+
+
 const missionsDir = path.resolve(process.cwd(), 'missions');
 
 const allResults = [];
@@ -165,10 +186,35 @@ const flatMissions = allResults.flatMap(entry => {
   }));
 });
 
+// Read provider/model from config (allow env override for model)
+const cfgPath = path.resolve(process.cwd(), 'testronaut-config.json');
+let llmProvider = 'openai';
+let llmModel = 'gpt-4o';
+
+if (fs.existsSync(cfgPath)) {
+  try {
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+    if (cfg?.provider) llmProvider = String(cfg.provider);
+    if (cfg?.model) llmModel = String(cfg.model);
+  } catch (e) {
+    console.warn('⚠️ Could not read testronaut-config.json:', e.message);
+  }
+}
+
+// Env override takes precedence for the model (matches runtime behavior)
+if (process.env.TESTRONAUT_MODEL?.trim()) {
+  llmModel = process.env.TESTRONAUT_MODEL.trim();
+}
+
+
 const report = {
   runId,
   startTime: startTime.toISOString(),
   endTime: endTime.toISOString(),
+  llm: {
+    provider: llmProvider,
+    model: llmModel,
+  },
   summary: {
     totalMissions: flatMissions.length,
     passed: flatMissions.filter(m => m.status === 'passed').length,

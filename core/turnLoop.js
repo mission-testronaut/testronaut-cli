@@ -11,8 +11,15 @@ import {
   tokenEstimate, 
   tokenUseCoolOff, 
   recordTokenUsage, 
-  pruneOldTokenUsage 
+  pruneOldTokenUsage,
+  getCurrentTokenLimit,
+  updateLimitsFromHeaders
 } from '../tools/tokenControl.js';
+import { resolveModel } from '../openAI/modelResolver.js';
+
+
+const MODEL_ID = resolveModel();
+console.log(`🧠 Using OpenAI model: ${MODEL_ID}`);
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -52,7 +59,7 @@ const pushDOMAssistant = async (browser, messages, agentMemory, { skipIfLastTool
   });
 
   const domHtml = await CHROME_TOOL_MAP.get_dom(browser, { limit: 100000, exclude: true }, agentMemory);
-  await tokenEstimate('gpt-4o', domHtml);
+  await tokenEstimate( MODEL_ID, domHtml);
   // fs.writeFileSync(`missions/mission_reports/debug-expanded-${Date.now()}.html`, domHtml);
 
   messages.push({
@@ -89,7 +96,7 @@ export const turnLoop = async (
       ({ turnTimestamps, totalTokensUsed } = pruneOldTokenUsage(turnTimestamps));
 
       // Cool off check
-      ({ totalTokensUsed, turnTimestamps, shouldBackoff } = await tokenUseCoolOff(totalTokensUsed, turnTimestamps));
+      ({ totalTokensUsed, turnTimestamps, shouldBackoff } = await tokenUseCoolOff(totalTokensUsed, turnTimestamps, MODEL_ID));
       if(shouldBackoff) return await turnLoop(browser, messages, maxTurns, turn, currentStep);
 
       //Tool Validator
@@ -123,12 +130,14 @@ export const turnLoop = async (
       
 
       response = await openai.chat.completions.create({
-        model: 'gpt-4o',
+        model: MODEL_ID,
         messages,
         tools: toolsSchema,
       });
     } catch (err) {
       if (err.status === 429) {
+        // If headers include limits, learn them for this model
+        try { updateLimitsFromHeaders(MODEL_ID, err.headers || err.response?.headers || {}); } catch {}
         const delay = Math.min(60000, 2 ** retryCount * 2000);
         console.warn(`⚠️ Rate limited. Retrying in ${delay / 1000}s... (retry ${retryCount + 1})`);
         await wait(delay);
@@ -248,7 +257,7 @@ export const turnLoop = async (
             exclude: true,
             focus: [],
           }, agentMemory);
-          await tokenEstimate('gpt-4o', domHtml);
+          await tokenEstimate(MODEL_ID, domHtml);
           await pushDOMAssistant(browser, messages, agentMemory, {
             skipIfLastTool: ['get_dom', 'check_text']
           });
