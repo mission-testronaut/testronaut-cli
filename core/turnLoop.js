@@ -180,10 +180,14 @@ export const turnLoop = async (
     
     const msg = response.choices[0].message;
 
-    const planLine = summarizeTurnIntentFromMessage(msg);
-    currentStep.summary = planLine;
-    currentStep.events.unshift(`📝 Plan: ${planLine}`);
-    console.log(`📝 Plan: ${planLine}`);
+    // Plain (no emoji) for storage:
+    const planPlain  = summarizeTurnIntentFromMessage(msg, { emoji: true });
+    // Emoji (toggleable) for console/event log:
+    const planDisplay = summarizeTurnIntentFromMessage(msg, { /* emoji default via env */ });
+
+    currentStep.summary = planPlain; // stored in JSON
+    currentStep.events.unshift(`📝 Plan: ${planDisplay}`);
+    console.log(`📝 Plan: ${planDisplay}`);
 
     if (msg.tool_calls?.length) {
       console.log('Processing tool calls...');
