@@ -16,6 +16,8 @@ import {
   updateLimitsFromHeaders
 } from '../tools/tokenControl.js';
 import { resolveModel } from '../openAI/modelResolver.js';
+import { summarizeTurnIntentFromMessage } from './turnIntent.js';
+import { redactArgs } from './redaction.js';
 
 
 const MODEL_ID = resolveModel();
@@ -178,6 +180,11 @@ export const turnLoop = async (
     
     const msg = response.choices[0].message;
 
+    const planLine = summarizeTurnIntentFromMessage(msg);
+    currentStep.summary = planLine;
+    currentStep.events.unshift(`📝 Plan: ${planLine}`);
+    console.log(`📝 Plan: ${planLine}`);
+
     if (msg.tool_calls?.length) {
       console.log('Processing tool calls...');
       const toolResponses = [];
@@ -187,8 +194,9 @@ export const turnLoop = async (
         const fnName = call.function.name;
         lastToolName = fnName;
         const args = JSON.parse(call.function.arguments || '{}');
-        console.log(`[model] → ${fnName}`, args);
-        currentStep.events.push(`[model] → ${fnName} ${args}`);
+        const safeArgs = redactArgs(fnName, args);
+        console.log(`[model] → ${fnName}`, safeArgs);
+        currentStep.events.push(`[model] → ${fnName} ${safeArgs}`);
         // console.log('Calling tool:', fnName);
         let result;
         let errorMessage = null;
