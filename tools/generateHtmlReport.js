@@ -13,6 +13,7 @@ export function generateHtmlReport(report, outputPath) {
   const esc = (s) => String(s ?? '')
     .replace(/&/g, '&amp;').replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
+  const escAttr = (s) => esc(s).replace(/"/g, '&quot;'); // for HTML attributes
   const badge = (status) =>
     status === 'passed' ? '✅ Passed' :
     status === 'failed' ? '❌ Failed' : (status || '—');
@@ -31,10 +32,18 @@ export function generateHtmlReport(report, outputPath) {
         ? `<img src="${esc(step.screenshotPath)}" alt="screenshot turn ${esc(step.turn ?? idx)}">`
         : '';
 
+      const plan = (typeof step.summary === 'string' && step.summary.trim())
+        ? step.summary.trim()
+        : '';
+      const planSpan = plan
+        ? `<span class="plan" title="${escAttr(plan)}">${esc(plan)}</span>`
+        : '';
+
       return `
         <details class="step" ${ok ? '' : 'open'}>
           <summary>
             <span class="turn">Turn ${esc((step.turn ?? idx) + 1)}</span>
+            ${planSpan}
             <span class="step-result ${ok ? 'ok' : 'bad'}">${esc(step.result || '—')}</span>
             <span class="tokens">tokens: ${esc(step.tokensUsed ?? '—')} / total: ${esc(step.totalTokensUsed ?? '—')}</span>
           </summary>
@@ -210,6 +219,10 @@ export function generateHtmlReport(report, outputPath) {
     .step summary:hover{ background: rgba(255,255,255,.08); }
 
     .turn{ font-weight:700; }
+    .plan{
+      flex:1; color: var(--text-muted); font-size:12px;
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    }
     .step-result.ok{ color: var(--ok); font-weight:700; }
     .step-result.bad{ color: var(--bad); font-weight:700; }
     .tokens{ color: var(--text-muted); font-size:12px; margin-left:auto; font-variant-numeric: tabular-nums; }
