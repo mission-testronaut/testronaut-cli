@@ -1,6 +1,6 @@
 {
   "name": "testronaut",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "main": "./runner/testronaut.js",
   "bin": {
     "testronaut": "./bin/cli.js"
@@ -12,7 +12,8 @@
   },
   "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "start": "node ./bin/cli.js"
   },
   "author": "",
@@ -20,6 +21,7 @@
   "description": "",
   "dependencies": {
     "@dqbd/tiktoken": "^1.0.21",
+    "@google/generative-ai": "^0.24.1",
     "cheerio": "^1.1.0",
     "dotenv": "^17.2.0",
     "inquirer": "^12.9.1",
@@ -34,5 +36,9 @@
     "automation",
     "node",
     "qa"
-  ]
+  ],
+  "devDependencies": {
+    "@types/node": "^24.9.1",
+    "vitest": "^4.0.1"
+  }
 }
