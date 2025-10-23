@@ -15,7 +15,7 @@ import {
   updateLimitsFromHeaders
 } from '../tools/tokenControl.js';
 import { resolveProviderModel } from '../llm/modelResolver.js';
-import { getLLM } from '../llm/index.js';
+import { getLLM } from '../llm/llmFactory.js';
 import { summarizeTurnIntentFromMessage } from './turnIntent.js';
 import { redactArgs } from './redaction.js';
 
