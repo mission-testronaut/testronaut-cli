@@ -1,4 +1,3 @@
-import OpenAI from 'openai';
 import toolsSchema from '../tools/toolSchema.js';
 import { CHROME_TOOL_MAP } from '../tools/chromeBrowser.js';
 import fs from 'fs';
@@ -15,15 +14,15 @@ import {
   getCurrentTokenLimit,
   updateLimitsFromHeaders
 } from '../tools/tokenControl.js';
-import { resolveModel } from '../openAI/modelResolver.js';
+import { resolveProviderModel } from '../llm/modelResolver.js';
+import { getLLM } from '../llm/index.js';
 import { summarizeTurnIntentFromMessage } from './turnIntent.js';
 import { redactArgs } from './redaction.js';
 
+const { provider: PROVIDER_ID, model: MODEL_ID } = resolveProviderModel();
+console.log(`🧠 Using LLM → provider: ${PROVIDER_ID}, model: ${MODEL_ID}`);
 
-const MODEL_ID = resolveModel();
-console.log(`🧠 Using OpenAI model: ${MODEL_ID}`);
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const llm = getLLM(PROVIDER_ID);
 
 let totalTokensUsed = 0;
 let turnTimestamps = [];
@@ -46,6 +45,7 @@ const pushDOMAssistant = async (browser, messages, agentMemory, { skipIfLastTool
 
   const domCallId = `get_dom_${Date.now()}`;
 
+  // Inject an assistant tool call (OpenAI-like shape)
   messages.push({
     role: 'assistant',
     tool_calls: [
@@ -61,8 +61,7 @@ const pushDOMAssistant = async (browser, messages, agentMemory, { skipIfLastTool
   });
 
   const domHtml = await CHROME_TOOL_MAP.get_dom(browser, { limit: 100000, exclude: true }, agentMemory);
-  await tokenEstimate( MODEL_ID, domHtml);
-  // fs.writeFileSync(`missions/mission_reports/debug-expanded-${Date.now()}.html`, domHtml);
+  await tokenEstimate(MODEL_ID, domHtml);
 
   messages.push({
     role: 'tool',
@@ -71,7 +70,7 @@ const pushDOMAssistant = async (browser, messages, agentMemory, { skipIfLastTool
     type: 'function',
     content: typeof domHtml === 'string' ? domHtml : JSON.stringify(domHtml),
   });
-}
+};
 
 export const turnLoop = async (
   browser, 
@@ -80,33 +79,28 @@ export const turnLoop = async (
   currentTurn = 0, 
   retryCount = 0, 
   currentStep = {},
-  ctx = {} // 👈 { steps, missionName }
+  ctx = {} // { steps, missionName }
 ) => {
   const { steps = [], missionName } = ctx;
-  let agentMemory = {
-    lastMenuExpanded: false
-  };
+  let agentMemory = { lastMenuExpanded: false };
   
   for (let turn = currentTurn; turn < maxTurns; turn++) {
     console.log(`\n🔄 Turn ${turn + 1}/${maxTurns}`);
     let response;
-    // const currentStep = { turn, events: [], result: '🟡 In Progress' };
-    const currentStep = { turn, events: [], result: '🟡 In Progress', missionName }; // 👈 tag it
-    try {
+    const step = { turn, events: [], result: '🟡 In Progress', missionName };
 
-      // Recalculate the rolling window before checking cooldown
+    try {
       ({ turnTimestamps, totalTokensUsed } = pruneOldTokenUsage(turnTimestamps));
 
-      // Cool off check
       ({ totalTokensUsed, turnTimestamps, shouldBackoff } = await tokenUseCoolOff(totalTokensUsed, turnTimestamps, MODEL_ID));
-      if(shouldBackoff) return await turnLoop(browser, messages, maxTurns, turn, currentStep);
+      if (shouldBackoff) return await turnLoop(browser, messages, maxTurns, turn, currentStep);
 
       //Tool Validator
       if (!validateAndInsertMissingToolResponses(messages, { insertPlaceholders: true })) {
         console.error('❌ Tool call structure invalid and no placeholders inserted.');
-        currentStep.events.push('❌ Tool call structure invalid and no placeholders inserted.')
-        currentStep.result = '❌ Failure';
-        steps.push(currentStep);
+        step.events.push('❌ Tool call structure invalid and no placeholders inserted.');
+        step.result = '❌ Failure';
+        steps.push(step);
         return steps;
       }
 
@@ -120,25 +114,26 @@ export const turnLoop = async (
             )
           )
       );
-      
       if (unrespondedCalls.length) {
         console.error('🛑 Detected assistant tool calls without matching tool responses:');
         console.dir(unrespondedCalls, { depth: 5 });
-        currentStep.events.push('🛑 Detected assistant tool calls without matching tool responses')
-        currentStep.result = '❌ Failure';
-        steps.push(currentStep);
+        step.events.push('🛑 Detected assistant tool calls without matching tool responses');
+        step.result = '❌ Failure';
+        steps.push(step);
         return steps;
       }
-      
 
-      response = await openai.chat.completions.create({
+      // ✅ Provider-agnostic chat
+      const { message, usage, headers } = await llm.chat({
         model: MODEL_ID,
         messages,
-        tools: toolsSchema,
+        tools: toolsSchema
       });
+
+      response = { message, usage, headers };
     } catch (err) {
       if (err.status === 429) {
-        // If headers include limits, learn them for this model
+        // Provider may expose headers; only OpenAI uses updateLimitsFromHeaders currently
         try { updateLimitsFromHeaders(MODEL_ID, err.headers || err.response?.headers || {}); } catch {}
         const delay = Math.min(60000, 2 ** retryCount * 2000);
         console.warn(`⚠️ Rate limited. Retrying in ${delay / 1000}s... (retry ${retryCount + 1})`);
@@ -146,47 +141,43 @@ export const turnLoop = async (
 
         if (retryCount >= 5) {
           console.error('❌ Too many retries. Exiting.');
-          currentStep.events.push('❌ Too many retries. Exiting.')
-          currentStep.result = '❌ Failure';
-          steps.push(currentStep);
+          step.events.push('❌ Too many retries. Exiting.');
+          step.result = '❌ Failure';
+          steps.push(step);
           return steps;
         }
-
-        return await turnLoop(browser, messages, maxTurns, turn, retryCount + 1, currentStep);
+        return await turnLoop(browser, messages, maxTurns, turn, retryCount + 1, step);
       } else if (err.status === 400) {
         console.error('❌ Bad request:', err.message);
-        // console.log("current tools", toolsSchema);
-        // console.log("messages: ", messages)
-        currentStep.events.push(`❌ Bad request: ${err.message}`)
-        currentStep.result = '❌ Failure';
-        steps.push(currentStep);
+        step.events.push(`❌ Bad request: ${err.message}`);
+        step.result = '❌ Failure';
+        steps.push(step);
         return steps;
       } else {
         throw err;
       }
     }
-    console.log('Response received from OpenAI');
+
+    console.log(`Response received from ${PROVIDER_ID}`);
+
+    // Usage accounting (normalized)
     const usage = response.usage;
     if (usage) {
       const tokensUsed = usage.total_tokens || 0;
       console.log(`📊 Token Usage This Turn → Total: ${tokensUsed}`);
-      currentStep.tokensUsed = tokensUsed;
+      step.tokensUsed = tokensUsed;
       recordTokenUsage(turnTimestamps, tokensUsed);
       ({ turnTimestamps, totalTokensUsed } = pruneOldTokenUsage(turnTimestamps));
-
       console.log(`📈 Running Total Tokens Used (Rolling 60s): ${totalTokensUsed}`);
-      currentStep.totalTokensUsed = totalTokensUsed;
+      step.totalTokensUsed = totalTokensUsed;
     }
     
-    const msg = response.choices[0].message;
+    const msg = response.message ?? { role: 'assistant', content: '' };
 
-    // Plain (no emoji) for storage:
     const planPlain  = summarizeTurnIntentFromMessage(msg, { emoji: true });
-    // Emoji (toggleable) for console/event log:
-    const planDisplay = summarizeTurnIntentFromMessage(msg, { /* emoji default via env */ });
-
-    currentStep.summary = planPlain; // stored in JSON
-    currentStep.events.unshift(`📝 Plan: ${planDisplay}`);
+    const planDisplay = summarizeTurnIntentFromMessage(msg, {});
+    step.summary = planPlain;
+    step.events.unshift(`📝 Plan: ${planDisplay}`);
     console.log(`📝 Plan: ${planDisplay}`);
 
     if (msg.tool_calls?.length) {
@@ -200,55 +191,48 @@ export const turnLoop = async (
         const args = JSON.parse(call.function.arguments || '{}');
         const safeArgs = redactArgs(fnName, args);
         console.log(`[model] → ${fnName}`, safeArgs);
-        currentStep.events.push(`[model] → ${fnName} ${safeArgs}`);
-        // console.log('Calling tool:', fnName);
+        step.events.push(`[model] → ${fnName} ${safeArgs}`);
+
         let result;
         let errorMessage = null;
         try {
-          // console.log("agentMemory: ", agentMemory);
-          result = await CHROME_TOOL_MAP[fnName](browser, args, agentMemory);
-
-          if (typeof result !== 'string') {
-            result = JSON.stringify(result ?? '');
-          }
-        } catch (err) {
-          errorMessage = `ERROR: ${err.message}`;
+          result = await CHROME_TOOL_MAP[fnName](browser, args, /*agentMemory*/ { lastMenuExpanded: false });
+          if (typeof result !== 'string') result = JSON.stringify(result ?? '');
+        } catch (e) {
+          errorMessage = `ERROR: ${e.message}`;
           result = errorMessage;
         }
 
-        // ------ Capture file upload/download events for mission report ------
+        // file event capture (unchanged)
         try {
           const maybeJson = JSON.parse(result);
           if (maybeJson && maybeJson._testronaut_file_event) {
-            currentStep.files = currentStep.files || [];
-            currentStep.files.push(maybeJson);
-
+            step.files = step.files || [];
+            step.files.push(maybeJson);
             if (maybeJson._testronaut_file_event === 'upload') {
               const msgLine = `📤 Uploaded "${maybeJson.fileName}" (${formatBytes(maybeJson.bytes)}) via ${maybeJson.method}`;
-              currentStep.events.push(msgLine);
-              console.log(msgLine);
+              step.events.push(msgLine); console.log(msgLine);
             } else if (maybeJson._testronaut_file_event === 'download') {
               const msgLine = `📥 Downloaded "${maybeJson.fileName}" (${formatBytes(maybeJson.bytes)}) via ${maybeJson.mode}`;
-              currentStep.events.push(msgLine);
-              console.log(msgLine);
+              step.events.push(msgLine); console.log(msgLine);
             }
           }
-        } catch { /* not JSON / ignore */ }
+        } catch { /* ignore */ }
 
         console.log(`[tool ] ← ${fnName} result:`, errorMessage ? '❌ Failed' : '✅ Success');
-        currentStep.events.push(`[tool ] ← ${fnName} result: ${errorMessage ? '❌ Failed' : '✅ Success'}`)
+        step.events.push(`[tool ] ← ${fnName} result: ${errorMessage ? '❌ Failed' : '✅ Success'}`);
         const truncated = result.length > 100 ? result.slice(0, 100) + '…' : result;
         console.log(`[tool ] ← ${truncated}`);
+        step.events.push(`[tool ] ← ${truncated}`);
 
         if (fnName === 'screenshot') {
           const match = result.match(/screenshot.*?saved at: (.+\.png)/i);
           if (match && match[1]) {
-            currentStep.screenshotPath = match[1];
-            currentStep.events.push(`🖼️ Screenshot captured: ${match[1]}`);
+            step.screenshotPath = match[1];
+            step.events.push(`🖼️ Screenshot captured: ${match[1]}`);
           }
         }
         
-        currentStep.events.push(`[tool ] ← ${truncated}`)
         toolResponses.push({
           role: 'tool',
           tool_call_id: call.id,
@@ -257,47 +241,33 @@ export const turnLoop = async (
           content: result,
         });
 
-        if (fnName === 'expand_menu') {
-          agentMemory.lastMenuExpanded = true;
-        }
-        
-        if (fnName === 'click_text' || fnName === 'click' || fnName === 'expand_menu') {
-          console.log(`[auto] → Injecting DOM after menu expand...`);
-          currentStep.events.push(`[auto] → Injecting DOM after menu expand...`);
-          const domHtml = await CHROME_TOOL_MAP.get_dom(browser, {
-            limit: 100000,
-            exclude: true,
-            focus: [],
-          }, agentMemory);
+        if (['click_text', 'click', 'expand_menu'].includes(fnName)) {
+          console.log(`[auto] → Injecting DOM after ${fnName}...`);
+          step.events.push(`[auto] → Injecting DOM after ${fnName}...`);
+          const domHtml = await CHROME_TOOL_MAP.get_dom(browser, { limit: 100000, exclude: true, focus: [] }, { lastMenuExpanded: fnName === 'expand_menu' });
           await tokenEstimate(MODEL_ID, domHtml);
-          await pushDOMAssistant(browser, messages, agentMemory, {
-            skipIfLastTool: ['get_dom', 'check_text']
-          });
+          await pushDOMAssistant(browser, messages, { lastMenuExpanded: fnName === 'expand_menu' }, { skipIfLastTool: ['get_dom', 'check_text'] });
           console.log(`[auto] → DOM size after ${fnName}: ${domHtml.length} chars`);
-          currentStep.events.push(`[auto] → DOM size after ${fnName}: ${domHtml.length} chars`)
+          step.events.push(`[auto] → DOM size after ${fnName}: ${domHtml.length} chars`);
         }
-        
       }
+
       messages.push(msg, ...toolResponses);
-      currentStep.result = '✅ Passed';
-      steps.push(currentStep);
+      step.result = '✅ Passed';
+      steps.push(step);
       continue;
     }
 
     const finalResponse = finalResponseHandler(msg);
     if (finalResponse !== null) {
-      currentStep.events.push(finalResponse.finalMessage);
-      currentStep.result = finalResponse.success ? '✅ Mission Success': '❌ Mission Failure';
-      steps.push(currentStep);
+      step.events.push(finalResponse.finalMessage);
+      step.result = finalResponse.success ? '✅ Mission Success' : '❌ Mission Failure';
+      steps.push(step);
       return { success: finalResponse.finalMessage, steps };
     }
 
-
-    await pushDOMAssistant(browser, messages, agentMemory,{
-      skipIfLastTool: ['get_dom', 'check_text']
-    });
-
+    await pushDOMAssistant(browser, messages, { lastMenuExpanded: false }, { skipIfLastTool: ['get_dom', 'check_text'] });
     console.log(`[auto] → Injected DOM for next reasoning step`);
-    currentStep.events.push(`[auto] → Injected DOM for next reasoning step`)
+    step.events.push(`[auto] → Injected DOM for next reasoning step`);
   }
-}
+};
