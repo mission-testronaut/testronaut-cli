@@ -104,7 +104,7 @@ if (args.includes('--init')) {
 
 Next steps:
   1. Get an API key from your AI provider
-  2. Add it to your .env file as OPENAI_API_KEY
+  2. Add it to your .env file
   3. Run your first mission:
        npx testronaut
 

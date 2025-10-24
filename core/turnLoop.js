@@ -1,3 +1,33 @@
+/**
+ * turnLoop.js
+ * ------------
+ * Purpose:
+ *   Core execution loop for Testronaut's autonomous agent testing framework.
+ *   Handles reasoning turns, model responses, tool execution, DOM updates,
+ *   backoff logic, and final mission success/failure detection.
+ *
+ * Responsibilities:
+ *   - Coordinate between browser (Playwright/Puppeteer) and chosen LLM.
+ *   - Maintain conversation history and agent "memory" between turns.
+ *   - Detect and execute tool/function calls emitted by the model.
+ *   - Track and enforce token-per-minute rate limits with adaptive cooldowns.
+ *   - Handle DOM re-injection after browser actions to support reasoning continuity.
+ *   - Summarize each turn’s intent and record detailed step logs.
+ *
+ * Related tests:
+ *   Located in `tests/turnLoopTests/`
+ *   (see integration tests covering multi-turn reasoning, tool calling, and backoff).
+ *
+ * Used by:
+ *   - CLI mission runners (`missionRunner.js`, `runMission.js`)
+ *   - Autonomous agent framework during mission playback.
+ *
+ * Notes:
+ *   - Provider-agnostic: routes all LLM calls through the `llmFactory` adapter layer.
+ *   - OpenAI and Gemini both normalize responses to an OpenAI-like message format.
+ *   - Token control is model-sensitive but provider-neutral.
+ */
+
 import toolsSchema from '../tools/toolSchema.js';
 import { CHROME_TOOL_MAP } from '../tools/chromeBrowser.js';
 import fs from 'fs';
@@ -11,7 +41,6 @@ import {
   tokenUseCoolOff, 
   recordTokenUsage, 
   pruneOldTokenUsage,
-  getCurrentTokenLimit,
   updateLimitsFromHeaders
 } from '../tools/tokenControl.js';
 import { resolveProviderModel } from '../llm/modelResolver.js';
@@ -19,16 +48,24 @@ import { getLLM } from '../llm/llmFactory.js';
 import { summarizeTurnIntentFromMessage } from './turnIntent.js';
 import { redactArgs } from './redaction.js';
 
+// ─────────────────────────────────────────────
+// STEP 0: Resolve provider + model and initialize adapter
+// ─────────────────────────────────────────────
 const { provider: PROVIDER_ID, model: MODEL_ID } = resolveProviderModel();
 console.log(`🧠 Using LLM → provider: ${PROVIDER_ID}, model: ${MODEL_ID}`);
 
 const llm = getLLM(PROVIDER_ID);
 
+// Rolling token counters used for self-throttling
 let totalTokensUsed = 0;
 let turnTimestamps = [];
 let shouldBackoff;
 let steps = [];
 
+/**
+ * Utility: format byte counts into human-readable strings.
+ * Used when reporting upload/download events in mission logs.
+ */
 function formatBytes(n) {
   if (!Number.isFinite(n)) return `${n}`;
   const u = ['B','KB','MB','GB','TB'];
@@ -37,7 +74,17 @@ function formatBytes(n) {
   return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${u[i]}`;
 }
 
+/**
+ * Pushes a new "get_dom" tool call and result pair into the message history.
+ * This keeps the model updated on the browser's DOM after actions like click/expand.
+ *
+ * @param {object} browser - The browser automation instance.
+ * @param {array} messages - The running conversation message array.
+ * @param {object} agentMemory - Memory object storing recent agent state.
+ * @param {{skipIfLastTool?: string[]}} opts - Optional tool skip conditions.
+ */
 const pushDOMAssistant = async (browser, messages, agentMemory, { skipIfLastTool } = {}) => {
+  // Avoid redundant DOM pushes immediately following tools that already include DOM context.
   if (skipIfLastTool && skipIfLastTool.includes(messages.at(-1)?.name)) {
     console.log(`[skip] Skipping DOM push after redundant tool: ${messages.at(-1)?.name}`);
     return;
@@ -45,7 +92,7 @@ const pushDOMAssistant = async (browser, messages, agentMemory, { skipIfLastTool
 
   const domCallId = `get_dom_${Date.now()}`;
 
-  // Inject an assistant tool call (OpenAI-like shape)
+  // Inject a synthetic assistant tool call
   messages.push({
     role: 'assistant',
     tool_calls: [
@@ -63,6 +110,7 @@ const pushDOMAssistant = async (browser, messages, agentMemory, { skipIfLastTool
   const domHtml = await CHROME_TOOL_MAP.get_dom(browser, { limit: 100000, exclude: true }, agentMemory);
   await tokenEstimate(MODEL_ID, domHtml);
 
+  // Push the corresponding tool response back into the conversation
   messages.push({
     role: 'tool',
     tool_call_id: domCallId,
@@ -72,6 +120,22 @@ const pushDOMAssistant = async (browser, messages, agentMemory, { skipIfLastTool
   });
 };
 
+/**
+ * Main turn loop driver.
+ *
+ * Runs the agent through iterative reasoning turns until:
+ * - Max turn count is reached, or
+ * - The model emits a "final" message (success/failure).
+ *
+ * @param {object} browser - Browser automation interface (Playwright/Puppeteer).
+ * @param {array} messages - Conversation messages so far.
+ * @param {number} maxTurns - Maximum allowed reasoning turns.
+ * @param {number} currentTurn - Turn index to start from (default 0).
+ * @param {number} retryCount - Internal retry counter for rate limiting.
+ * @param {object} currentStep - Step data being populated for the current turn.
+ * @param {object} ctx - Shared context (steps array, mission name).
+ * @returns {Promise<object[]>} - Collected step results or final success message.
+ */
 export const turnLoop = async (
   browser, 
   messages, 
@@ -84,18 +148,24 @@ export const turnLoop = async (
   const { steps = [], missionName } = ctx;
   let agentMemory = { lastMenuExpanded: false };
   
+  // ─────────────────────────────────────────────
+  // STEP 1: Begin reasoning cycle
+  // ─────────────────────────────────────────────
   for (let turn = currentTurn; turn < maxTurns; turn++) {
     console.log(`\n🔄 Turn ${turn + 1}/${maxTurns}`);
     let response;
     const step = { turn, events: [], result: '🟡 In Progress', missionName };
 
     try {
+      // Refresh token usage window (rolling 60 seconds)
       ({ turnTimestamps, totalTokensUsed } = pruneOldTokenUsage(turnTimestamps));
 
-      ({ totalTokensUsed, turnTimestamps, shouldBackoff } = await tokenUseCoolOff(totalTokensUsed, turnTimestamps, MODEL_ID));
+      // Adaptive cooldown if nearing provider rate limit
+      ({ totalTokensUsed, turnTimestamps, shouldBackoff } =
+        await tokenUseCoolOff(totalTokensUsed, turnTimestamps, MODEL_ID));
       if (shouldBackoff) return await turnLoop(browser, messages, maxTurns, turn, currentStep);
 
-      //Tool Validator
+      // Verify message structure integrity before requesting next model step
       if (!validateAndInsertMissingToolResponses(messages, { insertPlaceholders: true })) {
         console.error('❌ Tool call structure invalid and no placeholders inserted.');
         step.events.push('❌ Tool call structure invalid and no placeholders inserted.');
@@ -104,6 +174,7 @@ export const turnLoop = async (
         return steps;
       }
 
+      // Detect orphaned assistant tool calls with no matching tool responses
       const unrespondedCalls = messages.filter(
         (msg, i) =>
           msg.role === 'assistant' &&
@@ -123,17 +194,21 @@ export const turnLoop = async (
         return steps;
       }
 
-      // ✅ Provider-agnostic chat
+      // ─────────────────────────────────────────────
+      // STEP 2: Request next reasoning turn from model
+      // ─────────────────────────────────────────────
       const { message, usage, headers } = await llm.chat({
         model: MODEL_ID,
         messages,
-        tools: toolsSchema
+        tools: toolsSchema,
       });
-
       response = { message, usage, headers };
+
     } catch (err) {
+      // ─────────────────────────────────────────────
+      // STEP 3: Error and rate-limit handling
+      // ─────────────────────────────────────────────
       if (err.status === 429) {
-        // Provider may expose headers; only OpenAI uses updateLimitsFromHeaders currently
         try { updateLimitsFromHeaders(MODEL_ID, err.headers || err.response?.headers || {}); } catch {}
         const delay = Math.min(60000, 2 ** retryCount * 2000);
         console.warn(`⚠️ Rate limited. Retrying in ${delay / 1000}s... (retry ${retryCount + 1})`);
@@ -158,9 +233,10 @@ export const turnLoop = async (
       }
     }
 
+    // ─────────────────────────────────────────────
+    // STEP 4: Process model response
+    // ─────────────────────────────────────────────
     console.log(`Response received from ${PROVIDER_ID}`);
-
-    // Usage accounting (normalized)
     const usage = response.usage;
     if (usage) {
       const tokensUsed = usage.total_tokens || 0;
@@ -171,23 +247,25 @@ export const turnLoop = async (
       console.log(`📈 Running Total Tokens Used (Rolling 60s): ${totalTokensUsed}`);
       step.totalTokensUsed = totalTokensUsed;
     }
-    
+
     const msg = response.message ?? { role: 'assistant', content: '' };
 
-    const planPlain  = summarizeTurnIntentFromMessage(msg, { emoji: true });
-    const planDisplay = summarizeTurnIntentFromMessage(msg, {});
+    // Summarize model’s plan for the turn (plain + emoji variants)
+    const planPlain = summarizeTurnIntentFromMessage(msg, { emoji: true });
+    const planDisplay = summarizeTurnIntentFromMessage(msg);
     step.summary = planPlain;
     step.events.unshift(`📝 Plan: ${planDisplay}`);
     console.log(`📝 Plan: ${planDisplay}`);
 
+    // ─────────────────────────────────────────────
+    // STEP 5: Handle tool/function calls
+    // ─────────────────────────────────────────────
     if (msg.tool_calls?.length) {
       console.log('Processing tool calls...');
       const toolResponses = [];
-      let lastToolName = null;
 
       for (const call of msg.tool_calls) {
         const fnName = call.function.name;
-        lastToolName = fnName;
         const args = JSON.parse(call.function.arguments || '{}');
         const safeArgs = redactArgs(fnName, args);
         console.log(`[model] → ${fnName}`, safeArgs);
@@ -196,35 +274,33 @@ export const turnLoop = async (
         let result;
         let errorMessage = null;
         try {
-          result = await CHROME_TOOL_MAP[fnName](browser, args, /*agentMemory*/ { lastMenuExpanded: false });
+          result = await CHROME_TOOL_MAP[fnName](browser, args, agentMemory);
           if (typeof result !== 'string') result = JSON.stringify(result ?? '');
         } catch (e) {
           errorMessage = `ERROR: ${e.message}`;
           result = errorMessage;
         }
 
-        // file event capture (unchanged)
+        // Capture and log any file upload/download events
         try {
           const maybeJson = JSON.parse(result);
           if (maybeJson && maybeJson._testronaut_file_event) {
             step.files = step.files || [];
             step.files.push(maybeJson);
-            if (maybeJson._testronaut_file_event === 'upload') {
-              const msgLine = `📤 Uploaded "${maybeJson.fileName}" (${formatBytes(maybeJson.bytes)}) via ${maybeJson.method}`;
-              step.events.push(msgLine); console.log(msgLine);
-            } else if (maybeJson._testronaut_file_event === 'download') {
-              const msgLine = `📥 Downloaded "${maybeJson.fileName}" (${formatBytes(maybeJson.bytes)}) via ${maybeJson.mode}`;
-              step.events.push(msgLine); console.log(msgLine);
-            }
+            const msgLine = maybeJson._testronaut_file_event === 'upload'
+              ? `📤 Uploaded "${maybeJson.fileName}" (${formatBytes(maybeJson.bytes)}) via ${maybeJson.method}`
+              : `📥 Downloaded "${maybeJson.fileName}" (${formatBytes(maybeJson.bytes)}) via ${maybeJson.mode}`;
+            step.events.push(msgLine);
+            console.log(msgLine);
           }
-        } catch { /* ignore */ }
+        } catch { /* non-JSON results ignored */ }
 
         console.log(`[tool ] ← ${fnName} result:`, errorMessage ? '❌ Failed' : '✅ Success');
-        step.events.push(`[tool ] ← ${fnName} result: ${errorMessage ? '❌ Failed' : '✅ Success'}`);
         const truncated = result.length > 100 ? result.slice(0, 100) + '…' : result;
-        console.log(`[tool ] ← ${truncated}`);
+        step.events.push(`[tool ] ← ${fnName} result: ${errorMessage ? '❌ Failed' : '✅ Success'}`);
         step.events.push(`[tool ] ← ${truncated}`);
 
+        // Screenshot detection
         if (fnName === 'screenshot') {
           const match = result.match(/screenshot.*?saved at: (.+\.png)/i);
           if (match && match[1]) {
@@ -232,7 +308,8 @@ export const turnLoop = async (
             step.events.push(`🖼️ Screenshot captured: ${match[1]}`);
           }
         }
-        
+
+        // Push corresponding tool message back to LLM
         toolResponses.push({
           role: 'tool',
           tool_call_id: call.id,
@@ -241,23 +318,34 @@ export const turnLoop = async (
           content: result,
         });
 
+        // After interactive DOM actions, refresh model context
         if (['click_text', 'click', 'expand_menu'].includes(fnName)) {
           console.log(`[auto] → Injecting DOM after ${fnName}...`);
           step.events.push(`[auto] → Injecting DOM after ${fnName}...`);
-          const domHtml = await CHROME_TOOL_MAP.get_dom(browser, { limit: 100000, exclude: true, focus: [] }, { lastMenuExpanded: fnName === 'expand_menu' });
+          const domHtml = await CHROME_TOOL_MAP.get_dom(browser, {
+            limit: 100000,
+            exclude: true,
+            focus: [],
+          }, agentMemory);
           await tokenEstimate(MODEL_ID, domHtml);
-          await pushDOMAssistant(browser, messages, { lastMenuExpanded: fnName === 'expand_menu' }, { skipIfLastTool: ['get_dom', 'check_text'] });
+          await pushDOMAssistant(browser, messages, agentMemory, {
+            skipIfLastTool: ['get_dom', 'check_text'],
+          });
           console.log(`[auto] → DOM size after ${fnName}: ${domHtml.length} chars`);
           step.events.push(`[auto] → DOM size after ${fnName}: ${domHtml.length} chars`);
         }
       }
 
+      // Merge new assistant + tool responses back into conversation
       messages.push(msg, ...toolResponses);
       step.result = '✅ Passed';
       steps.push(step);
       continue;
     }
 
+    // ─────────────────────────────────────────────
+    // STEP 6: Detect final mission state
+    // ─────────────────────────────────────────────
     const finalResponse = finalResponseHandler(msg);
     if (finalResponse !== null) {
       step.events.push(finalResponse.finalMessage);
@@ -266,7 +354,12 @@ export const turnLoop = async (
       return { success: finalResponse.finalMessage, steps };
     }
 
-    await pushDOMAssistant(browser, messages, { lastMenuExpanded: false }, { skipIfLastTool: ['get_dom', 'check_text'] });
+    // ─────────────────────────────────────────────
+    // STEP 7: Fallback → Push DOM for next reasoning cycle
+    // ─────────────────────────────────────────────
+    await pushDOMAssistant(browser, messages, agentMemory, {
+      skipIfLastTool: ['get_dom', 'check_text'],
+    });
     console.log(`[auto] → Injected DOM for next reasoning step`);
     step.events.push(`[auto] → Injected DOM for next reasoning step`);
   }

@@ -4,7 +4,7 @@ import { openAIModels, geminiModels, isKnownModel, pickInitialIndex } from '../.
 describe('model helpers', () => {
   it('lists known models', () => {
     expect(openAIModels()).toContain('gpt-4o');
-    expect(geminiModels()).toContain('gemini-1.5-flash');
+    expect(geminiModels()).toContain('gemini-2.5-flash');
   });
 
   it('recognizes known models by provider', () => {

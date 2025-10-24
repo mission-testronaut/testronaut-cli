@@ -119,12 +119,12 @@ export async function initializeTestronautProject() {
         name: 'geminiModel',
         message: 'Select a Google Gemini model:',
         choices: [
-          { title: 'Gemini 1.5 Pro (general, high quality)', value: 'gemini-1.5-pro' },
-          { title: 'Gemini 1.5 Flash (fast, cost-efficient)', value: 'gemini-1.5-flash' },
-          { title: 'Gemini 1.5 Flash-8B (lightweight)', value: 'gemini-1.5-flash-8b' },
+          { title: 'Gemini 2.5 Pro (general, high quality)', value: 'gemini-2.5-pro' },
+          { title: 'Gemini 2.5 Flash (fast, cost-efficient)', value: 'gemini-2.5-flash' },
+          { title: 'Gemini 2.5 Flash-8B (lightweight)', value: 'gemini-2.5-flash-8b' },
         ],
         // Keep prior selection if present; default to fast/cost-effective Flash.
-        initial: pickInitialIndex(models, config.model, 'gemini-1.5-flash')
+        initial: pickInitialIndex(models, config.model, 'gemini-2.5-flash')
       });
 
       config.model = geminiModel;

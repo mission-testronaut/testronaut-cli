@@ -102,9 +102,9 @@ export function openAIModels() {
  */
 export function geminiModels() {
   return [
-    'gemini-1.5-pro',
-    'gemini-1.5-flash',
-    'gemini-1.5-flash-8b',
+    'gemini-2.5-pro',        // best reasoning, tool use
+    'gemini-2.5-flash',      // fast, cost-effective
+    'gemini-2.5-flash-lite', // lightweight / high throughput
   ];
 }
 
