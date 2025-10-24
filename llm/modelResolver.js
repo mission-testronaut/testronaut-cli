@@ -1,28 +1,46 @@
+/**
+ * modelResolver.js
+ * -----------------
+ * Purpose:
+ *   Determines which LLM provider and model Testronaut should use.
+ *   Reads from env first, then `testronaut-config.json`, then defaults.
+ *
+ * Resolution priority:
+ *   1) Env: TESTRONAUT_PROVIDER / TESTRONAUT_MODEL
+ *   2) Config file (provider + model)
+ *   3) Legacy config (model === "openai", no provider)
+ *   4) Default: { provider: "openai", model: "gpt-4o" }
+ *
+ * Related tests: tests/llmTests/modelResolver.test.js
+ * Used by: core/turnLoop.js, llm/llmFactory.js
+ */
+
 import path from 'path';
 import fs from 'fs';
 
-const root = process.cwd();
-const configPath = path.join(root, 'testronaut-config.json');
-
 /**
- * Resolves provider & model with env overrides and safe defaults.
- * Env has highest priority:
- *   - TESTRONAUT_PROVIDER
- *   - TESTRONAUT_MODEL
+ * Resolve provider & model, honoring env overrides and safe defaults.
+ * @param {{cwd?: string}} [opts] - optional current working directory override (useful in tests)
+ * @returns {{provider: string, model: string}}
  */
-export function resolveProviderModel() {
+export function resolveProviderModel(opts = {}) {
   const envProvider = process.env.TESTRONAUT_PROVIDER?.trim();
   const envModel    = process.env.TESTRONAUT_MODEL?.trim();
 
+  // 1) Env override (both provided)
   if (envProvider && envModel) {
     return { provider: envProvider, model: envModel };
   }
+
+  // 2) Config lookup (compute path at call time)
+  const root = opts.cwd || process.cwd();
+  const configPath = path.join(root, 'testronaut-config.json');
 
   try {
     if (fs.existsSync(configPath)) {
       const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
 
-      // Preferred path: explicit provider & model in config
+      // Modern config: explicit provider + model
       if (cfg?.provider && cfg?.model) {
         return {
           provider: envProvider || cfg.provider,
@@ -30,16 +48,16 @@ export function resolveProviderModel() {
         };
       }
 
-      // Back-compat: very old configs with 'openai' in model
+      // Legacy: model === "openai" and no provider
       if (!cfg?.provider && cfg?.model === 'openai') {
         return { provider: 'openai', model: envModel || 'gpt-4o' };
       }
     }
   } catch (e) {
-    console.warn('⚠️ Could not read testronaut-config.json; using default provider/model. Error:', e.message);
+    console.warn('⚠️ Could not read testronaut-config.json; using defaults. Error:', e.message);
   }
 
-  // Safe defaults
+  // 3) Defaults
   return {
     provider: envProvider || 'openai',
     model: envModel || 'gpt-4o',

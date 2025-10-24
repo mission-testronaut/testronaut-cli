@@ -15,7 +15,7 @@
  *   - Summarize each turn’s intent and record detailed step logs.
  *
  * Related tests:
- *   Located in `tests/turnLoopTests/`
+ *   Located in `tests/coreTests/`
  *   (see integration tests covering multi-turn reasoning, tool calling, and backoff).
  *
  * Used by:

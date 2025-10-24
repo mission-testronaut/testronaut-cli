@@ -1,7 +1,39 @@
+/**
+ * geminiProvider.js
+ * ------------------
+ * Purpose:
+ *   Adapter that normalizes Testronaut's OpenAI-like chat format to
+ *   Google Gemini's SDK and back. Exposes a single `chat()` method.
+ *
+ * Responsibilities:
+ *   - Convert OpenAI-like messages → Gemini "contents" (roles/parts).
+ *   - Map tool/function calling both ways:
+ *       • assistant.tool_calls → Gemini functionCall parts
+ *       • tool messages → user parts (so the model can read results)
+ *   - Return an OpenAI-like assistant message and usage metadata.
+ *
+ * Message contract (OpenAI-like, internal):
+ *   - messages: Array<{ role: 'system'|'user'|'assistant'|'tool', content?: string|Array, ... }>
+ *   - Assistant tool calls:
+ *       message.tool_calls = [{ id, type:'function', function:{ name, arguments:string }}]
+ *   - Tool messages:
+ *       { role:'tool', tool_call_id, name, type:'function', content:string }
+ *
+ * Related tests:
+ *   Located in `tests/llmTests/geminiProvider.test.js`
+ *
+ * Used by:
+ *   - llm/llmFactory.js
+ */
+
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 /**
- * Converts OpenAI-like messages to Gemini "contents"
+ * Convert OpenAI-like messages → Gemini "contents" array.
+ * - System messages are coalesced and injected as a prefix into the next user turn.
+ * - Assistant tool calls are represented as model turns with functionCall parts.
+ * - Tool results are encoded as a user turn with a JSON payload part.
+ * - Text/images are mapped to Gemini `parts` (text / inlineData).
  */
 function toGeminiContents(messages) {
   const contents = [];
@@ -9,6 +41,7 @@ function toGeminiContents(messages) {
 
   for (const m of messages) {
     if (m.role === 'system') {
+      // Collect multi-system messages; inject once on the next user message
       const sysText = Array.isArray(m.content)
         ? m.content.map(p => (typeof p === 'string' ? p : p.text || '')).join('\n')
         : (m.content || '');
@@ -16,8 +49,8 @@ function toGeminiContents(messages) {
       continue;
     }
 
+    // Assistant tool calls → Gemini functionCall parts on a model turn
     if (m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length) {
-      // Represent assistant tool calls as function calls in a model turn.
       contents.push({
         role: 'model',
         parts: m.tool_calls.map(tc => ({
@@ -30,8 +63,8 @@ function toGeminiContents(messages) {
       continue;
     }
 
+    // Tool results → encode as a user turn with a JSON part the model can parse
     if (m.role === 'tool') {
-      // Return tool results as user parts so model can consume them next turn
       const parts = [{
         text: JSON.stringify({
           _tool_result: true,
@@ -44,7 +77,7 @@ function toGeminiContents(messages) {
       continue;
     }
 
-    // Normal user/assistant text messages
+    // Normal user/assistant content (text and/or images)
     const baseParts = [];
     const asArray = Array.isArray(m.content) ? m.content : [{ type: 'text', text: m.content }];
     for (const p of asArray) {
@@ -60,7 +93,7 @@ function toGeminiContents(messages) {
       }
     }
 
-    // Include system prefix on the first user turn after system
+    // Include system prefix exactly once on the first user turn after system
     if (systemPrefix && m.role === 'user') {
       baseParts.unshift({ text: `[system]\n${systemPrefix}` });
       systemPrefix = '';
@@ -77,11 +110,12 @@ function safeJsonParse(s) {
 }
 
 /**
- * Converts Gemini response to OpenAI-like assistant message
+ * Convert a Gemini candidate → OpenAI-like assistant message.
+ * - Collects text parts into `content`.
+ * - Translates functionCall parts into `tool_calls`.
  */
 function fromGeminiCandidate(cand) {
   const parts = cand?.content?.parts ?? [];
-  // Tool calls appear as functionCall parts; text parts as .text
   const tool_calls = [];
   const texts = [];
 
@@ -115,23 +149,26 @@ export class GeminiProvider {
   }
 
   /**
+   * Execute a chat turn via Gemini and normalize the response.
    * @param {{model:string, messages:any[], tools?:any[]}} params
    * @returns {Promise<{message:any, usage?:{total_tokens?:number, providerRaw?:any}}>}
    */
   async chat({ model, messages, tools }) {
+    // Map OpenAI-like tool schema → Gemini functionDeclarations
     const genTools = tools?.length
-      ? [{ functionDeclarations: tools.map(t => ({
+      ? [{
+          functionDeclarations: tools.map(t => ({
             name: t.function?.name ?? t.name,
             description: t.description ?? '',
             parameters: t.function?.parameters ?? t.parameters ?? {}, // JSON schema
-          }))
+          })),
         }]
       : undefined;
 
     const gmodel = this.client.getGenerativeModel({
       model,
       tools: genTools,
-      generationConfig: {}, // temperature handled upstream if needed
+      generationConfig: {}, // temperature/topP can be added upstream if needed
     });
 
     const contents = toGeminiContents(messages);

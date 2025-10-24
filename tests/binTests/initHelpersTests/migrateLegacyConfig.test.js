@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { migrateLegacyConfig } from '../../bin/initHelpers';
+import { migrateLegacyConfig } from '../../../bin/initHelpers';
 
 describe('migrateLegacyConfig', () => {
   it('sets provider=openai when model=openai and provider is missing', () => {

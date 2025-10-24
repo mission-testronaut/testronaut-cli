@@ -13,7 +13,7 @@
  *   - Accept provider headers (e.g., OpenAI) to update live TPM caps.
  *
  * Related tests:
- *   Located in `tests/tokenControlTests/`
+ *   Located in `tests/toolsTests/`
  *
  * Used by:
  *   - core/turnLoop.js (rate limiting & accounting)

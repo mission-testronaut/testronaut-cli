@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { openAIModels, geminiModels, isKnownModel, pickInitialIndex } from '../../bin/initHelpers';
+import { openAIModels, geminiModels, isKnownModel, pickInitialIndex } from '../../../bin/initHelpers';
 
 describe('model helpers', () => {
   it('lists known models', () => {

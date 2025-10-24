@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { defaultConfig } from '../../bin/initHelpers';
+import { defaultConfig } from '../../../bin/initHelpers';
 
 describe('defaultConfig', () => {
   it('creates sane defaults', () => {

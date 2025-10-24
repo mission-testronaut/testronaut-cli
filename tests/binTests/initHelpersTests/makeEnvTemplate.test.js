@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { makeEnvTemplate } from '../../bin/initHelpers';
+import { makeEnvTemplate } from '../../../bin/initHelpers';
 
 describe('makeEnvTemplate', () => {
   it('returns OpenAI template', () => {

@@ -11,7 +11,7 @@
  *   - All logic easily testable via Vitest
  *
  * Related tests:
- *   Located in `tests/initHelpersTests/`
+ *   Located in `tests/binTests/`
  *   Each helper has corresponding unit tests (e.g., `migrateLegacyConfig.test.js`,
  *   `makeEnvTemplate.test.js`, `pickInitialIndex.test.js`) that validate expected
  *   behavior and regression safety.
