@@ -13,7 +13,36 @@ function pickArg(args, keys) {
   return null;
 }
 
-export function summarizeToolCall(fnName, args = {}) {
+// core/turnIntent.js
+const ICONS = {
+  navigate: '🧭',
+  click_text: '🖱️',
+  click: '🖱️',
+  type: '⌨️',
+  fill: '⌨️',
+  press: '⌨️',
+  hover: '🪄',
+  wait_for_selector: '⏳',
+  wait: '⏳',
+  screenshot: '📸',
+  get_dom: '🧩',
+  check_text: '🔍',
+  scroll: '↕️',
+  upload_file: '📤',
+  download_file: '📥',
+  expand_menu: '📂',
+  set_viewport: '🖥️',
+  default: '⚙️',
+};
+
+const EMOJI_ON_DEFAULT =
+  process.env.TESTRONAUT_EMOJI === '1' || process.env.TESTRONAUT_EMOJI === 'true';
+
+const withIcon = (name, s, { emoji = EMOJI_ON_DEFAULT } = {}) =>
+  emoji ? `${ICONS[name] || ICONS.default} ${s}` : s;
+
+
+export function summarizeToolCall(fnName, args = {}, opts = {}) {
   const safeArgs = redactArgs(fnName, args);
 
   const selector = pickArg(safeArgs, ['selector','xpath','css','role','testId']);
@@ -29,33 +58,35 @@ export function summarizeToolCall(fnName, args = {}) {
   const tmo = timeout ? ` [≤${timeout}ms]` : '';
 
   switch (fnName) {
-    case 'navigate': return `Navigate to ${truncateMiddle(url || '(no url)', 80)}`;
-    case 'click_text': return `Click text${val}`;
-    case 'click': return `Click element${sel}`;
+    case 'navigate':     return withIcon('navigate',     `Navigate to ${truncateMiddle(url || '(no url)', 80)}`, opts);
+    case 'click_text':   return withIcon('click_text',   `Click text${val}`, opts);
+    case 'click':        return withIcon('click',        `Click element${sel}`, opts);
     case 'type':
-    case 'fill': return `Type${val}${selector ? ` into ${truncateMiddle(selector, 60)}` : ''}`;
-    case 'press': return `Press key${val || ''}${selector ? ` in ${truncateMiddle(selector, 60)}` : ''}`;
-    case 'hover': return `Hover over${sel || val || ''}`;
-    case 'wait_for_selector': return `Wait for${sel}${tmo}`;
-    case 'wait': return `Wait${tmo || ''}`;
-    case 'screenshot': return `Capture screenshot${selector ? ` of ${truncateMiddle(selector, 60)}` : ''}`;
-    case 'get_dom': return `Inspect DOM (focused extract)`;
-    case 'check_text': return `Check page for${val || ' specific text'}`;
-    case 'scroll': return `Scroll to coords (${x ?? '?'}, ${y ?? '?'})`;
-    case 'upload_file': return `Upload file ${truncateMiddle(file || '(unknown)', 60)}${selector ? ` via ${truncateMiddle(selector, 60)}` : ''}`;
-    case 'download_file': return `Download file to ${truncateMiddle(file || '(unknown)', 60)}`;
-    case 'expand_menu': return `Expand menu${sel || ''}`;
-    case 'set_viewport': return `Set viewport ${safeArgs?.width}×${safeArgs?.height}`;
+    case 'fill':         return withIcon('type',         `Type${val}${selector ? ` into ${truncateMiddle(selector, 60)}` : ''}`, opts);
+    case 'press':        return withIcon('press',        `Press key${val || ''}${selector ? ` in ${truncateMiddle(selector, 60)}` : ''}`, opts);
+    case 'hover':        return withIcon('hover',        `Hover over${sel || val || ''}`, opts);
+    case 'wait_for_selector':
+                        return withIcon('wait_for_selector', `Wait for${sel}${tmo}`, opts);
+    case 'wait':         return withIcon('wait',         `Wait${tmo || ''}`, opts);
+    case 'screenshot':   return withIcon('screenshot',   `Capture screenshot${selector ? ` of ${truncateMiddle(selector, 60)}` : ''}`, opts);
+    case 'get_dom':      return withIcon('get_dom',      `Inspect DOM (focused extract)`, opts);
+    case 'check_text':   return withIcon('check_text',   `Check page for${val || ' specific text'}`, opts);
+    case 'scroll':       return withIcon('scroll',       `Scroll to coords (${x ?? '?'}, ${y ?? '?'})`, opts);
+    case 'upload_file':  return withIcon('upload_file',  `Upload file ${truncateMiddle(file || '(unknown)', 60)}${selector ? ` via ${truncateMiddle(selector, 60)}` : ''}`, opts);
+    case 'download_file':
+                        return withIcon('download_file', `Download file to ${truncateMiddle(file || '(unknown)', 60)}`, opts);
+    case 'expand_menu':  return withIcon('expand_menu',  `Expand menu${sel || ''}`, opts);
+    case 'set_viewport': return withIcon('set_viewport', `Set viewport ${safeArgs?.width}×${safeArgs?.height}`, opts);
     default:
-      return `Run ${fnName} with ${truncateMiddle(JSON.stringify(safeArgs ?? {}), 80)}`;
+      return withIcon('default', `Run ${fnName} with ${truncateMiddle(JSON.stringify(safeArgs ?? {}), 80)}`, opts);
   }
 }
 
-export function summarizeTurnIntentFromMessage(msg) {
+export function summarizeTurnIntentFromMessage(msg, opts = {}) {
   try {
     if (msg?.tool_calls?.length) {
       return msg.tool_calls
-        .map(c => summarizeToolCall(c.function?.name || 'unknown', JSON.parse(c.function?.arguments || '{}')))
+        .map(c => summarizeToolCall(c.function?.name || 'unknown', JSON.parse(c.function?.arguments || '{}'), opts))
         .join(' → ');
     }
     if (msg?.content) return `Reasoning: ${truncateMiddle(msg.content, 120)}`;

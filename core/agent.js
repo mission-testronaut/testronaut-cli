@@ -49,7 +49,7 @@ export async function runAgent(goals, missionName, maxTurns = 20, ) {
         missionName,
         submissionType: goal.submissionType || goal.label,
         submissionName: goal.submissionName || null,
-        status: result.success ? 'passed' : 'failed',
+        status: result?.success ? 'passed' : 'failed',
         steps: JSON.parse(JSON.stringify(steps)), // 👈 deep-clone to avoid refs
         startTime: Date.now() - 1, // set real values if you have them
         endTime: Date.now(),

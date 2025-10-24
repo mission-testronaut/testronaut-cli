@@ -64,6 +64,9 @@ export function generateHtmlReport(report, outputPath) {
           <span class="name">${prettyTitle}</span>
           <span class="status ${statusClass}">${badge(m.status)}</span>
           <span class="meta">steps: ${steps.length} • duration: ${mDurationSec}s</span>
+          <span class="toolbar">
+            <button class="btn-mini toggle" data-scope="submission" aria-label="Expand">▼</button>
+          </span>
         </summary>
         <div class="steps">
           ${stepItems || '<div class="empty">No steps recorded.</div>'}
@@ -101,12 +104,16 @@ export function generateHtmlReport(report, outputPath) {
           <span class="name">${esc(missionName)}</span>
           <span class="status ${status === 'failed' ? 'bad' : 'ok'}">${badge(status)}</span>
           <span class="meta">submissions: ${subs.length} • steps: ${totalSteps} • duration: ${groupDur}s</span>
+          <span class="toolbar">
+            <button class="btn-mini toggle" data-scope="mission" aria-label="Expand">▼</button>
+          </span>
         </summary>
         <div class="group-body">
           ${subs.map(submissionBlock).join('')}
         </div>
       </details>
     `;
+
   };
 
   const groupsHtml = Object.entries(grouped).map(([name, subs]) => missionGroupBlock(name, subs)).join('');
@@ -199,6 +206,22 @@ export function generateHtmlReport(report, outputPath) {
     .mission-group > summary:hover{ background: rgba(255,255,255,.08); }
 
     .group-body{ padding:12px; display:grid; gap:10px; }
+    // .toolbar{display:flex; gap:8px; margin-left:auto;}
+    // .btn-mini{
+    //   font-size:11px; padding:4px 8px; border-radius:8px;
+    //   background: rgba(255,255,255,.06); color: var(--text);
+    //   border:1px solid var(--hairline); cursor:pointer;
+    // }
+    // .btn-mini:hover{ background: rgba(255,255,255,.10); }
+
+    .toolbar{display:flex; gap:8px; margin-left:auto;}
+    .btn-mini{
+      font-size:12px; padding:2px 8px; border-radius:8px;
+      background: rgba(255,255,255,.06); color: var(--text);
+      border:1px solid var(--hairline); cursor:pointer; line-height:1.2;
+      width:28px; text-align:center;
+    }
+    .btn-mini:hover{ background: rgba(255,255,255,.10); }
 
     .mission-submission > summary{
       font-weight:700; background: rgba(255,255,255,.06); border-top:1px solid var(--hairline);
@@ -268,6 +291,66 @@ export function generateHtmlReport(report, outputPath) {
   <div class="container">
     ${groupsHtml || '<div class="glass empty">No missions recorded.</div>'}
   </div>
+  <script>
+  (function () {
+    function setOpenAll(root, selector, open) {
+      root.querySelectorAll(selector).forEach(function (el) {
+        if (el && 'open' in el) el.open = open;
+      });
+    }
+    function areAllOpen(root, selector) {
+      var list = root.querySelectorAll(selector);
+      if (!list.length) return false;
+      for (var i=0;i<list.length;i++) { if (!list[i].open) return false; }
+      return true;
+    }
+    function refreshBtn(btn) {
+      var scope = btn.getAttribute('data-scope');
+      var root = btn.closest(scope === 'mission' ? '.mission-group' : '.mission-submission');
+      if (!root) return;
+      var allOpen = scope === 'mission'
+        ? (areAllOpen(root, '.mission-submission') && areAllOpen(root, '.mission-submission .step'))
+        : areAllOpen(root, '.step');
+      btn.textContent = allOpen ? '▲' : '▼';
+      btn.setAttribute('aria-label', allOpen ? 'Collapse' : 'Expand');
+      btn.dataset.open = allOpen ? 'true' : 'false';
+    }
+
+    // Click handler (single toggle)
+    document.addEventListener('click', function (e) {
+      var btn = e.target && e.target.closest && e.target.closest('button.toggle');
+      if (!btn) return;
+      e.preventDefault(); e.stopPropagation();
+
+      var scope = btn.getAttribute('data-scope');
+      var root = btn.closest(scope === 'mission' ? '.mission-group' : '.mission-submission');
+      if (!root) return;
+
+      var currentlyOpen = btn.dataset.open === 'true';
+      var nextOpen = !currentlyOpen;
+
+      if (scope === 'mission') {
+        root.open = true; // ensure visible
+        setOpenAll(root, '.mission-submission', nextOpen);
+        setOpenAll(root, '.mission-submission .step', nextOpen);
+      } else {
+        root.open = true;
+        setOpenAll(root, '.step', nextOpen);
+      }
+      refreshBtn(btn);
+    }, true);
+
+    // Keep arrows in sync if user toggles details manually
+    document.addEventListener('toggle', function () {
+      document.querySelectorAll('button.toggle').forEach(refreshBtn);
+    }, true);
+
+    // Initial refresh
+    document.querySelectorAll('button.toggle').forEach(refreshBtn);
+  })();
+  </script>
+
+
 </body>
 </html>`;
 
