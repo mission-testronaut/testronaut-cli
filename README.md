@@ -1,13 +1,14 @@
 # 🧑‍🚀 Testronaut
 
-**Testronaut** is an autonomous testing framework powered by OpenAI function calling and browser automation. It allows you to define mission-based tests in plain English, then runs them through a real browser to validate UI workflows.
+**Testronaut** is an autonomous testing framework powered by **LLMs and Playwright**.  
+It lets you define *mission-based tests* in plain English, then runs them through a real browser to validate UI workflows — all while generating human-readable reports.
 
 ---
 
 ## 🌌 Join the Mission Control Community
 
-Got questions, ideas, or want to share your missions?  
-Join our Discord to connect with other Testronauts, get support, and help shape the framework’s future.  
+Got questions, ideas, or missions to share?  
+Join the Discord to connect with other Testronauts, get support, and help shape the framework’s future.
 
 [![Join Discord](https://img.shields.io/badge/Join%20Us%20on%20Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/pBfdef92ba)
 
@@ -15,46 +16,52 @@ Join our Discord to connect with other Testronauts, get support, and help shape 
 
 ## 🚀 Features
 
-- Run real-world UI flows using missions written as plain strings or functions
-- Execute entire suites with `runMissions`
-- Uses GPT-4o + Playwright to reason and interact with your app
-- Dynamic DOM injection and retry logic
-- Built-in throttling for OpenAI rate limits
-- Modular design — define tools and memory handling as you like
+- Write tests in plain English — no brittle selectors  
+- Runs real browser sessions via **Playwright**  
+- Works with **multiple LLM providers** (OpenAI, Google Gemini, and more coming)  
+- Modular tool and DOM-reasoning system  
+- Dynamic rate-limit and token-tracking logic  
+- Generates JSON + HTML reports automatically  
 
 ---
 
 ## 📖 Documentation
 
 Looking for deeper guides, API references, and examples?  
-Head over to the official Testronaut Docs:
+Check the official docs:
 
 [![Read the Docs](https://img.shields.io/badge/Read%20the%20Docs-2E8555?style=for-the-badge&logo=readthedocs&logoColor=white)](https://docs.testronaut.app)
 
-The docs cover:
-- Getting started step-by-step
-- Writing advanced missions
-- CLI options and configuration
-- Integrating with Mission Control
-- Troubleshooting & FAQs
+Includes:
+- Quickstart and setup  
+- Writing advanced missions  
+- Configuring providers and models  
+- CLI options  
+- Mission Control integration  
+- Troubleshooting and FAQs  
 
 ---
 
 ## 📦 Installation
 
-```
+```bash
 npm install -g testronaut
 ```
-Then initialize with npx, following the instructions:
-```
+
+Then initialize your project:
+
+```bash
 npx testronaut --init
 ```
-run the welcome mission:
-```
+
+Run the sample mission:
+```bash
 npx testronaut welcome.mission.js
 ```
-📁 Directory Structure
-Your project should include a missions/ folder with mission files like:
+
+---
+
+## 📁 Project Structure
 
 ```
 missions/
@@ -62,142 +69,137 @@ missions/
 ├── logout.mission.js
 └── dashboard.mission.js
 ```
-Each file exports a mission string or function and invokes runMissions.
 
-### ✍️ Writing a Mission File
-Create a file in your missions/ directory, e.g. missions/login.mission.js:
+Each mission exports a string or function and calls `runMissions`.
 
-```
+---
+
+## ✍️ Example Mission
+
+```js
 import { runMissions } from 'testronaut';
 
 export const loginMission = `
 Visit ${process.env.URL}.
-Fill the username field with ${process.env.USERNAME}. 
+Fill the username field with ${process.env.USERNAME}.
 Fill the password field with ${process.env.PASSWORD}.
-Take a screenshot.
-Submit the form.
+Click the Login button.
 Wait for the dashboard to appear.
-Take another screenshot.
-Report SUCCESS if the dashboard is loaded, otherwise report FAILURE.
+Take a screenshot.
+Report SUCCESS if the dashboard is loaded, otherwise FAILURE.
 `;
 
 export async function executeMission() {
-  await runMissions({
-    mission: loginMission
-  }, "Login Mission");
+  await runMissions({ mission: loginMission }, "Login Mission");
 }
 ```
 
-Pass in credentials using an .env file. The .env file should also include your Open AI API key (permissions to the completions endpoint required):
+Create a `.env` file with your credentials **and LLM API key** (depending on your chosen provider):
 
-```
-OPENAI_API_KEY=sk-proj-############
+```bash
+# For OpenAI
+OPENAI_API_KEY=sk-...
+
+# Or for Gemini
+GEMINI_API_KEY=AIza...
+
 URL=https://example.com/login
 USERNAME=example@example.com
 PASSWORD=********
 ```
 
-You can chain multiple phases:
+---
 
-```
-import { runMissions } from 'testronaut';
-import { loginMission } from './login.mission.js';
-import { logoutMission } from './logout.mission.js';
-import { navigateToContactFormMission } from './navigateToContactForm.mission.js';
+## 🧠 LLM Provider Support
 
-export const fillContactFormMission = 
-`Input the text "example@example.com" in the email field.
-Input the phone number (555)555-5555 into the phone number field.
-Click the submit button.
-Upon submission success there should be a toast notification indicating the form information was saved successfully.
-Take a screenshot.
-If found, report SUCCESS. Otherwise, report FAILURE.`
+Testronaut is provider-agnostic.  
+Choose your preferred LLM at init or via environment variables.
 
-export async function executeMission() {
-  await runMissions({
-    preMission: [loginMission, navigateToContactFormMission],
-    mission: fillContactFormMission,
-    postMission: logoutMission,
-  }, "Fill Contact Form Mission");
-}
+```bash
+# During init
+npx testronaut --init
+
+# Or override anytime
+TESTRONAUT_PROVIDER=gemini TESTRONAUT_MODEL=gemini-2.5-pro npx testronaut
 ```
 
-### 🏃 Running Missions
-Run all missions in the missions/ directory:
+Current supported providers:
 
-```
+| Provider | Example Models |
+|-----------|----------------|
+| **OpenAI** | gpt-4o, gpt-4.1, o3, gpt-5, etc. |
+| **Google Gemini** | gemini-2.5-pro, gemini-2.5-flash, gemini-2.5-flash-8b |
+
+More providers coming soon (Anthropic, Mistral, etc.).
+
+---
+
+## 🏃 Running Missions
+
+Run all missions:
+```bash
 npx testronaut
 ```
-Run a specific file:
 
-```
+Run a specific mission:
+```bash
 npx testronaut login.mission.js
 ```
 
-🧰 Available Helpers
+Chain missions together:
+```js
+await runMissions({
+  preMission: [loginMission],
+  mission: fillContactFormMission,
+  postMission: logoutMission,
+}, "Contact Form Flow");
+```
+---
+
+## 📋 Reports
+
+Testronaut generates both JSON and HTML reports automatically under:
 
 ```
-runMissions({ preMission, mission, postMission }) 
+missions/mission_reports/
 ```
-– Runs test phases
 
-```
-mission(name, fn) and objective(desc, workflow) 
-```
-– Optional suite syntax
+Each includes:
+- Steps executed
+- Token usage
+- Screenshots
+- Pass/Fail summaries
 
-```
-runSuite(objectives)
-```
-– Executes all registered test objectives
+---
 
-### 📋 Reports
-HTML and JSON reports automatically created in the ```missions/mission_reports/``` directory for each testronaut run
+## 🧪 Under the Hood
 
-### 🧪 Under the Hood
-Uses Playwright for browser automation
+- **Playwright** for browser automation  
+- **LLMs** for reasoning, DOM parsing, and tool use  
+- **Token throttling** + adaptive cooldowns  
+- **Extensible architecture** for custom tools and workflows  
 
-Interacts with OpenAI’s GPT-4o via Function Calling
+---
 
-Supports modular tool definitions via CHROME_TOOL_MAP
+## 🧭 Mission Control
 
-🔧 Developing Locally
-Clone and install locally:
+[Mission Control](https://mission.testronaut.app) lets you:
+- View all reports in one dashboard  
+- Track mission history and success rates  
+- Compare results across environments  
+- Access screenshots and step details anytime  
 
-```
-npm install
-npm link
-```
-Now you can use testronaut in any local project.
+---
 
-### 📄 License
+## 📄 License
+
 MIT
-
---
-
-### 📊 Track Your Missions Over Time
-Want to see your test results evolve, spot trends, and keep all your reports in one place?  
-Sign up for **Mission Control** — your personal dashboard for Testronaut.
-
-With Mission Control you can:
-- 📈 Track your mission reports historically
-- 🔍 Drill into past runs with full step-by-step details
-- 🛠️ Compare results between different builds or environments
-- ☁️ Access reports from anywhere, without digging through local files
-
-Getting started is simple:
-1. [![Sign up for Mission Control](https://img.shields.io/badge/Sign%20Up%20for%20Mission%20Control-0A84FF?style=for-the-badge&logo=rocket&logoColor=white)](https://mission.testronaut.app)
-2. Link your account to Testronaut CLI
-3. Watch your mission history grow!
 
 ---
 
 ## ☕ Support the Mission
+
 🤖 Built with ❤️ by [Shane Fast](https://github.com/scfast)
 
-If Testronaut has helped you save time or improve your testing, consider fueling the mission!  
-Your support helps cover hosting, development time, and the occasional coffee needed to debug at 2am.
-
+If Testronaut saves you time, consider fueling the mission:  
 [![Donate](https://img.shields.io/badge/Donate-Coffee%20Fuel%20for%20Testronaut-ff813f?style=for-the-badge&logo=buy-me-a-coffee&logoColor=white)](https://buymeacoffee.com/testronaut)
-
----
