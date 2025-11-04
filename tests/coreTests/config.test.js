@@ -1,0 +1,146 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
+vi.mock('node:fs/promises', () => ({
+  readFile: vi.fn(),
+}));
+
+import { readFile } from 'node:fs/promises';
+import {
+  loadConfig,
+  getMaxTurns,
+  resolveTurnLimits,
+  enforceTurnBudget,
+} from '../../core/config.js';
+
+describe('core/config', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    delete process.env.STRICT_LIMITS;
+  });
+
+  describe('loadConfig', () => {
+    it('parses JSON when present', async () => {
+      readFile.mockResolvedValueOnce(JSON.stringify({ maxTurns: 33 }));
+      const cfg = await loadConfig('/any');
+      expect(cfg).toEqual({ maxTurns: 33 });
+    });
+
+    it('returns {} on ENOENT', async () => {
+      readFile.mockRejectedValueOnce(new Error('ENOENT'));
+      const cfg = await loadConfig('/missing');
+      expect(cfg).toEqual({});
+    });
+
+    it('returns {} on invalid JSON', async () => {
+      readFile.mockResolvedValueOnce('{ nope ');
+      const cfg = await loadConfig('/bad');
+      expect(cfg).toEqual({});
+    });
+  });
+
+  describe('getMaxTurns', () => {
+    it('uses fallback when invalid or missing', () => {
+      expect(getMaxTurns({}, 20)).toBe(20);
+      expect(getMaxTurns({ maxTurns: 'x' }, 20)).toBe(20);
+      expect(getMaxTurns({ maxTurns: 0 }, 20)).toBe(20);
+      expect(getMaxTurns({ maxTurns: -5 }, 20)).toBe(20);
+    });
+
+    it('returns numeric when valid', () => {
+      expect(getMaxTurns({ maxTurns: 7 }, 20)).toBe(7);
+      expect(getMaxTurns({ maxTurns: '15' }, 20)).toBe(15);
+    });
+  });
+
+  describe('resolveTurnLimits', () => {
+    it('returns expected defaults', () => {
+      const l = resolveTurnLimits();
+      expect(l.softMaxTurns).toBe(50);
+      expect(l.hardMaxTurns).toBe(200);
+      expect(l.hardMinTurns).toBe(5);
+      expect(l.maxIdleTurns).toBe(6);
+      expect(l.maxErrors).toBe(5);
+      expect(l.maxSeconds).toBe(600);
+    });
+  });
+
+  describe('enforceTurnBudget (lenient)', () => {
+    it('clamps > hardMaxTurns', () => {
+      const cfg = { maxTurns: 1000 };
+      const { effectiveMax, limits, notes, strict } = enforceTurnBudget(cfg);
+      expect(strict).toBe(false);
+      expect(effectiveMax).toBe(limits.hardMaxTurns);
+      expect(notes.join('\n')).toMatch(/Clamping to/i);
+    });
+
+    it('warns when > softMaxTurns but <= hardMaxTurns', () => {
+      const cfg = { maxTurns: 120 };
+      const { effectiveMax, limits, notes } = enforceTurnBudget(cfg);
+      expect(effectiveMax).toBe(120);
+      expect(notes.join('\n')).toMatch(/exceeds softMaxTurns/i);
+      expect(effectiveMax).toBeLessThanOrEqual(limits.hardMaxTurns);
+    });
+
+    it('raises to hardMinTurns when below minimum', () => {
+      const cfg = { maxTurns: 1 };
+      const { effectiveMax, limits, notes } = enforceTurnBudget(cfg);
+      expect(effectiveMax).toBe(limits.hardMinTurns);
+      expect(notes.join('\n')).toMatch(/Raising to/i);
+    });
+
+    it('normalizes soft>hard ordering with a note', () => {
+      const weird = {
+        softMaxTurns: 300,
+        hardMaxTurns: 200,
+        hardMinTurns: 5,
+        maxIdleTurns: 6,
+        maxErrors: 5,
+        maxSeconds: 600,
+      };
+      const { limits, notes } = enforceTurnBudget({ maxTurns: 20 }, weird);
+      expect(limits.softMaxTurns).toBe(limits.hardMaxTurns);
+      expect(notes.join('\n')).toMatch(/Adjusted softMaxTurns down to hardMaxTurns/);
+    });
+  });
+
+  describe('enforceTurnBudget (strict)', () => {
+    it('throws when > hardMaxTurns', () => {
+      const cfg = { maxTurns: 999, strictLimits: true };
+      expect(() => enforceTurnBudget(cfg)).toThrow(/exceeds hardMaxTurns/i);
+    });
+
+    it('throws when below hardMinTurns', () => {
+      process.env.STRICT_LIMITS = '1';
+      const cfg = { maxTurns: 2 };
+      expect(() => enforceTurnBudget(cfg)).toThrow(/below hardMinTurns/i);
+    });
+
+    it('throws when softMaxTurns > hardMaxTurns', () => {
+      const bad = {
+        softMaxTurns: 300,
+        hardMaxTurns: 200,
+        hardMinTurns: 5,
+        maxIdleTurns: 6,
+        maxErrors: 5,
+        maxSeconds: 600,
+      };
+      expect(() => enforceTurnBudget({ strictLimits: true, maxTurns: 20 }, bad))
+        .toThrow(/softMaxTurns .* > hardMaxTurns/);
+    });
+  });
+
+
+    describe('enforceTurnBudget env override', () => {
+    const old = process.env.TESTRONAUT_TURNS;
+
+    beforeEach(() => { delete process.env.TESTRONAUT_TURNS; });
+    afterEach(() => { if (old === undefined) delete process.env.TESTRONAUT_TURNS; else process.env.TESTRONAUT_TURNS = old; });
+
+    it('uses TESTRONAUT_TURNS over cfg.maxTurns', () => {
+        process.env.TESTRONAUT_TURNS = '30';
+        const { effectiveMax, notes } = enforceTurnBudget({ maxTurns: 5 });
+        expect(effectiveMax).toBe(30);
+        expect(notes.join('\n')).toMatch(/CLI turn override/i);
+    });
+    });
+});
