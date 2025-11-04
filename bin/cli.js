@@ -1,4 +1,37 @@
 #!/usr/bin/env node
+
+/**
+ * cli.js
+ * -------
+ * Purpose:
+ *   Single entry point for the Testronaut CLI:
+ *   - Parses flags (e.g., --model, --turns, --init, help).
+ *   - Runs mission files (single or all), aggregates results, and writes HTML/JSON reports.
+ *   - Provides subcommands: login, upload (report + screenshots), serve/view (static file server).
+ *
+ * Key flags:
+ *   --model <id> / --model=<id>         → sets TESTRONAUT_MODEL env (wins over config file)
+ *   --turns <n> / --turns=<n>           → sets TESTRONAUT_TURNS env (wins over config file)
+ *   --init                               → scaffolds project + optional Playwright browsers
+ *   --help                               → prints help
+ *
+ * Notable helpers (defined below):
+ *   parseJsonSafe(res, label)            → tolerant JSON parse with good error messages
+ *   pkgManagerForCwd(cwd)                → detects npm/pnpm/yarn/bun
+ *   hasAny(modNames)                     → “do we have at least one of these deps?” (ESM-safe)
+ *   installDev(pm, pkg)                  → dev-install a package with the detected package manager
+ *   ensurePlaywrightInstalled()          → install @playwright/test and browsers (skippable in CI)
+ *   guessMimeType(p)                     → static server content types
+ *   safeJoin(root, relUrlPath)           → path traversal protection for static server
+ *   findLatestReportPair(reportDir)      → find latest run_<ts>.html (+ matching .json if present)
+ *   serveLatestReport()                  → read-only file server for most recent HTML report
+ *
+ * Test strategy:
+ *   To test pure helpers without running the whole CLI, we export a tiny test bundle:
+ *     export const __test__ = { guessMimeType, safeJoin, findLatestReportPair, pkgManagerForCwd }
+ *   See tests in tests/cliTests/cli.helpers.test.js
+ */
+
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -46,6 +79,29 @@ if (modelFlagIndex >= 0) {
   args.splice(modelFlagIndex, modelOverride ? 2 : 1);
 }
 
+// Look for --turns=<n> or --turns <n>
+let turnsOverride;
+const turnsFlagIndex = args.findIndex(a => a === '--turns' || a.startsWith('--turns='));
+if (turnsFlagIndex >= 0) {
+  if (args[turnsFlagIndex].includes('=')) {
+    turnsOverride = args[turnsFlagIndex].split('=')[1];
+  } else if (args[turnsFlagIndex + 1]) {
+    turnsOverride = args[turnsFlagIndex + 1];
+  }
+
+  if (turnsOverride) {
+    const n = Number(turnsOverride.trim());
+    if (Number.isFinite(n) && n > 0) {
+      process.env.TESTRONAUT_TURNS = String(n);
+      console.log(`🎯 Turn override: ${process.env.TESTRONAUT_TURNS}`);
+    } else {
+      console.warn(`⚠️ Invalid --turns value "${turnsOverride}". Ignoring.`);
+    }
+  }
+
+  // Remove flag & value so they aren’t treated as filenames
+  args.splice(turnsFlagIndex, turnsOverride ? 2 : 1);
+}
 
 const missionsDir = path.resolve(process.cwd(), 'missions');
 
@@ -66,6 +122,7 @@ Usage:
 
 Options:
   --init                    Scaffold project folders and a welcome mission
+  --turns=<n>               Override max turns for this run (e.g., --turns=30)
   --help                    Show this help message
 
 Examples:
@@ -228,7 +285,13 @@ fs.mkdirSync(outputDir, { recursive: true });
 fs.writeFileSync(`${outputDir}/${runId}.json`, JSON.stringify(report, null, 2));
 generateHtmlReport(report, `${outputDir}/${runId}.html`);
 
-// helpers near top of cli.js
+/**
+ * Parse a fetch Response safely and return JSON or throw a rich error.
+ * @param {Response} res
+ * @param {string} urlLabel - human-friendly label for error messages
+ * @returns {Promise<any>}
+ * @throws when HTTP status is not ok or body is empty/invalid
+ */
 async function parseJsonSafe(res, urlLabel) {
   const text = await res.text(); // read once
   let data = null;
@@ -248,6 +311,11 @@ async function parseJsonSafe(res, urlLabel) {
   return data;
 }
 
+/**
+ * Detect the local package manager based on lockfiles.
+ * @param {string} [cwd=process.cwd()]
+ * @returns {'pnpm'|'yarn'|'bun'|'npm'}
+ */
 function pkgManagerForCwd(cwd = process.cwd()) {
   const has = (f) => fs.existsSync(path.join(cwd, f));
   if (has('pnpm-lock.yaml')) return 'pnpm';
@@ -559,7 +627,11 @@ async function uploadReport() {
   }
 }
 
-
+/**
+ * Guess a reasonable MIME type for static serving.
+ * @param {string} p - file path
+ * @returns {string}
+ */
 function guessMimeType(p) {
   const ext = path.extname(p).toLowerCase();
   if (ext === '.html' || ext === '.htm') return 'text/html; charset=utf-8';
@@ -574,6 +646,12 @@ function guessMimeType(p) {
   return 'application/octet-stream';
 }
 
+/**
+ * Path-join a request path to a root directory with traversal protection.
+ * @param {string} root - filesystem directory
+ * @param {string} relUrlPath - URL path from incoming request
+ * @returns {string|null} resolved path or null on attempted escape
+ */
 function safeJoin(root, relUrlPath) {
   // Prevent path traversal and keep within root
   const decoded = decodeURIComponent(relUrlPath);
@@ -593,6 +671,12 @@ async function openInBrowser(targetUrl) {
   return exec(`xdg-open ${quoted}`).catch(() => {}); // best-effort on Linux
 }
 
+/**
+ * Find the latest run HTML (and its matching JSON, if present).
+ * Expects files like "run_<timestamp>.html" in the report directory.
+ * @param {string} reportDir
+ * @returns {{htmlFile:string, jsonFile:string|null}|null}
+ */
 function findLatestReportPair(reportDir) {
   if (!fs.existsSync(reportDir)) return null;
   const files = fs.readdirSync(reportDir).filter(f => f.endsWith('.html'));
