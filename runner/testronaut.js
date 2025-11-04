@@ -1,27 +1,49 @@
+/**
+ * testronaut.js
+ * -------------
+ * Purpose:
+ *   High-level mission runner: normalize pre/main/post submissions,
+ *   compute a safe turn budget from config, and invoke the agent.
+ *
+ * Responsibilities:
+ *   - Read config once and derive turn limits via enforceTurnBudget().
+ *   - Build a normalized list of submissions with human-friendly names.
+ *   - Redact sensitive text when logging mission strings.
+ *   - Call runAgent(goals, missionName, maxTurns) and post-process status.
+ *
+ * Message contract (goal → initial messages inside agent):
+ *   - system: operational guidance + success/failure contract
+ *   - user:   the mission text (or coerced string)
+ *
+ * Related tests:
+ *   tests/missionTests/testronaut.test.js
+ *
+ * Used by:
+ *   - CLI entrypoint(s)
+ */
+
+
 import { runAgent } from '../core/agent.js';
 import { redactPasswordInText } from '../core/redaction.js';
-// import { runSuite } from './suiteRunner.js';
+import { loadConfig, enforceTurnBudget } from '../core/config.js';
 
-// const objectives = [];
-
-// export function mission(title, fn) {
-//   console.log(`\n🚀 Mission: ${title}`);
-//   fn();
-// }
-
-// export function objective(desc, workflow) {
-//   objectives.push({ name: desc, workflow });
-// }
-
-// export async function launch(preMissionSetup) {
-//   await runSuite(objectives, preMissionSetup);
-// }
-
-
-
+/**
+ * Run a mission flow.
+ *
+ * @param {{ preMission?: any|any[], mission?: any|any[], postMission?: any|any[] }} params
+ * @param {string} missionName
+ */
 export async function runMissions({ preMission, mission, postMission }, missionName) {
-  const normalizeToArray = (x) => (Array.isArray(x) ? x : x ? [x] : []);
+  // 1) Config and turn budget (with guardrails)
+  const cfg = await loadConfig();
+  const { effectiveMax, limits, notes } = enforceTurnBudget(cfg);
+  const maxTurns = effectiveMax;
+  if (notes.length) {
+    console.warn(notes.join('\n'));
+  }
 
+  // 2) Normalize submissions
+  const normalizeToArray = (x) => (Array.isArray(x) ? x : x ? [x] : []);
   const pre  = normalizeToArray(preMission);
   const main = normalizeToArray(mission);
   const post = normalizeToArray(postMission);
@@ -100,7 +122,8 @@ export async function runMissions({ preMission, mission, postMission }, missionN
     })
   );
 
-  const success = await runAgent(goals, missionName);
+  // 3) Execute
+  const success = await runAgent(goals, missionName, maxTurns);
   if (!success) {
     console.log(`❌ Aborting after failed goal.`);
     return;
