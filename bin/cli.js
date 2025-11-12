@@ -51,7 +51,7 @@ import { ensureBrowsers } from '../tools/playwrightSetup.js';
 // Keep PW browsers inside the project to avoid global cache skew
 process.env.PLAYWRIGHT_BROWSERS_PATH = process.env.PLAYWRIGHT_BROWSERS_PATH || '0';
 
-
+const TMP_DIR = path.resolve('./missions/tmp');
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // const apiBase = `http://localhost:3002` //
@@ -59,6 +59,52 @@ const apiBase = 'http://api.testronaut.app'; // Replace with your actual API bas
 
 
 const args = process.argv.slice(2);
+
+function readJsonlSteps(p) {
+  if (!p || !fs.existsSync(p)) return null;
+  const lines = fs.readFileSync(p, 'utf8').split(/\r?\n/).filter(Boolean);
+  const parsed = [];
+  for (const line of lines) {
+    try { parsed.push(JSON.parse(line)); } catch { /* ignore bad lines */ }
+  }
+  return parsed;
+}
+
+/**
+ * Merge duplicate turns without losing information.
+ * Strategy:
+ *  - Keep the latest **non-empty** version for a given turn if both exist
+ *  - If both are non-empty, keep the later one (last write wins)
+ *  - Preserve original order by line index as a tiebreaker
+ */
+function mergeDuplicateTurns(steps) {
+  const out = [];
+  const byTurn = new Map(); // turn -> index in out
+  for (const s of steps) {
+    const turn = Number.isFinite(s.turn) ? s.turn : out.length;
+    const hasEvents = Array.isArray(s.events) && s.events.length > 0;
+    if (!byTurn.has(turn)) {
+      out.push(s);
+      byTurn.set(turn, out.length - 1);
+    } else {
+      const idx = byTurn.get(turn);
+      const existing = out[idx];
+      const existingHasEvents = Array.isArray(existing.events) && existing.events.length > 0;
+      // Prefer the one with events; if both have events, prefer the newer (s)
+      if (!existingHasEvents && hasEvents) {
+        out[idx] = s;
+      } else if (existingHasEvents && hasEvents) {
+        out[idx] = s;
+      } else {
+        // both empty or both sparse — keep latest
+        out[idx] = s;
+      }
+    }
+  }
+  // stable sort by `turn` ascending, then by original order via array index already preserved
+  out.sort((a, b) => (a.turn ?? 0) - (b.turn ?? 0));
+  return out;
+}
 
 // Look for --model=<id> or --model <id>
 let modelOverride;
@@ -236,11 +282,22 @@ const endTime = new Date();
 
 const flatMissions = allResults.flatMap(entry => {
   const result = entry.result;
-  const missions = Array.isArray(result) ? result : [result]; // normalize
-  return missions.map(m => ({
-    ...m,
-    file: entry.file
-  }));
+  const missions = Array.isArray(result) ? result : [result];
+
+  return missions.map(m => {
+    let steps = m.steps;
+    if (m.stepFile && fs.existsSync(m.stepFile)) {
+      const fromJsonl = readJsonlSteps(m.stepFile);
+      if (fromJsonl && fromJsonl.length) {
+        steps = mergeDuplicateTurns(fromJsonl);
+      }
+    }
+    return {
+      ...m,
+      steps,
+      file: entry.file,
+    };
+  });
 });
 
 // Read provider/model from config (allow env override for model)
@@ -774,4 +831,15 @@ async function serveLatestReport() {
 
   // Best-effort auto-open
   await openInBrowser(reportUrl).catch(() => {});
+}
+
+try {
+  if (!process.env.TN_KEEP_TMP && fs.existsSync(TMP_DIR)) {
+    fs.rmSync(TMP_DIR, { recursive: true, force: true });
+    console.log('🧹 Cleaned up temporary files.');
+  } else {
+    console.log('⚠️ Skipped tmp cleanup (TN_KEEP_TMP set).');
+  }
+} catch (err) {
+  console.warn(`⚠️ Could not remove tmp folder: ${err.message}`);
 }
