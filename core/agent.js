@@ -25,6 +25,8 @@
 import 'dotenv/config';
 import { ChromeBrowser } from '../tools/chromeBrowser.js';
 import { turnLoop } from './turnLoop.js';
+import fs from 'fs';
+import path from 'path';
 
 /**
  * Execute goals with a browser agent.
@@ -41,9 +43,18 @@ export async function runAgent(goals, missionName, maxTurns = 20) {
 
   try {
     const missionResults = [];
+    const tmpDir = path.resolve(process.cwd(), 'missions/tmp');
+    fs.mkdirSync(tmpDir, { recursive: true });
 
     for (const goal of goals) {
       const steps = [];
+      // Unique-ish JSONL file for this mission’s steps
+      const stepFile = path.join(
+        tmpDir,
+        `${missionName.replace(/[^\w.-]+/g, '_')}_${Date.now()}_steps.jsonl`
+      );
+      // Start clean
+      fs.writeFileSync(stepFile, '');
 
       // Ensure user message is a string (functions/objects → toString fallback)
       const userContent =
@@ -78,8 +89,35 @@ export async function runAgent(goals, missionName, maxTurns = 20) {
         0,    // currentTurn
         0,    // retryCount
         null, // currentStep
-        { steps, missionName }
+        {
+          steps,
+          missionName,
+          onStep: (s) => {
+            // Append each step as a JSON line
+            try {
+              fs.appendFileSync(stepFile, JSON.stringify(s) + '\n');
+              // Keep memory in check: retain only the last ~20 steps in RAM
+              if (steps.length > 20) steps.splice(0, steps.length - 20);
+            } catch {} // best-effort; don’t crash the agent
+          }
+        }
       );
+
+      function dedupeSteps(steps) {
+        const seen = new Set();
+        const out = [];
+        for (const s of steps) {
+          const first = s?.events?.[0] || '';
+          const key = `${s.turn}::${s.summary}::${first}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            out.push(s);
+          }
+        }
+        return out;
+      }
+
+      const compact = dedupeSteps(steps);
 
       // Snapshot steps (avoid retaining references to mutable arrays)
       missionResults.push({
@@ -87,7 +125,8 @@ export async function runAgent(goals, missionName, maxTurns = 20) {
         submissionType: goal.submissionType || goal.label,
         submissionName: goal.submissionName || null,
         status: result?.success ? 'passed' : 'failed',
-        steps: JSON.parse(JSON.stringify(steps)), // deep-clone
+        steps: JSON.parse(JSON.stringify(compact)), // last 20 (by memory design)
+        stepFile, // full history is in this JSONL (one step per line)
         startTime: Date.now() - 1, // TODO: wire actual timings if needed
         endTime: Date.now(),
       });

@@ -60,7 +60,7 @@ const llm = getLLM(PROVIDER_ID);
 let totalTokensUsed = 0;
 let turnTimestamps = [];
 let shouldBackoff;
-let steps = [];
+// let steps = [];
 
 /**
  * Utility: format byte counts into human-readable strings.
@@ -148,6 +148,15 @@ export const turnLoop = async (
   const { steps = [], missionName } = ctx;
   let agentMemory = { lastMenuExpanded: false };
   
+  // Centralized recorder: push to in-memory buffer AND fire optional callback for streaming
+  // Idempotent recorder – prevents accidental double-push
+  const recordStep = (step) => {
+    if (!step || step.__recorded) return;
+    step.__recorded = true;
+    try { steps.push(step); } catch {}
+    try { ctx?.onStep?.(step); } catch {}
+  };
+  
   // ─────────────────────────────────────────────
   // STEP 1: Begin reasoning cycle
   // ─────────────────────────────────────────────
@@ -163,7 +172,13 @@ export const turnLoop = async (
       // Adaptive cooldown if nearing provider rate limit
       ({ totalTokensUsed, turnTimestamps, shouldBackoff } =
         await tokenUseCoolOff(totalTokensUsed, turnTimestamps, MODEL_ID));
-      if (shouldBackoff) return await turnLoop(browser, messages, maxTurns, turn, currentStep);
+      if (shouldBackoff) {
+        // step.result = '🟡 In Progress';
+        recordStep(step);         // ✅ write the partial step before sleeping
+        turn -= 1;                // retry same turn index
+        continue;
+        // return await turnLoop(browser, messages, maxTurns, turn, currentStep);
+      }
 
       // Verify message structure integrity before requesting next model step
       if (!validateAndInsertMissingToolResponses(messages, { insertPlaceholders: true })) {
@@ -171,6 +186,7 @@ export const turnLoop = async (
         step.events.push('❌ Tool call structure invalid and no placeholders inserted.');
         step.result = '❌ Failure';
         steps.push(step);
+        recordStep(step);
         return steps;
       }
 
@@ -191,6 +207,7 @@ export const turnLoop = async (
         step.events.push('🛑 Detected assistant tool calls without matching tool responses');
         step.result = '❌ Failure';
         steps.push(step);
+        recordStep(step);
         return steps;
       }
 
@@ -212,6 +229,9 @@ export const turnLoop = async (
         try { updateLimitsFromHeaders(MODEL_ID, err.headers || err.response?.headers || {}); } catch {}
         const delay = Math.min(60000, 2 ** retryCount * 2000);
         console.warn(`⚠️ Rate limited. Retrying in ${delay / 1000}s... (retry ${retryCount + 1})`);
+        step.events.push(`⏳ Rate limit: waiting ${Math.round(delay/1000)}s (retry ${retryCount + 1})`);
+        // step.result = '🟡 In Progress';
+        recordStep(step);         // ✅ persist this step before sleeping
         await wait(delay);
 
         if (retryCount >= 5) {
@@ -219,14 +239,20 @@ export const turnLoop = async (
           step.events.push('❌ Too many retries. Exiting.');
           step.result = '❌ Failure';
           steps.push(step);
+          recordStep(step);
           return steps;
         }
-        return await turnLoop(browser, messages, maxTurns, turn, retryCount + 1, step);
+        // return await turnLoop(browser, messages, maxTurns, turn, retryCount + 1, step);
+        // reattempt same turn after delay; keep same loop, bump retryCount
+        retryCount += 1;
+        turn -= 1;
+        continue;
       } else if (err.status === 400) {
         console.error('❌ Bad request:', err.message);
         step.events.push(`❌ Bad request: ${err.message}`);
         step.result = '❌ Failure';
         steps.push(step);
+        recordStep(step);
         return steps;
       } else {
         throw err;
@@ -296,7 +322,7 @@ export const turnLoop = async (
         } catch { /* non-JSON results ignored */ }
 
         console.log(`[tool ] ← ${fnName} result:`, errorMessage ? '❌ Failed' : '✅ Success');
-        const truncated = result.length > 100 ? result.slice(0, 100) + '…' : result;
+        const truncated = result.length > 1000 ? result.slice(0, 1000) + '…' : result;
         step.events.push(`[tool ] ← ${fnName} result: ${errorMessage ? '❌ Failed' : '✅ Success'}`);
         step.events.push(`[tool ] ← ${truncated}`);
 
@@ -340,6 +366,7 @@ export const turnLoop = async (
       messages.push(msg, ...toolResponses);
       step.result = '✅ Passed';
       steps.push(step);
+      recordStep(step);
       continue;
     }
 
@@ -351,6 +378,7 @@ export const turnLoop = async (
       step.events.push(finalResponse.finalMessage);
       step.result = finalResponse.success ? '✅ Mission Success' : '❌ Mission Failure';
       steps.push(step);
+      recordStep(step);
       return { success: finalResponse.finalMessage, steps };
     }
 
@@ -362,5 +390,8 @@ export const turnLoop = async (
     });
     console.log(`[auto] → Injected DOM for next reasoning step`);
     step.events.push(`[auto] → Injected DOM for next reasoning step`);
+    // This is a meaningful turn even without tool calls — record it.
+    step.result = step.result || '🟡 In Progress';
+    recordStep(step);
   }
 };
