@@ -35,6 +35,7 @@ import { wait } from './turnLoopUtils.js';
  */
 const DEFAULT_LIMITS = [
   // ── OpenAI (newer first) ────────────────────────────────────────────────
+  { test: /^gpt-5.1(-|$)/i,             tpm: 120000 },
   { test: /^gpt-5(-|$)/i,               tpm:  90000 },
   { test: /^gpt-5-mini(-|$)/i,          tpm: 240000 },
   { test: /^gpt-5-nano(-|$)/i,          tpm: 600000 },

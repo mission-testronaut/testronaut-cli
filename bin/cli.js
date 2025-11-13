@@ -810,15 +810,21 @@ async function serveLatestReport() {
   await new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(0, '127.0.0.1', resolve);
-
-    process.on('SIGINT', () => {
-      console.log('\n🛑 Shutting down…');
-      server.close(() => {
-        resolve();
-        process.exit(0);
-      });
-    });
   });
+
+  // Move signal handling to after server is listening
+  const shutdown = () => {
+    console.log('\n🛑 Shutting down…');
+    try {
+      server.close(); // best-effort; don’t wait for it
+    } catch (_) {
+      // ignore
+    }
+    process.exit(0);
+  };
+
+  process.once('SIGINT', shutdown);
+  process.once('SIGTERM', shutdown);
 
   const address = server.address();
   const port = typeof address === 'object' && address ? address.port : 0;

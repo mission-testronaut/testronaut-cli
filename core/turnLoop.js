@@ -185,7 +185,6 @@ export const turnLoop = async (
         console.error('❌ Tool call structure invalid and no placeholders inserted.');
         step.events.push('❌ Tool call structure invalid and no placeholders inserted.');
         step.result = '❌ Failure';
-        steps.push(step);
         recordStep(step);
         return steps;
       }
@@ -206,7 +205,6 @@ export const turnLoop = async (
         console.dir(unrespondedCalls, { depth: 5 });
         step.events.push('🛑 Detected assistant tool calls without matching tool responses');
         step.result = '❌ Failure';
-        steps.push(step);
         recordStep(step);
         return steps;
       }
@@ -238,7 +236,6 @@ export const turnLoop = async (
           console.error('❌ Too many retries. Exiting.');
           step.events.push('❌ Too many retries. Exiting.');
           step.result = '❌ Failure';
-          steps.push(step);
           recordStep(step);
           return steps;
         }
@@ -251,7 +248,6 @@ export const turnLoop = async (
         console.error('❌ Bad request:', err.message);
         step.events.push(`❌ Bad request: ${err.message}`);
         step.result = '❌ Failure';
-        steps.push(step);
         recordStep(step);
         return steps;
       } else {
@@ -365,7 +361,6 @@ export const turnLoop = async (
       // Merge new assistant + tool responses back into conversation
       messages.push(msg, ...toolResponses);
       step.result = '✅ Passed';
-      steps.push(step);
       recordStep(step);
       continue;
     }
@@ -377,7 +372,6 @@ export const turnLoop = async (
     if (finalResponse !== null) {
       step.events.push(finalResponse.finalMessage);
       step.result = finalResponse.success ? '✅ Mission Success' : '❌ Mission Failure';
-      steps.push(step);
       recordStep(step);
       return { success: finalResponse.finalMessage, steps };
     }

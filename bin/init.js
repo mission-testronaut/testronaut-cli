@@ -94,9 +94,10 @@ export async function initializeTestronautProject() {
           { title: 'o3 (reasoning w/ native tool use)', value: 'o3' },
           { title: 'o4-mini (reasoning, cost-effective)', value: 'o4-mini' },
           // GPT-5 family (availability varies)
-          { title: 'GPT-5 (latest reasoning model)', value: 'gpt-5' },
+          { title: 'GPT-5 (previous reasoning model)', value: 'gpt-5' },
           { title: 'GPT-5 mini (faster)', value: 'gpt-5-mini' },
           { title: 'GPT-5 nano (lightweight)', value: 'gpt-5-nano' },
+          { title: 'GPT-5.1 (latest reasoning model)', value: 'gpt-5.1' },
         ],
         // Keep prior selection highlighted if present; fallback to 4.1-mini.
         initial: pickInitialIndex(models, config.model, 'gpt-4.1-mini')
