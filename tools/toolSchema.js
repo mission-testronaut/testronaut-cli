@@ -285,6 +285,107 @@ const toolsSchema = [
         required: []
       }
     }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'set_ground_control_state',
+      description: 'Update stable mission facts for Ground Control: app URL, current page role, login status, and constraints. Use this when you learn something that should remain true across future turns and should not be forgotten.',
+      parameters: {
+        type: 'object',
+        properties: {
+          app: {
+            type: 'object',
+            description: 'App/URL related state. Only send fields you are certain about.',
+            properties: {
+              baseUrl: {
+                type: 'string',
+                description: 'Canonical base URL of the app under test, e.g. "https://demo.testronaut.app".'
+              },
+              currentUrl: {
+                type: 'string',
+                description: 'Current page URL after navigation.'
+              },
+              routeRole: {
+                type: 'string',
+                description: 'Short label for the current page role, e.g. "login", "chat", "dashboard".'
+              }
+            },
+            additionalProperties: false
+          },
+          session: {
+            type: 'object',
+            description: 'User/session related facts.',
+            properties: {
+              loggedIn: {
+                type: 'boolean',
+                description: 'Whether the user is currently logged in.'
+              },
+              userLabel: {
+                type: 'string',
+                description: 'Short label for the user account, e.g. "Demo user", "Buzz Aldrin".'
+              },
+              tenant: {
+                type: 'string',
+                description: 'Tenant or workspace name, if applicable.'
+              }
+            },
+            additionalProperties: false
+          },
+          navigation: {
+            type: 'object',
+            description: 'Navigation-related state.',
+            properties: {
+              currentLabel: {
+                type: 'string',
+                description: 'Short human label for the current page, e.g. "Main chat page".'
+              }
+            },
+            additionalProperties: false
+          },
+          constraints: {
+            type: 'object',
+            description: 'Mission or environment constraints.',
+            properties: {
+              stayWithinBaseUrl: {
+                type: 'boolean',
+                description: 'If true, do not navigate outside the app base URL unless explicitly instructed.'
+              }
+            },
+            additionalProperties: false
+          }
+        },
+        additionalProperties: false
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'record_mission_telemetry',
+      description: 'Record a small, durable observation for the mission log: breadcrumbs, assertions, issues, or general notes for Ground Control.',
+      parameters: {
+        type: 'object',
+        properties: {
+          kind: {
+            type: 'string',
+            enum: ['breadcrumb', 'assertion', 'issue', 'note'],
+            description: 'Type of observation: navigation breadcrumb, assertion, discovered issue, or general note.'
+          },
+          text: {
+            type: 'string',
+            description: 'Short description of the observation in 1–2 sentences.'
+          },
+          status: {
+            type: 'string',
+            enum: ['passed', 'failed', 'n/a'],
+            description: 'Optional status for assertions or issues.'
+          }
+        },
+        required: ['kind', 'text'],
+        additionalProperties: false
+      }
+    }
   }
 ];
 
