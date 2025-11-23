@@ -68,10 +68,7 @@ export async function runAgent(goals, missionName, maxTurns = 20) {
 
       // 🔭 Build a compact Ground Control snapshot for the prompt
       const groundSummary = summarizeGroundControlForPrompt(groundControl);
-      const messages = [
-        {
-          role: 'system',
-          content: `
+      let systemContent = `
 You are an autonomous web agent piloting a browser for end-to-end testing.
 
 Core behavior:
@@ -129,15 +126,19 @@ Use Ground Control as your persistent mission memory about:
 - Where you are (currentUrl, routeRole),
 - Who you are logged in as (session),
 - Any constraints about staying on the correct site.
-          `.trim(),
-        },
-        {
-          role: 'system',
-          content: 
-            `
-            🛰️ Ground Control Snapshot: ${JSON.stringify(groundSummary, null, 2)}
-            `.trim(),
-        },
+      `.trim();
+
+      if (groundSummary) {
+        systemContent +=
+          '\n\n' +
+          `
+──── Ground Control Snapshot ────
+🛰️ ${JSON.stringify(groundSummary, null, 2)}
+          `.trim();
+      }
+
+      const messages = [
+        { role: 'system', content: systemContent },
         { role: 'user', content: userContent },
       ];
 

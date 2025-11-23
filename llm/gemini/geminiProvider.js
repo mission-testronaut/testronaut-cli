@@ -109,6 +109,19 @@ function safeJsonParse(s) {
   try { return JSON.parse(s ?? '{}'); } catch { return null; }
 }
 
+// Gemini's functionDeclarations reject JSON Schema's `additionalProperties`; prune it recursively.
+function stripAdditionalProperties(obj) {
+  if (!obj || typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) return obj.map(stripAdditionalProperties);
+
+  const out = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (k === 'additionalProperties') continue; // Gemini function declarations do not support this key
+    out[k] = stripAdditionalProperties(v);
+  }
+  return out;
+}
+
 /**
  * Convert a Gemini candidate → OpenAI-like assistant message.
  * - Collects text parts into `content`.
@@ -160,7 +173,7 @@ export class GeminiProvider {
           functionDeclarations: tools.map(t => ({
             name: t.function?.name ?? t.name,
             description: t.description ?? '',
-            parameters: t.function?.parameters ?? t.parameters ?? {}, // JSON schema
+            parameters: stripAdditionalProperties(t.function?.parameters ?? t.parameters ?? {}), // JSON schema sans additionalProperties (unsupported by Gemini)
           })),
         }]
       : undefined;

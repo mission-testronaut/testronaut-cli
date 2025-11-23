@@ -266,12 +266,18 @@ export function summarizeGroundControlForPrompt(gc = {}) {
   const navigation = gc.navigation || {};
   const telemetry = Array.isArray(gc.telemetry) ? gc.telemetry : [];
 
+  const routeRole = typeof navigation.routeRole === 'string'
+    ? navigation.routeRole
+    : (typeof app.routeRole === 'string' ? app.routeRole : null);
+  const currentLabel = typeof navigation.currentLabel === 'string' ? navigation.currentLabel : null;
+
   // Only emit snapshot if we have at least *some* meaningful info
   const hasSignal =
     app.baseUrl ||
     app.currentUrl ||
     typeof session.loggedIn === 'boolean' ||
-    navigation.routeRole ||
+    routeRole ||
+    currentLabel ||
     telemetry.length > 0;
 
   if (!hasSignal) return null;
@@ -293,7 +299,8 @@ export function summarizeGroundControlForPrompt(gc = {}) {
       userLabel: session.userLabel || null,
     },
     navigation: {
-      routeRole: navigation.routeRole || null,
+      routeRole,
+      currentLabel,
     },
     telemetryLines,
   };

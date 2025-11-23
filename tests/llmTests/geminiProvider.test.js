@@ -77,6 +77,35 @@ describe('GeminiProvider', () => {
     expect(shared.getModelOpts.tools[0].functionDeclarations.map(d => d.name)).toEqual(['foo', 'bar']);
   });
 
+  it('strips additionalProperties from tool schemas (unsupported by Gemini)', async () => {
+    const prov = new GeminiProvider({ apiKey: 'gk-123' });
+    const tools = [
+      {
+        type: 'function',
+        function: {
+          name: 'set_ground_control_state',
+          parameters: {
+            type: 'object',
+            properties: {
+              app: {
+                type: 'object',
+                additionalProperties: false,
+                properties: { baseUrl: { type: 'string' } },
+              },
+            },
+            additionalProperties: false,
+          },
+        },
+      },
+    ];
+
+    await prov.chat({ model: 'gemini-2.5-flash', messages: [{ role: 'user', content: 'go' }], tools });
+
+    const decl = shared.getModelOpts.tools[0].functionDeclarations[0];
+    expect(decl.parameters.additionalProperties).toBeUndefined();
+    expect(decl.parameters.properties.app.additionalProperties).toBeUndefined();
+  });
+
   it('converts OpenAI-like messages → Gemini contents (system prefix + tool calls + tool results)', async () => {
     const prov = new GeminiProvider({ apiKey: 'gk-xyz' });
 

@@ -72,6 +72,13 @@ const warnedModels = new Set();
  *  - o200k_base for modern, long-context families (OpenAI 4o/4.1/5, Gemini 2.5, O*)
  *  - cl100k_base as a broad fallback
  */
+/**
+ * Resolve the best-effort tokenizer for a model.
+ * Falls back to o200k_base for modern long-context models and cl100k_base otherwise.
+ *
+ * @param {string} model - Model identifier used to pick an encoding.
+ * @returns {import('@dqbd/tiktoken').Tiktoken | null} tokenizer or null on failure
+ */
 function getTokenizer(model) {
   try {
     return encoding_for_model(model);
@@ -229,6 +236,7 @@ export const tokenUseCoolOff = async (totalTokensUsed, turnTimestamps, model) =>
  * Record tokens for the current turn in the rolling window.
  * @param {Array<[number,number]>} turnTimestamps
  * @param {number} tokensUsed
+ * @returns {void}
  */
 export const recordTokenUsage = (turnTimestamps, tokensUsed) => {
   const now = Date.now();
@@ -273,7 +281,10 @@ const getDynamicBackoffMs = async (turnTimestamps, tokenLimit) => {
 };
 
 
-// Test-only helper to clear internal state between tests
+/**
+ * Test-only helper to clear internal state between runs.
+ * @returns {void}
+ */
 export function __resetTokenControlForTests() {
   liveLimits.clear();
   warnedModels.clear();
