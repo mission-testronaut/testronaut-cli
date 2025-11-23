@@ -20,7 +20,6 @@ export const wait = (ms) => new Promise(res => setTimeout(res, ms));
 export function validateAndInsertMissingToolResponses(messages, options = {}) {
   const { insertPlaceholders = true } = options;
   const missingResponses = [];
-
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i];
     if (msg.role === 'assistant' && msg.tool_calls?.length) {

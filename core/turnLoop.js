@@ -47,6 +47,13 @@ import { resolveProviderModel } from '../llm/modelResolver.js';
 import { getLLM } from '../llm/llmFactory.js';
 import { summarizeTurnIntentFromMessage } from './turnIntent.js';
 import { redactArgs } from './redaction.js';
+import { 
+  sanitizeHeavyToolHistory, 
+  pruneConversationContext,
+  createEmptyGroundControl,
+  applyGroundControlUpdate,
+  recordGroundTelemetry,
+ } from '../tools/contextControl.js';
 
 // ─────────────────────────────────────────────
 // STEP 0: Resolve provider + model and initialize adapter
@@ -60,7 +67,26 @@ const llm = getLLM(PROVIDER_ID);
 let totalTokensUsed = 0;
 let turnTimestamps = [];
 let shouldBackoff;
-// let steps = [];
+
+// Certain tools mutate the browser or produce side effects that are
+// *useful for humans* (reports/screenshots), but do not carry semantic
+// information that the LLM needs on subsequent turns.
+// For these, we respond to the tool_call with a tiny stub ("OK"/error)
+// instead of the full result payload to avoid bloating context.
+//
+// NOTE: We *still* log the full result in `step.events` and step metadata.
+const FIRE_AND_FORGET_TOOLS = new Set([
+  'screenshot',
+  'click',
+  'click_text',
+  // 'expand_menu',
+  'fill',
+  'upload_file',
+  'download_file',
+  'click_and_follow_popup',
+  'switch_to_page',
+  'close_current_page',
+]);
 
 /**
  * Utility: format byte counts into human-readable strings.
@@ -143,9 +169,10 @@ export const turnLoop = async (
   currentTurn = 0, 
   retryCount = 0, 
   currentStep = {},
-  ctx = {} // { steps, missionName }
+  ctx = {} // { steps, missionName, groundControl }
 ) => {
-  const { steps = [], missionName } = ctx;
+  const { steps = [], missionName, groundControl = createEmptyGroundControl() } = ctx;
+  ctx.groundControl = groundControl;
   let agentMemory = { lastMenuExpanded: false };
   
   // Centralized recorder: push to in-memory buffer AND fire optional callback for streaming
@@ -173,11 +200,9 @@ export const turnLoop = async (
       ({ totalTokensUsed, turnTimestamps, shouldBackoff } =
         await tokenUseCoolOff(totalTokensUsed, turnTimestamps, MODEL_ID));
       if (shouldBackoff) {
-        // step.result = '🟡 In Progress';
         recordStep(step);         // ✅ write the partial step before sleeping
         turn -= 1;                // retry same turn index
         continue;
-        // return await turnLoop(browser, messages, maxTurns, turn, currentStep);
       }
 
       // Verify message structure integrity before requesting next model step
@@ -209,6 +234,18 @@ export const turnLoop = async (
         return steps;
       }
 
+      // Before calling the model, trim/sanitize the conversation context.
+      // 1) Replace older heavy tool payloads with small stubs.
+      sanitizeHeavyToolHistory(messages, { keepRecentPerTool: 2 });
+
+      // 2) Hard-cap total history length (system messages + last N others).
+      {
+        const pruned = pruneConversationContext(messages, { maxNonSystemMessages: 40 });
+        messages.length = 0;
+        messages.push(...pruned);
+      }
+
+
       // ─────────────────────────────────────────────
       // STEP 2: Request next reasoning turn from model
       // ─────────────────────────────────────────────
@@ -228,7 +265,6 @@ export const turnLoop = async (
         const delay = Math.min(60000, 2 ** retryCount * 2000);
         console.warn(`⚠️ Rate limited. Retrying in ${delay / 1000}s... (retry ${retryCount + 1})`);
         step.events.push(`⏳ Rate limit: waiting ${Math.round(delay/1000)}s (retry ${retryCount + 1})`);
-        // step.result = '🟡 In Progress';
         recordStep(step);         // ✅ persist this step before sleeping
         await wait(delay);
 
@@ -239,8 +275,6 @@ export const turnLoop = async (
           recordStep(step);
           return steps;
         }
-        // return await turnLoop(browser, messages, maxTurns, turn, retryCount + 1, step);
-        // reattempt same turn after delay; keep same loop, bump retryCount
         retryCount += 1;
         turn -= 1;
         continue;
@@ -303,7 +337,7 @@ export const turnLoop = async (
           result = errorMessage;
         }
 
-        // Capture and log any file upload/download events
+        // Capture and log any file upload/download events (for reports)
         try {
           const maybeJson = JSON.parse(result);
           if (maybeJson && maybeJson._testronaut_file_event) {
@@ -315,14 +349,16 @@ export const turnLoop = async (
             step.events.push(msgLine);
             console.log(msgLine);
           }
-        } catch { /* non-JSON results ignored */ }
+        } catch {
+          // non-JSON results ignored
+        }
 
         console.log(`[tool ] ← ${fnName} result:`, errorMessage ? '❌ Failed' : '✅ Success');
         const truncated = result.length > 1000 ? result.slice(0, 1000) + '…' : result;
         step.events.push(`[tool ] ← ${fnName} result: ${errorMessage ? '❌ Failed' : '✅ Success'}`);
         step.events.push(`[tool ] ← ${truncated}`);
 
-        // Screenshot detection
+        // Screenshot detection (for report metadata only)
         if (fnName === 'screenshot') {
           const match = result.match(/screenshot.*?saved at: (.+\.png)/i);
           if (match && match[1]) {
@@ -331,13 +367,33 @@ export const turnLoop = async (
           }
         }
 
-        // Push corresponding tool message back to LLM
+        if (fnName === 'set_ground_control_state') {
+          applyGroundControlUpdate(groundControl, args);
+          result = JSON.stringify({ ok: true, groundControl });
+        }
+
+        if (fnName === 'record_mission_telemetry') {
+          const recorded = recordGroundTelemetry(groundControl, args, { turn });
+          result = JSON.stringify({ ok: true, recorded });
+        }
+
+        // Decide what to send back to the LLM for this tool.
+        // - For "fire-and-forget" tools, send a tiny stub (OK/error) to avoid
+        //   bloating context with large payloads (file JSON, etc.).
+        // - For semantic tools (get_dom, check_text, etc.), send full result.
+        let contentForModel;
+        if (FIRE_AND_FORGET_TOOLS.has(fnName)) {
+          contentForModel = errorMessage || 'OK';
+        } else {
+          contentForModel = result;
+        }
+
         toolResponses.push({
           role: 'tool',
           tool_call_id: call.id,
           name: fnName,
           type: 'function',
-          content: result,
+          content: contentForModel,
         });
 
         // After interactive DOM actions, refresh model context

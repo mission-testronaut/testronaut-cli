@@ -25,6 +25,7 @@
 import 'dotenv/config';
 import { ChromeBrowser } from '../tools/chromeBrowser.js';
 import { turnLoop } from './turnLoop.js';
+import { createEmptyGroundControl, summarizeGroundControlForPrompt } from '../tools/contextControl.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -46,6 +47,9 @@ export async function runAgent(goals, missionName, maxTurns = 20) {
     const tmpDir = path.resolve(process.cwd(), 'missions/tmp');
     fs.mkdirSync(tmpDir, { recursive: true });
 
+    // 🔭 Shared Ground Control state across all goals/missions
+    const groundControl = createEmptyGroundControl();
+
     for (const goal of goals) {
       const steps = [];
       // Unique-ish JSONL file for this mission’s steps
@@ -62,22 +66,79 @@ export async function runAgent(goals, missionName, maxTurns = 20) {
           ? goal.goal
           : goal?.goal?.toString?.() ?? String(goal.goal);
 
+      // 🔭 Build a compact Ground Control snapshot for the prompt
+      const groundSummary = summarizeGroundControlForPrompt(groundControl);
+      let systemContent = `
+You are an autonomous web agent piloting a browser for end-to-end testing.
+
+Core behavior:
+- Use function calls to complete the user's goal.
+- If you are unsure of selectors for inputs or buttons, call 'get_dom' to retrieve page HTML,
+  analyze it, then choose selectors based on labels, names, types, and placeholder values.
+- If you want to click a button labeled "Sign out", prefer:
+
+  click_text({ text: "Sign out" })
+
+  Do NOT use CSS selectors like 'button:contains("Sign out")' — they are invalid.
+
+After completing the goal, respond with a final plain-text message starting with
+either "SUCCESS:" or "FAILURE:" followed by a short explanation.
+
+──── Ground Control (persistent mission state) ────
+You also have special tools to manage a compact, non-pruned state called "Ground Control".
+Ground Control tracks high-level truths about the app and session, such as:
+
+- app:       { baseUrl, currentUrl, routeRole }          // where the app lives and where you are now
+- session:   { loggedIn, userLabel, tenant }             // login state and identity
+- navigation:{ currentLabel }                            // human label for the current view
+- constraints:{ stayWithinBaseUrl }                      // domain / navigation constraints
+- telemetry: [{ ts, kind, text, status, turn, extra }]   // optional breadcrumbs
+
+You have two Ground Control tools:
+
+1) establish_ground_control
+   - Use this EARLY in a mission/phase once you understand key facts, e.g.:
+     - The base URL (e.g. "https://ult.ultimarii.app")
+     - The current URL and what the page represents (routeRole: "login", "chat", "dashboard", etc.)
+     - Whether you are logged in or not.
+   - Call it once per mission phase (premission / mission / postmission) when you first
+     have a clear picture of where you are and what the app state is.
+   - Provide as many known fields as you can, but do not guess wildly. Unknown fields can be omitted.
+
+2) update_ground_control
+   - Use this when important truths change or become clearer, for example:
+     - URL or routeRole changes after navigation or login.
+     - Login state changes (loggedIn false → true or vice versa).
+     - You discover the displayed user name or tenant.
+     - You identify a new page role (e.g. "chat", "settings", "feedback-form").
+   - Only update fields that changed or that you now know with more confidence.
+   - Optionally add short telemetry breadcrumbs about major milestones,
+     e.g. "Logged in and reached chat workspace".
+
+General rules:
+- Keep Ground Control high-level and stable; do NOT spam small, noisy updates.
+- Before leaving a page for a new flow, make sure Ground Control reflects the currentUrl
+  and routeRole so you can reason about where you are and where you’ve been.
+- Respect constraints (e.g. stayWithinBaseUrl = true) when deciding whether it is safe to navigate.
+
+Use Ground Control as your persistent mission memory about:
+- Where the app lives (baseUrl),
+- Where you are (currentUrl, routeRole),
+- Who you are logged in as (session),
+- Any constraints about staying on the correct site.
+      `.trim();
+
+      if (groundSummary) {
+        systemContent +=
+          '\n\n' +
+          `
+──── Ground Control Snapshot ────
+🛰️ ${JSON.stringify(groundSummary, null, 2)}
+          `.trim();
+      }
+
       const messages = [
-        {
-          role: 'system',
-          content: `
-            You are an autonomous web agent. Use function calls to complete the user's goal.
-            If you are unsure of the selectors for inputs or buttons, call 'get_dom' to retrieve page HTML,
-            analyze it, then make your best guess based on labels, names, types, and placeholder values.
-            If you want to click a button labeled "Sign out", prefer:
-
-            click_text({ text: "Sign out" })
-
-            Do NOT use CSS selectors like 'button:contains("Sign out")' — they are invalid.
-
-            After completing the goal, respond with a final plain-text message starting with SUCCESS or FAILURE.
-          `.trim(),
-        },
+        { role: 'system', content: systemContent },
         { role: 'user', content: userContent },
       ];
 
@@ -92,6 +153,7 @@ export async function runAgent(goals, missionName, maxTurns = 20) {
         {
           steps,
           missionName,
+          groundControl,
           onStep: (s) => {
             // Append each step as a JSON line
             try {
