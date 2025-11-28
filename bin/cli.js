@@ -29,7 +29,7 @@
  * Test strategy:
  *   To test pure helpers without running the whole CLI, we export a tiny test bundle:
  *     export const __test__ = { guessMimeType, safeJoin, findLatestReportPair, pkgManagerForCwd }
- *   See tests in tests/cliTests/cli.helpers.test.js
+ *   See tests in tests/toolsTests/cli.helpers.test.js
  */
 
 import fs from 'fs';
@@ -60,6 +60,11 @@ const apiBase = 'http://api.testronaut.app'; // Replace with your actual API bas
 
 const args = process.argv.slice(2);
 
+/**
+ * Read a JSONL steps file into an array of objects.
+ * @param {string} p
+ * @returns {object[]|null}
+ */
 function readJsonlSteps(p) {
   if (!p || !fs.existsSync(p)) return null;
   const lines = fs.readFileSync(p, 'utf8').split(/\r?\n/).filter(Boolean);
@@ -73,21 +78,27 @@ function readJsonlSteps(p) {
 /**
  * Merge duplicate turns without losing information.
  * Strategy:
- *  - Keep the latest **non-empty** version for a given turn if both exist
+ *  - Keep the latest **non-empty** version for a given (turn,retry) pair
  *  - If both are non-empty, keep the later one (last write wins)
  *  - Preserve original order by line index as a tiebreaker
+ *
+ * @param {Array} steps
+ * @returns {Array}
  */
 function mergeDuplicateTurns(steps) {
   const out = [];
-  const byTurn = new Map(); // turn -> index in out
+  const byKey = new Map(); // composite key -> index in out
   for (const s of steps) {
     const turn = Number.isFinite(s.turn) ? s.turn : out.length;
+    const attempt = Number.isFinite(s.retryAttempt) ? s.retryAttempt : 1;
     const hasEvents = Array.isArray(s.events) && s.events.length > 0;
-    if (!byTurn.has(turn)) {
+    const key = `${turn}::${attempt}`;
+
+    if (!byKey.has(key)) {
       out.push(s);
-      byTurn.set(turn, out.length - 1);
+      byKey.set(key, out.length - 1);
     } else {
-      const idx = byTurn.get(turn);
+      const idx = byKey.get(key);
       const existing = out[idx];
       const existingHasEvents = Array.isArray(existing.events) && existing.events.length > 0;
       // Prefer the one with events; if both have events, prefer the newer (s)
@@ -101,10 +112,27 @@ function mergeDuplicateTurns(steps) {
       }
     }
   }
-  // stable sort by `turn` ascending, then by original order via array index already preserved
-  out.sort((a, b) => (a.turn ?? 0) - (b.turn ?? 0));
+  // stable sort by `turn` then `retryAttempt`, then by original order
+  out.sort((a, b) => {
+    const ta = a.turn ?? 0;
+    const tb = b.turn ?? 0;
+    if (ta !== tb) return ta - tb;
+    const ra = Number.isFinite(a.retryAttempt) ? a.retryAttempt : 1;
+    const rb = Number.isFinite(b.retryAttempt) ? b.retryAttempt : 1;
+    if (ra !== rb) return ra - rb;
+    return 0;
+  });
   return out;
 }
+
+// Expose a small bundle for unit tests (helper-only; not the CLI flow)
+export const __test__ = {
+  guessMimeType,
+  safeJoin,
+  findLatestReportPair,
+  mergeDuplicateTurns,
+  readJsonlSteps,
+};
 
 // Look for --model=<id> or --model <id>
 let modelOverride;
@@ -149,6 +177,37 @@ if (turnsFlagIndex >= 0) {
   args.splice(turnsFlagIndex, turnsOverride ? 2 : 1);
 }
 
+// Look for --retry_limit / --retry-limit
+let retryOverride;
+const retryFlagIndex = args.findIndex(a =>
+  a === '--retry_limit' ||
+  a.startsWith('--retry_limit=') ||
+  a === '--retry-limit' ||
+  a.startsWith('--retry-limit=')
+);
+if (retryFlagIndex >= 0) {
+  const rawArg = args[retryFlagIndex];
+  if (rawArg.includes('=')) {
+    retryOverride = rawArg.split('=')[1];
+  } else if (args[retryFlagIndex + 1]) {
+    retryOverride = args[retryFlagIndex + 1];
+  }
+
+  if (retryOverride) {
+    const n = Number(retryOverride.trim());
+    if (Number.isFinite(n)) {
+      const clamped = Math.min(10, Math.max(1, n));
+      process.env.TESTRONAUT_RETRY_LIMIT = String(clamped);
+      console.log(`🔁 Retry limit override: ${process.env.TESTRONAUT_RETRY_LIMIT} (allowed 1-10)`);
+    } else {
+      console.warn(`⚠️ Invalid --retry_limit value "${retryOverride}". Ignoring.`);
+    }
+  }
+
+  // Remove flag & value so they aren’t treated as filenames
+  args.splice(retryFlagIndex, retryOverride ? 2 : 1);
+}
+
 const missionsDir = path.resolve(process.cwd(), 'missions');
 
 const allResults = [];
@@ -170,6 +229,7 @@ Options:
   --init                    Scaffold project folders and a welcome mission
   --turns=<n>               Override max turns for this run (e.g., --turns=30)
   --help                    Show this help message
+  --retry_limit=<n>         Override agent turn retry limits (minimum 1, maximum 10)
 
 Examples:
   npx testronaut
@@ -720,6 +780,11 @@ function safeJoin(root, relUrlPath) {
   return resolved;
 }
 
+/**
+ * Best-effort cross-platform URL opener.
+ * @param {string} targetUrl
+ * @returns {Promise<void>}
+ */
 async function openInBrowser(targetUrl) {
   const platform = process.platform;
   const quoted = `"${targetUrl}"`;

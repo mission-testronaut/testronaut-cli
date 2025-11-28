@@ -25,7 +25,7 @@
 
 import { runAgent } from '../core/agent.js';
 import { redactPasswordInText } from '../core/redaction.js';
-import { loadConfig, enforceTurnBudget } from '../core/config.js';
+import { loadConfig, enforceTurnBudget, getRetryLimit } from '../core/config.js';
 
 /**
  * Run a mission flow.
@@ -38,8 +38,13 @@ export async function runMissions({ preMission, mission, postMission }, missionN
   const cfg = await loadConfig();
   const { effectiveMax, limits, notes } = enforceTurnBudget(cfg);
   const maxTurns = effectiveMax;
+  const retryInfo = getRetryLimit(cfg);
+  const retryLimit = retryInfo.value;
   if (notes.length) {
     console.warn(notes.join('\n'));
+  }
+  if (retryInfo.clamped) {
+    console.warn(`⚠️ Retry limit clamped to ${retryLimit} (allowed range 1-10).`);
   }
 
   // 2) Normalize submissions
@@ -123,7 +128,7 @@ export async function runMissions({ preMission, mission, postMission }, missionN
   );
 
   // 3) Execute
-  const success = await runAgent(goals, missionName, maxTurns);
+  const success = await runAgent(goals, missionName, maxTurns, retryLimit);
   if (!success) {
     console.log(`❌ Aborting after failed goal.`);
     return;
