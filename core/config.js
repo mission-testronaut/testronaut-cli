@@ -53,6 +53,36 @@ export function getMaxTurns(cfg, fallback = 20) {
 }
 
 /**
+ * Resolve retry limit per turn (attempts - 1) with clamping.
+ * Priority: env TESTRONAUT_RETRY_LIMIT → config.retryLimit → fallback
+ *
+ * @param {object} cfg
+ * @param {number} [fallback=2]
+ * @returns {{ value:number, source:'env'|'config'|'default', clamped:boolean }}
+ */
+export function getRetryLimit(cfg, fallback = 2) {
+  const clampRetry = (n) => {
+    const clamped = Math.min(10, Math.max(1, n));
+    return { value: clamped, clamped: clamped !== n };
+  };
+
+  const envVal = Number(process.env.TESTRONAUT_RETRY_LIMIT);
+  if (Number.isFinite(envVal)) {
+    const { value, clamped } = clampRetry(envVal);
+    return { value, source: 'env', clamped };
+  }
+
+  const cfgVal = Number(cfg?.retryLimit);
+  if (Number.isFinite(cfgVal)) {
+    const { value, clamped } = clampRetry(cfgVal);
+    return { value, source: 'config', clamped };
+  }
+
+  const { value, clamped } = clampRetry(fallback);
+  return { value, source: 'default', clamped };
+}
+
+/**
  * Baseline limits for mission runs. Adjust here for global defaults.
  *
  * @returns {{

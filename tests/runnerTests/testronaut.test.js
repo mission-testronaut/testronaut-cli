@@ -9,10 +9,11 @@ vi.mock('../../core/redaction.js', () => ({
 vi.mock('../../core/config.js', () => ({
   loadConfig: vi.fn(),
   enforceTurnBudget: vi.fn(),
+  getRetryLimit: vi.fn(),
 }));
 
 import { runAgent } from '../../core/agent.js';
-import { loadConfig, enforceTurnBudget } from '../../core/config.js';
+import { loadConfig, enforceTurnBudget, getRetryLimit } from '../../core/config.js';
 
 // Adjust the import path if your file lives elsewhere
 import { runMissions } from '../../runner/testronaut.js';
@@ -20,6 +21,8 @@ import { runMissions } from '../../runner/testronaut.js';
 describe('cli/testronaut.runMissions (with enforceTurnBudget)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default retry limit unless overridden in a test
+    getRetryLimit.mockReturnValue({ value: 2, source: 'default', clamped: false });
   });
 
   it('passes effectiveMax to runAgent and logs any notes', async () => {
@@ -30,6 +33,7 @@ describe('cli/testronaut.runMissions (with enforceTurnBudget)', () => {
       notes: ['⚠️ maxTurns (999) exceeds hardMaxTurns (200). Clamping to 200.'],
       strict: false,
     });
+    getRetryLimit.mockReturnValue({ value: 2, source: 'default', clamped: false });
 
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -46,7 +50,7 @@ describe('cli/testronaut.runMissions (with enforceTurnBudget)', () => {
       expect.stringContaining('Clamping to 200')
     );
     expect(runAgent).toHaveBeenCalledWith(
-      expect.any(Array), 'Budgeted Run', 200
+      expect.any(Array), 'Budgeted Run', 200, 2
     );
 
     warn.mockRestore();
@@ -61,6 +65,7 @@ describe('cli/testronaut.runMissions (with enforceTurnBudget)', () => {
       notes: [],
       strict: false,
     });
+    getRetryLimit.mockReturnValue({ value: 3, source: 'default', clamped: false });
 
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -72,7 +77,7 @@ describe('cli/testronaut.runMissions (with enforceTurnBudget)', () => {
     await runMissions({ mission: 'No warnings' }, 'Clean');
 
     expect(warn).not.toHaveBeenCalled();
-    expect(runAgent).toHaveBeenCalledWith(expect.any(Array), 'Clean', 20);
+    expect(runAgent).toHaveBeenCalledWith(expect.any(Array), 'Clean', 20, 3);
 
     warn.mockRestore();
     log.mockRestore();
@@ -138,8 +143,8 @@ describe('cli/testronaut.runMissions (with enforceTurnBudget)', () => {
     // Mission name is the passed-in missionName for main
     expect(goals[1].submissionName).toMatch(/^My Mission/);
 
-    // Effective max turns passed through
-    expect(runAgent).toHaveBeenCalledWith(expect.any(Array), 'My Mission', 15);
+    // Effective max turns and retry limit passed through
+    expect(runAgent).toHaveBeenCalledWith(expect.any(Array), 'My Mission', 15, 2);
 
     log.mockRestore();
   });

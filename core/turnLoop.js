@@ -67,6 +67,8 @@ const llm = getLLM(PROVIDER_ID);
 let totalTokensUsed = 0;
 let turnTimestamps = [];
 let shouldBackoff;
+const DEFAULT_TURN_RETRY_LIMIT = 2; // number of retries (not counting initial attempt)
+const TURN_RETRY_BASE_DELAY_MS = 500;
 
 // Certain tools mutate the browser or produce side effects that are
 // *useful for humans* (reports/screenshots), but do not carry semantic
@@ -171,16 +173,25 @@ export const turnLoop = async (
   currentStep = {},
   ctx = {} // { steps, missionName, groundControl }
 ) => {
-  const { steps = [], missionName, groundControl = createEmptyGroundControl() } = ctx;
+  const { steps = [], missionName, groundControl = createEmptyGroundControl(), retryLimit: retryLimitRaw } = ctx;
+  const stepsArchive = ctx.stepsArchive || steps;
+  const retryLimitClamped = Math.min(10, Math.max(1, Number.isFinite(retryLimitRaw) ? retryLimitRaw : DEFAULT_TURN_RETRY_LIMIT)); // retries allowed (excludes initial)
+  const maxAttempts = retryLimitClamped + 1; // includes initial attempt
   ctx.groundControl = groundControl;
   let agentMemory = { lastMenuExpanded: false };
+  let turnRetries = 0;
+  let stepSeq = ctx._stepSeq || 0;
   
   // Centralized recorder: push to in-memory buffer AND fire optional callback for streaming
   // Idempotent recorder – prevents accidental double-push
   const recordStep = (step) => {
     if (!step || step.__recorded) return;
+    step._seq = stepSeq++;
     step.__recorded = true;
     try { steps.push(step); } catch {}
+    if (stepsArchive && stepsArchive !== steps) {
+      try { stepsArchive.push(step); } catch {}
+    }
     try { ctx?.onStep?.(step); } catch {}
   };
   
@@ -190,7 +201,19 @@ export const turnLoop = async (
   for (let turn = currentTurn; turn < maxTurns; turn++) {
     console.log(`\n🔄 Turn ${turn + 1}/${maxTurns}`);
     let response;
-    const step = { turn, events: [], result: '🟡 In Progress', missionName };
+    const attempt = turnRetries + 1;
+    const step = {
+      turn,
+      retryAttempt: attempt,
+      retryLimit: retryLimitClamped, // number of retries allowed (excludes initial)
+      events: [],
+      result: '🟡 In Progress',
+      missionName,
+    };
+    if (attempt > 1) {
+      const retryNumber = attempt - 1;
+      step.events.push(`🔁 Re-attempt ${retryNumber}/${retryLimitClamped} for turn`);
+    }
 
     try {
       // Refresh token usage window (rolling 60 seconds)
@@ -211,7 +234,7 @@ export const turnLoop = async (
         step.events.push('❌ Tool call structure invalid and no placeholders inserted.');
         step.result = '❌ Failure';
         recordStep(step);
-        return steps;
+        return { success: false, steps: stepsArchive };
       }
 
       // Detect orphaned assistant tool calls with no matching tool responses
@@ -231,7 +254,7 @@ export const turnLoop = async (
         step.events.push('🛑 Detected assistant tool calls without matching tool responses');
         step.result = '❌ Failure';
         recordStep(step);
-        return steps;
+        return { success: false, steps: stepsArchive };
       }
 
       // Before calling the model, trim/sanitize the conversation context.
@@ -273,7 +296,7 @@ export const turnLoop = async (
           step.events.push('❌ Too many retries. Exiting.');
           step.result = '❌ Failure';
           recordStep(step);
-          return steps;
+          return { success: false, steps: stepsArchive };
         }
         retryCount += 1;
         turn -= 1;
@@ -283,7 +306,7 @@ export const turnLoop = async (
         step.events.push(`❌ Bad request: ${err.message}`);
         step.result = '❌ Failure';
         recordStep(step);
-        return steps;
+        return { success: false, steps: stepsArchive };
       } else {
         throw err;
       }
@@ -319,6 +342,7 @@ export const turnLoop = async (
     if (msg.tool_calls?.length) {
       console.log('Processing tool calls...');
       const toolResponses = [];
+      let hadToolIssues = false;
 
       for (const call of msg.tool_calls) {
         const fnName = call.function.name;
@@ -335,6 +359,7 @@ export const turnLoop = async (
         } catch (e) {
           errorMessage = `ERROR: ${e.message}`;
           result = errorMessage;
+          hadToolIssues = true;
         }
 
         // Capture and log any file upload/download events (for reports)
@@ -416,7 +441,21 @@ export const turnLoop = async (
 
       // Merge new assistant + tool responses back into conversation
       messages.push(msg, ...toolResponses);
-      step.result = '✅ Passed';
+      if (hadToolIssues && turnRetries < retryLimitClamped) {
+        step.result = '⏳ Retrying turn';
+        const retryNumber = attempt - 1;
+        step.events.push(`🔁 Re-attempt ${retryNumber}/${retryLimitClamped} after tool issues`);
+        recordStep(step);
+        turnRetries += 1;
+        const delay = Math.min(TURN_RETRY_BASE_DELAY_MS * 2 ** (turnRetries - 1), 2000);
+        await wait(delay);
+        turn -= 1; // re-use the same turn index
+        continue;
+      }
+
+      // reset retries after a clean turn or after exhausting retries
+      turnRetries = 0;
+      step.result = hadToolIssues ? '⚠️ Turn Issues' : '✅ Passed';
       recordStep(step);
       continue;
     }
@@ -429,7 +468,8 @@ export const turnLoop = async (
       step.events.push(finalResponse.finalMessage);
       step.result = finalResponse.success ? '✅ Mission Success' : '❌ Mission Failure';
       recordStep(step);
-      return { success: finalResponse.finalMessage, steps };
+      turnRetries = 0;
+      return { success: finalResponse.success, finalMessage: finalResponse.finalMessage, steps: stepsArchive };
     }
 
     // ─────────────────────────────────────────────
@@ -443,5 +483,8 @@ export const turnLoop = async (
     // This is a meaningful turn even without tool calls — record it.
     step.result = step.result || '🟡 In Progress';
     recordStep(step);
+    turnRetries = 0;
   }
+
+  return { success: false, steps: stepsArchive };
 };

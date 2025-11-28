@@ -1,7 +1,30 @@
-// generateHtmlReport.js
+/**
+ * generateHtmlReport.js
+ * ---------------------
+ * Purpose:
+ *   Render a Testronaut run summary into a single, self-contained HTML file.
+ *
+ * Responsibilities:
+ *   - Escape and format mission/step data into a readable report.
+ *   - Group submissions by mission and surface per-step metadata (tokens, retries).
+ *   - Write the HTML to disk at the provided output path (or a default location).
+ *
+ * Related tests:
+ *   tests/toolsTests/generateHtmlReport.test.js
+ *
+ * Used by:
+ *   - CLI report generation and upload flows.
+ */
 import fs from 'fs';
 import path from 'path';
 
+/**
+ * Render and write a Testronaut run report to disk.
+ *
+ * @param {object} report - normalized run JSON (runId, missions, summary, llm, etc.)
+ * @param {string} [outputPath] - optional absolute/relative path for the HTML file
+ * @returns {string} absolute path to the written HTML file
+ */
 export function generateHtmlReport(report, outputPath) {
   const { runId, startTime, endTime, missions = [], summary = {}, llm = {} } = report;
   const durationSec =
@@ -9,7 +32,7 @@ export function generateHtmlReport(report, outputPath) {
       ? ((new Date(endTime) - new Date(startTime)) / 1000).toFixed(2)
       : '—';
 
-  // helpers
+  // Escaping helpers for text and HTML attributes
   const esc = (s) => String(s ?? '')
     .replace(/&/g, '&amp;').replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
@@ -28,6 +51,17 @@ export function generateHtmlReport(report, outputPath) {
     const stepItems = steps.map((step, idx) => {
       const events = Array.isArray(step.events) ? step.events : [];
       const ok = /✅|Passed|Mission Success/i.test(step.result || '');
+      const resultRaw = step.result || '—';
+      const resultTooltip = resultRaw.includes('⚠️ Turn Issues')
+        ? 'Turn had tool/action issues (e.g., selector/timeouts). It may not indicate a product bug.'
+        : '';
+      const retryAttempt = step.retryAttempt || 1; // includes initial
+      const retryLimit = step.retryLimit; // number of retries allowed (excludes initial)
+      const retryNumber = retryAttempt - 1;
+      const retryTotal = Number.isFinite(retryLimit) ? retryLimit : Math.max(retryNumber, 0);
+      const attemptLabel = retryNumber > 0
+        ? ` (re-attempt ${retryNumber}/${retryTotal || retryNumber})`
+        : '';
       const imgTag = step.screenshotPath
         ? `<img src="${esc(step.screenshotPath)}" alt="screenshot turn ${esc(step.turn ?? idx)}">`
         : '';
@@ -42,9 +76,9 @@ export function generateHtmlReport(report, outputPath) {
       return `
         <details class="step" ${ok ? '' : 'open'}>
           <summary>
-            <span class="turn">Turn ${esc((step.turn ?? idx) + 1)}</span>
+            <span class="turn">Turn ${esc((step.turn ?? idx) + 1)}${esc(attemptLabel)}</span>
             ${planSpan}
-            <span class="step-result ${ok ? 'ok' : 'bad'}">${esc(step.result || '—')}</span>
+            <span class="step-result ${ok ? 'ok' : 'bad'}" ${resultTooltip ? `title="${escAttr(resultTooltip)}"` : ''}>${esc(resultRaw)}</span>
             <span class="tokens">tokens: ${esc(step.tokensUsed ?? '—')} / total: ${esc(step.totalTokensUsed ?? '—')}</span>
           </summary>
           <pre class="events">${esc(events.join('\n')) || '(no events)'}</pre>

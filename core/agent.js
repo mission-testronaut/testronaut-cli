@@ -37,7 +37,7 @@ import path from 'path';
  * @param {number} [maxTurns=20] - upper bound for turnLoop per goal
  * @returns {Promise<Array<{missionName:string, submissionType:string, submissionName:string|null, status:'passed'|'failed', steps:any[], startTime:number, endTime:number}>>}
  */
-export async function runAgent(goals, missionName, maxTurns = 20) {
+export async function runAgent(goals, missionName, maxTurns = 20, retryLimit) {
   const browser = new ChromeBrowser();
   await browser.start();
   let result;
@@ -52,6 +52,7 @@ export async function runAgent(goals, missionName, maxTurns = 20) {
 
     for (const goal of goals) {
       const steps = [];
+      const stepsArchive = [];
       // Unique-ish JSONL file for this mission’s steps
       const stepFile = path.join(
         tmpDir,
@@ -152,7 +153,9 @@ Use Ground Control as your persistent mission memory about:
         null, // currentStep
         {
           steps,
+          stepsArchive,
           missionName,
+          retryLimit,
           groundControl,
           onStep: (s) => {
             // Append each step as a JSON line
@@ -160,26 +163,24 @@ Use Ground Control as your persistent mission memory about:
               fs.appendFileSync(stepFile, JSON.stringify(s) + '\n');
               // Keep memory in check: retain only the last ~20 steps in RAM
               if (steps.length > 20) steps.splice(0, steps.length - 20);
+              stepsArchive.push(s);
             } catch {} // best-effort; don’t crash the agent
           }
         }
       );
 
       function dedupeSteps(steps) {
-        const seen = new Set();
-        const out = [];
-        for (const s of steps) {
-          const first = s?.events?.[0] || '';
-          const key = `${s.turn}::${s.summary}::${first}`;
-          if (!seen.has(key)) {
-            seen.add(key);
-            out.push(s);
+        const copy = [...steps];
+        copy.sort((a, b) => {
+          if (Number.isFinite(a?._seq) && Number.isFinite(b?._seq)) {
+            return a._seq - b._seq;
           }
-        }
-        return out;
+          return (a?.turn ?? 0) - (b?.turn ?? 0);
+        });
+        return copy;
       }
 
-      const compact = dedupeSteps(steps);
+      const compact = dedupeSteps(stepsArchive.length ? stepsArchive : steps);
 
       // Snapshot steps (avoid retaining references to mutable arrays)
       missionResults.push({

@@ -128,7 +128,7 @@ describe('turnLoop', () => {
     const messages = baseMessages();
     const result = await turnLoop(browser, messages, 1, 0, 0, {}, { steps: [], missionName: 'demo' });
 
-    expect(result).toBeTruthy();
+    expect(result.success).toBe(true);
     expect(result.steps?.length).toBe(1);
     const step = result.steps[0];
     expect(step.tokensUsed).toBe(42);
@@ -163,7 +163,7 @@ describe('turnLoop', () => {
     const messages = baseMessages();
     const res = await turnLoop(browser, messages, 2, 0, 0, {}, { steps: [], missionName: 'demo' });
 
-    expect(res).toBeTruthy();
+    expect(res.success).toBe(true);
     expect(res.steps.length).toBe(2);
 
     const step1 = res.steps[0];
@@ -173,5 +173,57 @@ describe('turnLoop', () => {
 
     const step2 = res.steps[1];
     expect(step2.result).toMatch(/Success/);
+  });
+
+  it('retries a turn on tool error before marking issues', async () => {
+    // First turn: tool call → click_text will throw
+    shared.chatMock.mockResolvedValueOnce({
+      message: {
+        role: 'assistant',
+        content: '',
+        tool_calls: [
+          {
+            id: 'tool_retry',
+            type: 'function',
+            function: { name: 'click_text', arguments: JSON.stringify({ text: 'Hello' }) },
+          },
+        ],
+      },
+      usage: { total_tokens: 7 },
+    });
+    // Retry turn: same tool call, click_text succeeds
+    shared.chatMock.mockResolvedValueOnce({
+      message: {
+        role: 'assistant',
+        content: '',
+        tool_calls: [
+          {
+            id: 'tool_retry_2',
+            type: 'function',
+            function: { name: 'click_text', arguments: JSON.stringify({ text: 'Hello' }) },
+          },
+        ],
+      },
+      usage: { total_tokens: 6 },
+    });
+    // Final turn: mission completes
+    shared.chatMock.mockResolvedValueOnce({
+      message: { role: 'assistant', content: 'FINAL: done' },
+      usage: { total_tokens: 5 },
+    });
+
+    // click_text fails once, then succeeds
+    shared.chromeToolSpies.click_text
+      .mockImplementationOnce(async () => { throw new Error('no locator'); })
+      .mockImplementationOnce(async () => JSON.stringify({ ok: true, clicked: 'Hello' }));
+
+    const messages = baseMessages();
+    const res = await turnLoop(browser, messages, 3, 0, 0, {}, { steps: [], missionName: 'demo' });
+
+    expect(res.success).toBe(true);
+    expect(res.steps.length).toBe(3);
+    expect(res.steps[0].result).toBe('⏳ Retrying turn');
+    expect(res.steps[1].result).toBe('✅ Passed');
+    expect(res.steps[2].result).toMatch(/Success/);
   });
 });

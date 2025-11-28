@@ -8,6 +8,7 @@ import { readFile } from 'node:fs/promises';
 import {
   loadConfig,
   getMaxTurns,
+  getRetryLimit,
   resolveTurnLimits,
   enforceTurnBudget,
 } from '../../core/config.js';
@@ -61,6 +62,46 @@ describe('core/config', () => {
       expect(l.maxIdleTurns).toBe(6);
       expect(l.maxErrors).toBe(5);
       expect(l.maxSeconds).toBe(600);
+    });
+  });
+
+  describe('getRetryLimit', () => {
+    const OLD_ENV = { ...process.env };
+    beforeEach(() => {
+      process.env = { ...OLD_ENV };
+      delete process.env.TESTRONAUT_RETRY_LIMIT;
+    });
+    afterEach(() => {
+      process.env = { ...OLD_ENV };
+    });
+
+    it('returns default when missing', () => {
+      const res = getRetryLimit({});
+      expect(res.value).toBe(2);
+      expect(res.source).toBe('default');
+      expect(res.clamped).toBe(false);
+    });
+
+    it('uses config value and clamps to range', () => {
+      expect(getRetryLimit({ retryLimit: 5 }).value).toBe(5);
+      const high = getRetryLimit({ retryLimit: 99 });
+      expect(high.value).toBe(10);
+      expect(high.clamped).toBe(true);
+      const low = getRetryLimit({ retryLimit: 0 });
+      expect(low.value).toBe(1);
+      expect(low.clamped).toBe(true);
+    });
+
+    it('prefers env over config and clamps', () => {
+      process.env.TESTRONAUT_RETRY_LIMIT = '8';
+      const res = getRetryLimit({ retryLimit: 3 });
+      expect(res.value).toBe(8);
+      expect(res.source).toBe('env');
+
+      process.env.TESTRONAUT_RETRY_LIMIT = '0';
+      const clampedLow = getRetryLimit({ retryLimit: 3 });
+      expect(clampedLow.value).toBe(1);
+      expect(clampedLow.clamped).toBe(true);
     });
   });
 
