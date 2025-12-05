@@ -47,6 +47,7 @@ import { promisify } from 'util';
 const exec = promisify(execCmd);
 import url from 'url';
 import { ensureBrowsers } from '../tools/playwrightSetup.js';
+import { discoverMissionFiles } from '../core/missionDiscovery.js';
 
 // Keep PW browsers inside the project to avoid global cache skew
 process.env.PLAYWRIGHT_BROWSERS_PATH = process.env.PLAYWRIGHT_BROWSERS_PATH || '0';
@@ -208,8 +209,6 @@ if (retryFlagIndex >= 0) {
   args.splice(retryFlagIndex, retryOverride ? 2 : 1);
 }
 
-const missionsDir = path.resolve(process.cwd(), 'missions');
-
 const allResults = [];
 const runId = `run_${Date.now()}`;
 const startTime = new Date();
@@ -302,14 +301,16 @@ if (args.includes('serve') || args.includes('view')) {
   await new Promise(() => {}); // ✅ never resolves; Ctrl+C will terminate
 }
 
-if (!fs.existsSync(missionsDir)) {
-  console.error('❌ No `missions` directory found.');
+const { root: missionsRoot, files: discoveredMissions } = await discoverMissionFiles({ cwd: process.cwd() });
+
+if (!fs.existsSync(missionsRoot)) {
+  console.error(`❌ Missions directory not found: ${path.relative(process.cwd(), missionsRoot)}`);
   process.exit(1);
 }
 
 const runFile = async (filePath) => {
   try {
-    const modulePath = path.resolve(missionsDir, filePath);
+    const modulePath = path.resolve(missionsRoot, filePath);
     const missionsModule = await import(`file://${modulePath}`);
 
     if (typeof missionsModule.executeMission === 'function') {
@@ -331,9 +332,8 @@ if (args.length > 0) {
     await runFile(file);
   }
 } else {
-  // Run all *.mission.js files
-  const files = fs.readdirSync(missionsDir).filter(f => f.endsWith('.mission.js'));
-  for (const file of files) {
+  // Run missions discovered from config (or default behavior)
+  for (const file of discoveredMissions) {
     await runFile(file);
   }
 }
