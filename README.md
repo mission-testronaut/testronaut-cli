@@ -178,6 +178,8 @@ Each includes:
 - **LLMs** for reasoning, DOM parsing, and tool use  
 - **Token throttling** + adaptive cooldowns  
 - **Extensible architecture** for custom tools and workflows  
+- **DOM trimming controls** to cap list sizes (env `TESTRONAUT_DOM_LIST_LIMIT` or config `dom.listItemLimit`; use `all` cautiously—it can spike token use)
+- **Resource guard** to ensure full list/table downloads (config `resourceGuard` or env `TESTRONAUT_RESOURCE_*`)
 
 ---
 

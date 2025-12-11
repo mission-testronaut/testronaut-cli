@@ -52,6 +52,14 @@ export function defaultConfig(rootBasename) {
     outputDir: 'missions/mission_reports',
     projectName: rootBasename,
     maxTurns: 20,
+    dom: {
+      listItemLimit: 3,
+    },
+    resourceGuard: {
+      enabled: true,
+      hrefIncludes: ['/document/', '/file/', '/download', '/attachment/'],
+      dataTypes: ['document', 'file', 'item', 'row'],
+    },
   };
 }
 

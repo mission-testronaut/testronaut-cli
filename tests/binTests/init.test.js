@@ -77,6 +77,8 @@ describe('initializeTestronautProject', () => {
     expect(cfg.initialized).toBe(true);
     expect(cfg.outputDir).toBe('missions/mission_reports');
     expect(typeof cfg.maxTurns).toBe('number');
+    expect(cfg.dom?.listItemLimit).toBe(3);
+    expect(cfg.resourceGuard?.enabled).toBe(true);
 
     // .env
     const envPath = path.join(temp, '.env');
@@ -108,6 +110,8 @@ describe('initializeTestronautProject', () => {
     const cfg = readJson(path.join(temp, 'testronaut-config.json'));
     expect(cfg.provider).toBe('gemini');
     expect(cfg.model).toBe('gemini-2.5-flash');
+    expect(cfg.dom?.listItemLimit).toBe(3);
+    expect(cfg.resourceGuard?.enabled).toBe(true);
 
     const envTxt = fs.readFileSync(path.join(temp, '.env'), 'utf8');
     expect(envTxt).toMatch(/GEMINI_API_KEY=AIza/);
@@ -185,5 +189,7 @@ describe('initializeTestronautProject', () => {
     expect(cfg.projectName).toBe('my-project'); // preserved
     expect(cfg.outputDir).toBe('missions/mission_reports'); // default filled in
     expect(cfg.maxTurns).toBe(20); // default filled in
+    expect(cfg.dom?.listItemLimit).toBe(3);
+    expect(cfg.resourceGuard?.enabled).toBe(true);
   });
 });
