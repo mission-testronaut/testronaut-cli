@@ -1,3 +1,16 @@
+/**
+ * toolsSchema.js
+ * --------------
+ * Canonical list of tool/function definitions exposed to the LLM.
+ * Keep descriptions concise but clear; they are surfaced directly in the
+ * function/tool-calling interface for the model.
+ *
+ * Notes:
+ * - When adding a new tool, include a short description and minimally
+ *   strict parameters schema to avoid over-constraining the model.
+ * - Resource helper `resource_progress` is a lightweight introspection tool
+ *   used to report remaining detected resources (documents/files/rows).
+ */
 const toolsSchema = [
   {
     type: 'function',
@@ -285,6 +298,35 @@ const toolsSchema = [
         required: []
       }
     }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_local_files',
+      description: 'List files from a local directory (defaults to missions/files). Use to discover downloaded PDFs before uploading.',
+      parameters: {
+        type: 'object',
+        properties: {
+          dir: { type: 'string', description: 'Directory relative to project root (default: missions/files)' },
+          extensions: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional list of extensions to include (e.g., [".pdf"])'
+          }
+        }
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'resource_progress',
+      description: 'Report remaining items from the detected resource list (documents/files/rows) to ensure full coverage.',
+      parameters: {
+        type: 'object',
+        properties: {},
+      },
+    },
   },
   {
     type: 'function',
