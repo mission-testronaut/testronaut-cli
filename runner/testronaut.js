@@ -23,9 +23,20 @@
  */
 
 
+import fs from 'fs';
+import path from 'path';
 import { runAgent } from '../core/agent.js';
 import { redactPasswordInText } from '../core/redaction.js';
-import { loadConfig, enforceTurnBudget, getRetryLimit } from '../core/config.js';
+import { loadConfig, enforceTurnBudget, getRetryLimit, getDomListLimit, getResourceGuardConfig } from '../core/config.js';
+
+// Check process env for debug toggles (shared helper for tests and CLI).
+const isDebugEnabled = () => {
+  const raw = String(process.env.TESTRONAUT_DEBUG || '').trim().toLowerCase();
+  return ['1', 'true', 'yes', 'on'].includes(raw);
+};
+
+// Presentable string for DOM list limit logging/debug output.
+const formatListLimit = (v) => v === Infinity ? 'all' : v;
 
 /**
  * Run a mission flow.
@@ -40,11 +51,55 @@ export async function runMissions({ preMission, mission, postMission }, missionN
   const maxTurns = effectiveMax;
   const retryInfo = getRetryLimit(cfg);
   const retryLimit = retryInfo.value;
+  const domListLimitInfo = getDomListLimit(cfg);
+  const resourceGuard = getResourceGuardConfig(cfg);
+  const debugEnabled = isDebugEnabled();
   if (notes.length) {
     console.warn(notes.join('\n'));
   }
   if (retryInfo.clamped) {
     console.warn(`⚠️ Retry limit clamped to ${retryLimit} (allowed range 1-10).`);
+  }
+  if (domListLimitInfo?.clamped) {
+    console.warn(`⚠️ DOM list limit clamped to ${domListLimitInfo.value} (allowed 0-100 or "all"/"none").`);
+  }
+  if (domListLimitInfo?.mode === 'all') {
+    console.warn('⚠️ DOM list limit is set to "all". This can dramatically increase token usage and may break flows on heavy pages.');
+  }
+  if (debugEnabled) {
+    const cfgDomRaw = cfg?.dom?.listItemLimit ?? cfg?.dom?.listLimit ?? cfg?.domListLimit;
+    console.log('[debug] Debug mode enabled');
+    console.log('[debug] Turn limits', {
+      maxTurns,
+      softMax: limits.softMaxTurns,
+      hardMax: limits.hardMaxTurns,
+      hardMin: limits.hardMinTurns,
+    });
+    console.log('[debug] Retry limit', { retryLimit, source: retryInfo.source, clamped: retryInfo.clamped });
+    console.log('[debug] DOM list limit', {
+      env: process.env.TESTRONAUT_DOM_LIST_LIMIT ?? 'unset',
+      config: cfgDomRaw ?? 'unset',
+      resolved: formatListLimit(domListLimitInfo?.value),
+      mode: domListLimitInfo?.mode,
+      source: domListLimitInfo?.source,
+      clamped: domListLimitInfo?.clamped,
+    });
+    console.log('[debug] Resource guard', {
+      enabled: resourceGuard.enabled,
+      hrefIncludes: resourceGuard.hrefIncludes,
+      dataTypes: resourceGuard.dataTypes,
+    });
+    // Helpful for upload missions: show missions/files contents
+    const filesDir = path.resolve(process.cwd(), 'missions/files');
+    try {
+      const entries = fs.readdirSync(filesDir);
+      const pdfs = entries.filter(f => f.toLowerCase().endsWith('.pdf'));
+      console.log(`[debug] missions/files dir: ${filesDir}`);
+      console.log(`[debug] missions/files entries (${entries.length}):`, entries);
+      if (pdfs.length) console.log(`[debug] missions/files PDFs (${pdfs.length}):`, pdfs);
+    } catch (err) {
+      console.log(`[debug] missions/files not readable: ${err.message}`);
+    }
   }
 
   // 2) Normalize submissions
@@ -128,7 +183,13 @@ export async function runMissions({ preMission, mission, postMission }, missionN
   );
 
   // 3) Execute
-  const success = await runAgent(goals, missionName, maxTurns, retryLimit);
+  const success = await runAgent(
+    goals,
+    missionName,
+    maxTurns,
+    retryLimit,
+    { domListLimit: domListLimitInfo?.value, debug: debugEnabled, resourceGuard }
+  );
   if (!success) {
     console.log(`❌ Aborting after failed goal.`);
     return;
@@ -141,3 +202,6 @@ export async function runMissions({ preMission, mission, postMission }, missionN
   console.log('\n✅ Mission flow complete.');
   return success;
 }
+
+// Exposed for unit tests.
+export const __test__ = { isDebugEnabled, formatListLimit };
