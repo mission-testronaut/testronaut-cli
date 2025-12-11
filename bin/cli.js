@@ -154,6 +154,48 @@ if (modelFlagIndex >= 0) {
   args.splice(modelFlagIndex, modelOverride ? 2 : 1);
 }
 
+// Look for --debug / --debug=<bool> / --no-debug
+// Normalize CLI boolean strings into true/false/null for optional flags.
+const parseBool = (v) => {
+  const lower = String(v ?? '').trim().toLowerCase();
+  if (!lower) return null;
+  if (['1', 'true', 'yes', 'on'].includes(lower)) return true;
+  if (['0', 'false', 'no', 'off'].includes(lower)) return false;
+  return null;
+};
+__test__.parseBool = parseBool;
+
+let debugOverride;
+let debugConsumesNext = false;
+const debugFlagIndex = args.findIndex(a =>
+  a === '--debug' ||
+  a.startsWith('--debug=') ||
+  a === '--no-debug'
+);
+if (debugFlagIndex >= 0) {
+  const rawArg = args[debugFlagIndex];
+  if (rawArg.includes('=')) {
+    debugOverride = parseBool(rawArg.split('=')[1]);
+  } else if (rawArg === '--no-debug') {
+    debugOverride = false;
+  } else if (args[debugFlagIndex + 1] && !args[debugFlagIndex + 1].startsWith('-')) {
+    debugOverride = parseBool(args[debugFlagIndex + 1]);
+    debugConsumesNext = true;
+  } else {
+    debugOverride = true; // bare --debug enables it
+  }
+
+  if (debugOverride !== null) {
+    process.env.TESTRONAUT_DEBUG = debugOverride ? '1' : '0';
+    console.log(`🛠️ Debug mode ${debugOverride ? 'enabled' : 'disabled'} (TESTRONAUT_DEBUG=${process.env.TESTRONAUT_DEBUG})`);
+  } else {
+    console.warn('⚠️ Invalid --debug value. Use true/false, 1/0, yes/no.');
+  }
+
+  const consume = 1 + (debugConsumesNext && debugOverride !== null ? 1 : 0);
+  args.splice(debugFlagIndex, consume);
+}
+
 // Look for --turns=<n> or --turns <n>
 let turnsOverride;
 const turnsFlagIndex = args.findIndex(a => a === '--turns' || a.startsWith('--turns='));
@@ -227,6 +269,7 @@ Usage:
 Options:
   --init                    Scaffold project folders and a welcome mission
   --turns=<n>               Override max turns for this run (e.g., --turns=30)
+  --debug[=<bool>]          Enable verbose debug logs (or set TESTRONAUT_DEBUG=1)
   --help                    Show this help message
   --retry_limit=<n>         Override agent turn retry limits (minimum 1, maximum 10)
 
