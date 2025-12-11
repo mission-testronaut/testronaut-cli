@@ -10,19 +10,25 @@ vi.mock('../../core/config.js', () => ({
   loadConfig: vi.fn(),
   enforceTurnBudget: vi.fn(),
   getRetryLimit: vi.fn(),
+  getDomListLimit: vi.fn(),
+  getResourceGuardConfig: vi.fn(),
 }));
 
 import { runAgent } from '../../core/agent.js';
-import { loadConfig, enforceTurnBudget, getRetryLimit } from '../../core/config.js';
+import { loadConfig, enforceTurnBudget, getRetryLimit, getDomListLimit, getResourceGuardConfig } from '../../core/config.js';
 
 // Adjust the import path if your file lives elsewhere
-import { runMissions } from '../../runner/testronaut.js';
+import { runMissions, __test__ as testronautInternals } from '../../runner/testronaut.js';
 
 describe('cli/testronaut.runMissions (with enforceTurnBudget)', () => {
+  const OLD_ENV = { ...process.env };
   beforeEach(() => {
+    process.env = { ...OLD_ENV };
     vi.clearAllMocks();
     // Default retry limit unless overridden in a test
     getRetryLimit.mockReturnValue({ value: 2, source: 'default', clamped: false });
+    getDomListLimit.mockReturnValue({ value: 3, mode: 'number', source: 'default', clamped: false });
+    getResourceGuardConfig.mockReturnValue({ enabled: true, hrefIncludes: ['/document/'], dataTypes: ['document'] });
   });
 
   it('passes effectiveMax to runAgent and logs any notes', async () => {
@@ -50,7 +56,7 @@ describe('cli/testronaut.runMissions (with enforceTurnBudget)', () => {
       expect.stringContaining('Clamping to 200')
     );
     expect(runAgent).toHaveBeenCalledWith(
-      expect.any(Array), 'Budgeted Run', 200, 2
+      expect.any(Array), 'Budgeted Run', 200, 2, { domListLimit: 3, debug: false, resourceGuard: { enabled: true, hrefIncludes: ['/document/'], dataTypes: ['document'] } }
     );
 
     warn.mockRestore();
@@ -77,7 +83,33 @@ describe('cli/testronaut.runMissions (with enforceTurnBudget)', () => {
     await runMissions({ mission: 'No warnings' }, 'Clean');
 
     expect(warn).not.toHaveBeenCalled();
-    expect(runAgent).toHaveBeenCalledWith(expect.any(Array), 'Clean', 20, 3);
+    expect(runAgent).toHaveBeenCalledWith(expect.any(Array), 'Clean', 20, 3, { domListLimit: 3, debug: false, resourceGuard: { enabled: true, hrefIncludes: ['/document/'], dataTypes: ['document'] } });
+
+    warn.mockRestore();
+    log.mockRestore();
+  });
+
+  it('warns when the DOM list limit is clamped', async () => {
+    loadConfig.mockResolvedValue({});
+    enforceTurnBudget.mockReturnValue({
+      effectiveMax: 20,
+      limits: {},
+      notes: [],
+      strict: false,
+    });
+    getDomListLimit.mockReturnValue({ value: 100, mode: 'number', source: 'config', clamped: true });
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    runAgent.mockResolvedValue([
+      { steps: [{ result: 'SUCCESS: ok' }], status: 'passed' },
+    ]);
+
+    await runMissions({ mission: 'Clamp lists' }, 'Clamp Mission');
+
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('DOM list limit clamped to 100')
+    );
 
     warn.mockRestore();
     log.mockRestore();
@@ -144,7 +176,7 @@ describe('cli/testronaut.runMissions (with enforceTurnBudget)', () => {
     expect(goals[1].submissionName).toMatch(/^My Mission/);
 
     // Effective max turns and retry limit passed through
-    expect(runAgent).toHaveBeenCalledWith(expect.any(Array), 'My Mission', 15, 2);
+    expect(runAgent).toHaveBeenCalledWith(expect.any(Array), 'My Mission', 15, 2, { domListLimit: 3, debug: false, resourceGuard: { enabled: true, hrefIncludes: ['/document/'], dataTypes: ['document'] } });
 
     log.mockRestore();
   });
@@ -165,5 +197,38 @@ describe('cli/testronaut.runMissions (with enforceTurnBudget)', () => {
     expect(res).toBeUndefined();
 
     log.mockRestore();
+  });
+
+  it('passes debug flag through when TESTRONAUT_DEBUG is set', async () => {
+    process.env.TESTRONAUT_DEBUG = 'true';
+    loadConfig.mockResolvedValue({});
+    enforceTurnBudget.mockReturnValue({
+      effectiveMax: 20,
+      limits: {},
+      notes: [],
+      strict: false,
+    });
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    runAgent.mockResolvedValue([
+      { steps: [{ result: 'SUCCESS: ok' }], status: 'passed' },
+    ]);
+
+    await runMissions({ mission: 'Debug' }, 'Debug Mission');
+
+    expect(runAgent).toHaveBeenCalledWith(expect.any(Array), 'Debug Mission', 20, 2, { domListLimit: 3, debug: true, resourceGuard: { enabled: true, hrefIncludes: ['/document/'], dataTypes: ['document'] } });
+
+    log.mockRestore();
+  });
+
+  describe('__test__ helpers', () => {
+    it('formats list limits and reads debug env', () => {
+      const { isDebugEnabled, formatListLimit } = testronautInternals;
+      process.env.TESTRONAUT_DEBUG = 'on';
+      expect(isDebugEnabled()).toBe(true);
+      process.env.TESTRONAUT_DEBUG = '0';
+      expect(isDebugEnabled()).toBe(false);
+      expect(formatListLimit(Infinity)).toBe('all');
+      expect(formatListLimit(5)).toBe(5);
+    });
   });
 });

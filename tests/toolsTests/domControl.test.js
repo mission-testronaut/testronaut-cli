@@ -195,6 +195,41 @@ describe('domControl helpers', () => {
       // Total children: 2 cards + 1 other + 1 marker
       expect(rootChildren.length).toBe(4);
     });
+
+    it('keeps all repeated divs when maxAllowed is Infinity', () => {
+      const html = `
+        <div id="root">
+          <div class="card">1</div>
+          <div class="card">2</div>
+          <div class="card">3</div>
+          <div class="card">4</div>
+        </div>
+      `;
+      const $ = cheerio.load(html);
+
+      reduceRepeatedDivs($, Infinity);
+
+      const cardDivs = $('#root').children('div.card');
+      expect(cardDivs.length).toBe(4);
+      expect($('#root').children('div[data-collapsed="true"]').length).toBe(0);
+    });
+
+    it('removes all repeated divs when maxAllowed is 0', () => {
+      const html = `
+        <div id="root">
+          <div class="card">A</div>
+          <div class="card">B</div>
+        </div>
+      `;
+      const $ = cheerio.load(html);
+
+      reduceRepeatedDivs($, 0);
+
+      const cardDivs = $('#root').children('div.card');
+      expect(cardDivs.length).toBe(0);
+      const markers = $('#root').children('div[data-collapsed="true"]');
+      expect(markers.length).toBe(1);
+    });
   });
 
   describe('removeObfuscatedClassNames', () => {
