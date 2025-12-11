@@ -33,4 +33,13 @@ describe('cli helpers', () => {
     expect(latest?.htmlFile).toBe('run_200.html');
     expect(latest?.jsonFile).toBe('run_200.json');
   });
+
+  it('parses booleans in a tolerant way', () => {
+    const { parseBool } = __test__;
+    expect(parseBool('true')).toBe(true);
+    expect(parseBool('0')).toBe(false);
+    expect(parseBool('off')).toBe(false);
+    expect(parseBool('')).toBeNull();
+    expect(parseBool('maybe')).toBeNull();
+  });
 });
