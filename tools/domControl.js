@@ -37,7 +37,9 @@ export const removeNonContentTags = async ($) => {
     const $el = $(el);
     const allowedAttrs = [
       'href', 'src', 'type', 'alt', 'title',
-      'placeholder', 'name', 'id', 'class', 'aria-label', 'value'
+      'placeholder', 'name', 'id', 'class', 'aria-label', 'value',
+      // keep key data-* attributes that help identify rows/items without bloating too much
+      'data-type', 'data-id', 'data-title', 'data-parentid', 'data-order'
     ];
 
     const attrs = el.attribs;
@@ -155,6 +157,11 @@ export const chunkBySection = async ($, focus) => {
  * @returns {$} same Cheerio instance for chaining
  */
 export function reduceRepeatedDivs($, maxAllowed = 3) {
+  let limit = maxAllowed === Infinity ? Infinity : Number(maxAllowed);
+  if (limit !== Infinity) {
+    limit = Number.isFinite(limit) ? Math.max(0, limit) : 3;
+  }
+
   $('body, div').each((_, parentEl) => {
     const $parent = $(parentEl);
     const children = $parent.children('div');
@@ -175,9 +182,9 @@ export function reduceRepeatedDivs($, maxAllowed = 3) {
     // Reduce each group to maxAllowed
     for (const className in classGroups) {
       const group = classGroups[className];
-      if (group.length > maxAllowed) {
+      if (limit !== Infinity && group.length > limit) {
         // Remove excess nodes from the DOM
-        group.slice(maxAllowed).forEach(el => $(el).remove());
+        group.slice(limit).forEach(el => $(el).remove());
         $parent.append(`<div data-collapsed="true" data-class="${className}">[...truncated]</div>`);
       }
     }

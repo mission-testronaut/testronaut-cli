@@ -11,6 +11,8 @@ import {
   getRetryLimit,
   resolveTurnLimits,
   enforceTurnBudget,
+  getDomListLimit,
+  getResourceGuardConfig,
 } from '../../core/config.js';
 
 describe('core/config', () => {
@@ -102,6 +104,100 @@ describe('core/config', () => {
       const clampedLow = getRetryLimit({ retryLimit: 3 });
       expect(clampedLow.value).toBe(1);
       expect(clampedLow.clamped).toBe(true);
+    });
+  });
+
+  describe('getDomListLimit', () => {
+    const OLD_ENV = { ...process.env };
+    beforeEach(() => {
+      process.env = { ...OLD_ENV };
+      delete process.env.TESTRONAUT_DOM_LIST_LIMIT;
+    });
+    afterEach(() => {
+      process.env = { ...OLD_ENV };
+    });
+
+    it('returns default when missing', () => {
+      const res = getDomListLimit({});
+      expect(res.value).toBe(3);
+      expect(res.mode).toBe('number');
+      expect(res.source).toBe('default');
+      expect(res.clamped).toBe(false);
+    });
+
+    it('uses config value (nested) and clamps to range', () => {
+      const res = getDomListLimit({ dom: { listItemLimit: 250 } });
+      expect(res.value).toBe(100);
+      expect(res.mode).toBe('number');
+      expect(res.source).toBe('config');
+      expect(res.clamped).toBe(true);
+
+      const nestedAlt = getDomListLimit({ dom: { listLimit: '9' } });
+      expect(nestedAlt.value).toBe(9);
+      expect(nestedAlt.source).toBe('config');
+    });
+
+    it('prefers env override and accepts keywords', () => {
+      process.env.TESTRONAUT_DOM_LIST_LIMIT = 'all';
+      const allRes = getDomListLimit({ domListLimit: 2 });
+      expect(allRes.value).toBe(Infinity);
+      expect(allRes.mode).toBe('all');
+      expect(allRes.source).toBe('env');
+
+      process.env.TESTRONAUT_DOM_LIST_LIMIT = 'none';
+      const noneRes = getDomListLimit({ domListLimit: 5 });
+      expect(noneRes.value).toBe(0);
+      expect(noneRes.mode).toBe('none');
+      expect(noneRes.source).toBe('env');
+    });
+
+    it('accepts numeric strings', () => {
+      const res = getDomListLimit({ domListLimit: '7' });
+      expect(res.value).toBe(7);
+      expect(res.mode).toBe('number');
+    });
+  });
+
+  describe('getResourceGuardConfig', () => {
+    const OLD_ENV = { ...process.env };
+    beforeEach(() => {
+      process.env = { ...OLD_ENV };
+      delete process.env.TESTRONAUT_RESOURCE_GUARD;
+      delete process.env.TESTRONAUT_RESOURCE_HREF_PATTERNS;
+      delete process.env.TESTRONAUT_RESOURCE_DATA_TYPES;
+    });
+    afterEach(() => {
+      process.env = { ...OLD_ENV };
+    });
+
+    it('returns defaults when nothing is set', () => {
+      const res = getResourceGuardConfig({});
+      expect(res.enabled).toBe(true);
+      expect(res.hrefIncludes.length).toBeGreaterThan(0);
+      expect(res.dataTypes).toContain('document');
+    });
+
+    it('respects env toggles and lists', () => {
+      process.env.TESTRONAUT_RESOURCE_GUARD = 'false';
+      process.env.TESTRONAUT_RESOURCE_HREF_PATTERNS = '/a,/b';
+      process.env.TESTRONAUT_RESOURCE_DATA_TYPES = 'doc,file';
+      const res = getResourceGuardConfig({ resourceGuard: { enabled: true } });
+      expect(res.enabled).toBe(false);
+      expect(res.hrefIncludes).toEqual(['/a', '/b']);
+      expect(res.dataTypes).toEqual(['doc', 'file']);
+    });
+
+    it('falls back to config arrays when env missing', () => {
+      const res = getResourceGuardConfig({
+        resourceGuard: {
+          enabled: 'yes',
+          hrefIncludes: ['/x', '/y'],
+          dataTypes: ['row'],
+        },
+      });
+      expect(res.enabled).toBe(true);
+      expect(res.hrefIncludes).toEqual(['/x', '/y']);
+      expect(res.dataTypes).toEqual(['row']);
     });
   });
 

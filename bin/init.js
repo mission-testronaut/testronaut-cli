@@ -139,6 +139,8 @@ export async function initializeTestronautProject() {
     config.outputDir = config.outputDir || defaults.outputDir;
     config.projectName = config.projectName || defaults.projectName;
     config.maxTurns = config.maxTurns ?? defaults.maxTurns;
+    config.dom = { ...defaults.dom, ...(config.dom || {}) };
+    config.resourceGuard = { ...defaults.resourceGuard, ...(config.resourceGuard || {}) };
 
     // ─────────────────────────────────────────────
     // STEP 4: Persist config and scaffold .env (first run only)

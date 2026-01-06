@@ -47,6 +47,7 @@ import { promisify } from 'util';
 const exec = promisify(execCmd);
 import url from 'url';
 import { ensureBrowsers } from '../tools/playwrightSetup.js';
+import { discoverMissionFiles } from '../core/missionDiscovery.js';
 
 // Keep PW browsers inside the project to avoid global cache skew
 process.env.PLAYWRIGHT_BROWSERS_PATH = process.env.PLAYWRIGHT_BROWSERS_PATH || '0';
@@ -153,6 +154,48 @@ if (modelFlagIndex >= 0) {
   args.splice(modelFlagIndex, modelOverride ? 2 : 1);
 }
 
+// Look for --debug / --debug=<bool> / --no-debug
+// Normalize CLI boolean strings into true/false/null for optional flags.
+const parseBool = (v) => {
+  const lower = String(v ?? '').trim().toLowerCase();
+  if (!lower) return null;
+  if (['1', 'true', 'yes', 'on'].includes(lower)) return true;
+  if (['0', 'false', 'no', 'off'].includes(lower)) return false;
+  return null;
+};
+__test__.parseBool = parseBool;
+
+let debugOverride;
+let debugConsumesNext = false;
+const debugFlagIndex = args.findIndex(a =>
+  a === '--debug' ||
+  a.startsWith('--debug=') ||
+  a === '--no-debug'
+);
+if (debugFlagIndex >= 0) {
+  const rawArg = args[debugFlagIndex];
+  if (rawArg.includes('=')) {
+    debugOverride = parseBool(rawArg.split('=')[1]);
+  } else if (rawArg === '--no-debug') {
+    debugOverride = false;
+  } else if (args[debugFlagIndex + 1] && !args[debugFlagIndex + 1].startsWith('-')) {
+    debugOverride = parseBool(args[debugFlagIndex + 1]);
+    debugConsumesNext = true;
+  } else {
+    debugOverride = true; // bare --debug enables it
+  }
+
+  if (debugOverride !== null) {
+    process.env.TESTRONAUT_DEBUG = debugOverride ? '1' : '0';
+    console.log(`🛠️ Debug mode ${debugOverride ? 'enabled' : 'disabled'} (TESTRONAUT_DEBUG=${process.env.TESTRONAUT_DEBUG})`);
+  } else {
+    console.warn('⚠️ Invalid --debug value. Use true/false, 1/0, yes/no.');
+  }
+
+  const consume = 1 + (debugConsumesNext && debugOverride !== null ? 1 : 0);
+  args.splice(debugFlagIndex, consume);
+}
+
 // Look for --turns=<n> or --turns <n>
 let turnsOverride;
 const turnsFlagIndex = args.findIndex(a => a === '--turns' || a.startsWith('--turns='));
@@ -208,8 +251,6 @@ if (retryFlagIndex >= 0) {
   args.splice(retryFlagIndex, retryOverride ? 2 : 1);
 }
 
-const missionsDir = path.resolve(process.cwd(), 'missions');
-
 const allResults = [];
 const runId = `run_${Date.now()}`;
 const startTime = new Date();
@@ -228,6 +269,7 @@ Usage:
 Options:
   --init                    Scaffold project folders and a welcome mission
   --turns=<n>               Override max turns for this run (e.g., --turns=30)
+  --debug[=<bool>]          Enable verbose debug logs (or set TESTRONAUT_DEBUG=1)
   --help                    Show this help message
   --retry_limit=<n>         Override agent turn retry limits (minimum 1, maximum 10)
 
@@ -302,14 +344,16 @@ if (args.includes('serve') || args.includes('view')) {
   await new Promise(() => {}); // ✅ never resolves; Ctrl+C will terminate
 }
 
-if (!fs.existsSync(missionsDir)) {
-  console.error('❌ No `missions` directory found.');
+const { root: missionsRoot, files: discoveredMissions } = await discoverMissionFiles({ cwd: process.cwd() });
+
+if (!fs.existsSync(missionsRoot)) {
+  console.error(`❌ Missions directory not found: ${path.relative(process.cwd(), missionsRoot)}`);
   process.exit(1);
 }
 
 const runFile = async (filePath) => {
   try {
-    const modulePath = path.resolve(missionsDir, filePath);
+    const modulePath = path.resolve(missionsRoot, filePath);
     const missionsModule = await import(`file://${modulePath}`);
 
     if (typeof missionsModule.executeMission === 'function') {
@@ -331,9 +375,8 @@ if (args.length > 0) {
     await runFile(file);
   }
 } else {
-  // Run all *.mission.js files
-  const files = fs.readdirSync(missionsDir).filter(f => f.endsWith('.mission.js'));
-  for (const file of files) {
+  // Run missions discovered from config (or default behavior)
+  for (const file of discoveredMissions) {
     await runFile(file);
   }
 }

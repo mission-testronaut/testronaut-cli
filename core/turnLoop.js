@@ -63,6 +63,50 @@ console.log(`🧠 Using LLM → provider: ${PROVIDER_ID}, model: ${MODEL_ID}`);
 
 const llm = getLLM(PROVIDER_ID);
 
+// Track resource/download coverage across turns (guard against partial loops).
+function ensureDocProgress(agentMemory, cfg) {
+  if (!cfg?.enabled) return null;
+  if (!agentMemory.docProgress) {
+    agentMemory.docProgress = {
+      items: [],
+      downloaded: new Set(),
+      lastSummary: '',
+      lastScriptCount: 0,
+      patterns: cfg,
+    };
+  } else {
+    agentMemory.docProgress.patterns = cfg;
+  }
+  return agentMemory.docProgress;
+}
+
+// Parse injected <pre data-testronaut-doc-list> summary into structured items.
+function parseDocListFromDom(html) {
+  try {
+    const match = html.match(/<pre[^>]*data-testronaut-doc-list[^>]*>([\s\S]*?)<\/pre>/i);
+    if (!match) return { items: [], scriptDocs: 0 };
+    const text = match[1];
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean).slice(1);
+    const items = lines.map(l => {
+      const m = l.match(/-\s*\[(.*?)\]\s*(.*?)\s+(\/document\/\d+[^\s]*)?/i);
+      return {
+        id: m?.[1] || '',
+        title: m?.[2] || l.replace(/^-/, '').trim(),
+        href: m?.[3] || '',
+      };
+    }).filter(it => it.id || it.title || it.href);
+    return { items, scriptDocs: items.length };
+  } catch {
+    return { items: [], scriptDocs: 0 };
+  }
+}
+
+// Extract numeric document IDs from common /document/<id> URLs.
+function extractDocIdFromUrl(url = '') {
+  const m = url.match(/\/document\/(\d+)/i);
+  return m ? m[1] : '';
+}
+
 // Rolling token counters used for self-throttling
 let totalTokensUsed = 0;
 let turnTimestamps = [];
@@ -174,11 +218,17 @@ export const turnLoop = async (
   ctx = {} // { steps, missionName, groundControl }
 ) => {
   const { steps = [], missionName, groundControl = createEmptyGroundControl(), retryLimit: retryLimitRaw } = ctx;
+  const resourceGuardCfg = ctx.resourceGuard || {
+    enabled: true,
+    hrefIncludes: ['/document/', '/file/', '/download', '/attachment/'],
+    dataTypes: ['document', 'file', 'item', 'row'],
+  };
   const stepsArchive = ctx.stepsArchive || steps;
   const retryLimitClamped = Math.min(10, Math.max(1, Number.isFinite(retryLimitRaw) ? retryLimitRaw : DEFAULT_TURN_RETRY_LIMIT)); // retries allowed (excludes initial)
   const maxAttempts = retryLimitClamped + 1; // includes initial attempt
   ctx.groundControl = groundControl;
   let agentMemory = { lastMenuExpanded: false };
+  ensureDocProgress(agentMemory, resourceGuardCfg);
   let turnRetries = 0;
   let stepSeq = ctx._stepSeq || 0;
   
@@ -373,6 +423,20 @@ export const turnLoop = async (
               : `📥 Downloaded "${maybeJson.fileName}" (${formatBytes(maybeJson.bytes)}) via ${maybeJson.mode}`;
             step.events.push(msgLine);
             console.log(msgLine);
+
+            if (resourceGuardCfg.enabled && (maybeJson._testronaut_file_event === 'download' || maybeJson._testronaut_file_event === 'upload')) {
+              const prog = ensureDocProgress(agentMemory, resourceGuardCfg);
+              if (prog) {
+                const id = extractDocIdFromUrl(maybeJson.url || maybeJson.selector || maybeJson.fileName);
+                if (id) prog.downloaded.add(id);
+                // also try title match
+                if (maybeJson.fileName) {
+                  const byTitle = prog.items.find(i => maybeJson.fileName.includes(i.title));
+                  if (byTitle?.id) prog.downloaded.add(byTitle.id);
+                }
+                step.events.push(`📊 Resource progress: ${prog.downloaded.size}/${prog.items.length || prog.lastScriptCount}`);
+              }
+            }
           }
         } catch {
           // non-JSON results ignored
@@ -411,6 +475,35 @@ export const turnLoop = async (
           contentForModel = errorMessage || 'OK';
         } else {
           contentForModel = result;
+        }
+
+        // Keep doc list progress updated when we fetch DOM
+        if (!errorMessage && resourceGuardCfg.enabled) {
+          const prog = ensureDocProgress(agentMemory, resourceGuardCfg);
+          if (prog) {
+            if (fnName === 'get_dom') {
+              const { items, scriptDocs } = parseDocListFromDom(result);
+              if (items.length) {
+                prog.items = items;
+                prog.lastScriptCount = scriptDocs || items.length;
+                prog.lastSummary = `docs:${items.length}`;
+                step.events.push(`📊 Detected document list (${items.length} items)`);
+              }
+            } else if (fnName === 'list_local_files') {
+              try {
+                const parsed = JSON.parse(result);
+                const files = parsed?.files || [];
+                if (Array.isArray(files) && files.length) {
+                  prog.items = files.map(f => ({ id: f, title: f, href: f }));
+                  prog.lastScriptCount = files.length;
+                  prog.lastSummary = `files:${files.length}`;
+                  step.events.push(`📊 Detected local files (${files.length} items)`);
+                }
+              } catch {
+                // ignore parse errors
+              }
+            }
+          }
         }
 
         toolResponses.push({
@@ -465,6 +558,24 @@ export const turnLoop = async (
     // ─────────────────────────────────────────────
     const finalResponse = finalResponseHandler(msg);
     if (finalResponse !== null) {
+      const prog = ensureDocProgress(agentMemory, resourceGuardCfg);
+      if (prog?.items.length && prog.downloaded.size < prog.items.length) {
+        const remaining = prog.items
+          .filter(i => !prog.downloaded.has(i.id))
+          .map(i => i.title || i.id)
+          .slice(0, 10);
+        const remainText = remaining.length ? remaining.join('; ') : 'unknown items';
+        const guardMsg = `Auto-guard: downloaded ${prog.downloaded.size}/${prog.items.length}. Remaining: ${remainText}`;
+        console.log(`[guard] ${guardMsg}`);
+        step.events.push(guardMsg);
+        step.result = '🟡 In Progress';
+        recordStep(step);
+        // Nudge model to continue
+        messages.push({ role: 'assistant', content: guardMsg });
+        // Continue loop without exiting
+        turnRetries = 0;
+        continue;
+      }
       step.events.push(finalResponse.finalMessage);
       step.result = finalResponse.success ? '✅ Mission Success' : '❌ Mission Failure';
       recordStep(step);
@@ -487,4 +598,11 @@ export const turnLoop = async (
   }
 
   return { success: false, steps: stepsArchive };
+};
+
+// Expose small helper bundle for unit tests (no production use).
+export const __docProgressInternals = {
+  ensureDocProgress,
+  parseDocListFromDom,
+  extractDocIdFromUrl,
 };

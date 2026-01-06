@@ -35,10 +35,16 @@ import path from 'path';
  * @param {Array<{goal:any, submissionType?:string, submissionName?:string, label?:string}>} goals
  * @param {string} missionName
  * @param {number} [maxTurns=20] - upper bound for turnLoop per goal
+ * @param {number} [retryLimit]
+ * @param {{ domListLimit?: number|typeof Infinity, debug?: boolean, resourceGuard?: { enabled:boolean, hrefIncludes:string[], dataTypes:string[] } }} [opts]
  * @returns {Promise<Array<{missionName:string, submissionType:string, submissionName:string|null, status:'passed'|'failed', steps:any[], startTime:number, endTime:number}>>}
  */
-export async function runAgent(goals, missionName, maxTurns = 20, retryLimit) {
-  const browser = new ChromeBrowser();
+export async function runAgent(goals, missionName, maxTurns = 20, retryLimit, opts = {}) {
+  const browser = new ChromeBrowser({
+    domListLimit: opts.domListLimit,
+    debug: opts.debug,
+    resourceGuard: opts.resourceGuard,
+  });
   await browser.start();
   let result;
 
@@ -155,8 +161,9 @@ Use Ground Control as your persistent mission memory about:
           steps,
           stepsArchive,
           missionName,
-          retryLimit,
+          retryLimit, 
           groundControl,
+          resourceGuard: opts.resourceGuard,
           onStep: (s) => {
             // Append each step as a JSON line
             try {

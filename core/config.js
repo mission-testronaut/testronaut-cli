@@ -83,6 +83,97 @@ export function getRetryLimit(cfg, fallback = 2) {
 }
 
 /**
+ * Resolve how many list-like items to keep in DOM snapshots.
+ * - Accepts numbers (clamped 0-100), or the strings "all"/"none".
+ * - Priority: env TESTRONAUT_DOM_LIST_LIMIT → config.dom.listItemLimit/listLimit/domListLimit → fallback.
+ *
+ * @param {object} cfg
+ * @param {number} [fallback=3]
+ * @returns {{ value:number|typeof Infinity, mode:'number'|'all'|'none', source:'env'|'config'|'default', clamped:boolean }}
+ */
+export function getDomListLimit(cfg, fallback = 3) {
+  const clampList = (n) => {
+    const clamped = Math.min(100, Math.max(0, n));
+    return { value: clamped, clamped: clamped !== n };
+  };
+
+  const parseRaw = (raw) => {
+    if (raw === undefined || raw === null) return null;
+
+    if (typeof raw === 'string') {
+      const lower = raw.trim().toLowerCase();
+      if (!lower) return null;
+      if (lower === 'all') return { value: Infinity, mode: 'all', clamped: false };
+      if (lower === 'none') return { value: 0, mode: 'none', clamped: false };
+      const num = Number(lower);
+      if (!Number.isFinite(num)) return null;
+      const { value, clamped } = clampList(num);
+      return { value, mode: value === 0 ? 'none' : 'number', clamped };
+    }
+
+    if (typeof raw === 'number' && Number.isFinite(raw)) {
+      const { value, clamped } = clampList(raw);
+      return { value, mode: value === 0 ? 'none' : 'number', clamped };
+    }
+
+    return null;
+  };
+
+  const envParsed = parseRaw(process.env.TESTRONAUT_DOM_LIST_LIMIT);
+  if (envParsed) return { ...envParsed, source: 'env' };
+
+  const cfgRaw = cfg?.dom?.listItemLimit ?? cfg?.dom?.listLimit ?? cfg?.domListLimit;
+  const cfgParsed = parseRaw(cfgRaw);
+  if (cfgParsed) return { ...cfgParsed, source: 'config' };
+
+  const fbParsed = parseRaw(fallback);
+  return { ...fbParsed, source: 'default' };
+}
+
+/**
+ * Resolve resource guard settings for generic list/table harvesting.
+ * - Patterns are used to detect resource anchors/data attributes.
+ * - Enabled can be toggled via config.resourceGuard.enabled or TESTRONAUT_RESOURCE_GUARD.
+ */
+export function getResourceGuardConfig(cfg) {
+  const parseBool = (raw) => {
+    if (raw === undefined || raw === null) return null;
+    const lower = String(raw).trim().toLowerCase();
+    if (['1', 'true', 'yes', 'on'].includes(lower)) return true;
+    if (['0', 'false', 'no', 'off'].includes(lower)) return false;
+    return null;
+  };
+
+  const defaultHrefPatterns = ['/document/', '/file/', '/download', '/attachment/'];
+  const defaultDataTypes = ['document', 'file', 'item', 'row'];
+
+  const envEnabled = parseBool(process.env.TESTRONAUT_RESOURCE_GUARD);
+  const cfgEnabled = parseBool(cfg?.resourceGuard?.enabled);
+  const enabled = envEnabled ?? cfgEnabled ?? true;
+
+  const parseList = (raw) => {
+    if (Array.isArray(raw)) return raw.map(String).map(s => s.trim()).filter(Boolean);
+    if (typeof raw === 'string') {
+      return raw.split(',').map(s => s.trim()).filter(Boolean);
+    }
+    return [];
+  };
+
+  const hrefIncludes = parseList(process.env.TESTRONAUT_RESOURCE_HREF_PATTERNS)
+    || [];
+  const dataTypes = parseList(process.env.TESTRONAUT_RESOURCE_DATA_TYPES)
+    || [];
+
+  const cfgHref = parseList(cfg?.resourceGuard?.hrefIncludes);
+  const cfgTypes = parseList(cfg?.resourceGuard?.dataTypes);
+
+  const finalHref = (hrefIncludes.length ? hrefIncludes : cfgHref.length ? cfgHref : defaultHrefPatterns).map(s => s.toLowerCase());
+  const finalTypes = (dataTypes.length ? dataTypes : cfgTypes.length ? cfgTypes : defaultDataTypes).map(s => s.toLowerCase());
+
+  return { enabled, hrefIncludes: finalHref, dataTypes: finalTypes };
+}
+
+/**
  * Baseline limits for mission runs. Adjust here for global defaults.
  *
  * @returns {{

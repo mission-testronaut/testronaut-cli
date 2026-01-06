@@ -22,6 +22,7 @@ const { shared } = vi.hoisted(() => {
             mode: 'save',
           })
         ),
+        list_local_files: vi.fn(async () => JSON.stringify({ files: ['a.pdf', 'b.pdf'] })),
       },
     },
   };
@@ -63,6 +64,7 @@ vi.mock('../../tools/toolSchema.js', () => ({
     { type: 'function', function: { name: 'click_text', description: 'click by text', parameters: {} } },
     { type: 'function', function: { name: 'get_dom', description: 'get DOM html', parameters: {} } },
     { type: 'function', function: { name: 'screenshot', description: 'take a screenshot', parameters: {} } },
+    { type: 'function', function: { name: 'list_local_files', description: 'list files', parameters: {} } },
   ],
 }));
 
@@ -96,7 +98,7 @@ vi.mock('../../core/redaction.js', () => ({
 }));
 
 // Import SUT after mocks
-import { turnLoop } from '../../core/turnLoop.js';
+import { turnLoop, __docProgressInternals } from '../../core/turnLoop.js';
 
 // Helper
 function baseMessages() {
@@ -225,5 +227,48 @@ describe('turnLoop', () => {
     expect(res.steps[0].result).toBe('⏳ Retrying turn');
     expect(res.steps[1].result).toBe('✅ Passed');
     expect(res.steps[2].result).toMatch(/Success/);
+  });
+
+  describe('__docProgressInternals helpers', () => {
+    const { parseDocListFromDom, extractDocIdFromUrl, ensureDocProgress } = __docProgressInternals;
+
+    it('parses injected doc list summary', () => {
+      const html = `<pre data-testronaut-doc-list>
+List
+- [123] File A /document/123
+- [456] File B /document/456
+</pre>`;
+      const { items, scriptDocs } = parseDocListFromDom(html);
+      expect(items).toHaveLength(2);
+      expect(items[0].id).toBe('123');
+      expect(items[1].title.length).toBeGreaterThan(0);
+      expect(scriptDocs).toBe(2);
+    });
+
+    it('extracts doc id from url and tracks progress', () => {
+      expect(extractDocIdFromUrl('https://x.com/document/999/foo')).toBe('999');
+      expect(extractDocIdFromUrl('nope')).toBe('');
+
+      const mem = {};
+      const cfg = { enabled: true, hrefIncludes: ['/doc'], dataTypes: ['doc'] };
+      const prog = ensureDocProgress(mem, cfg);
+      expect(prog.patterns).toBe(cfg);
+      prog.items = [{ id: '1', title: 'Doc 1' }];
+      prog.downloaded.add('1');
+      expect(prog.downloaded.has('1')).toBe(true);
+    });
+
+    it('updates progress from list_local_files results', () => {
+      const mem = {};
+      const cfg = { enabled: true, hrefIncludes: ['/doc'], dataTypes: ['doc'] };
+      const prog = ensureDocProgress(mem, cfg);
+      prog.items = [];
+      // simulate list_local_files JSON result
+      const parsed = JSON.parse(JSON.stringify({ files: ['x.pdf', 'y.pdf'] }));
+      prog.items = parsed.files.map(f => ({ id: f, title: f, href: f }));
+      prog.downloaded.add('x.pdf');
+      expect(prog.items).toHaveLength(2);
+      expect(prog.downloaded.has('x.pdf')).toBe(true);
+    });
   });
 });
