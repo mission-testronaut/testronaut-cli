@@ -42,4 +42,34 @@ describe('cli helpers', () => {
     expect(parseBool('')).toBeNull();
     expect(parseBool('maybe')).toBeNull();
   });
+
+  it('parses vercel bypass flags and removes them from args', () => {
+    const { parseVercelBypassArgs } = __test__;
+    const res = parseVercelBypassArgs(['--dev', '--vercel-bypass=secret123', 'login']);
+    expect(res.secret).toBe('secret123');
+    expect(res.args).toEqual(['--dev', 'login']);
+    expect(res.invalid).toBe(false);
+  });
+
+  it('parses vercel bypass value from next arg', () => {
+    const { parseVercelBypassArgs } = __test__;
+    const res = parseVercelBypassArgs(['--vercel_bypass', 'abc', 'login']);
+    expect(res.secret).toBe('abc');
+    expect(res.args).toEqual(['login']);
+    expect(res.invalid).toBe(false);
+  });
+
+  it('handles missing vercel bypass value', () => {
+    const { parseVercelBypassArgs } = __test__;
+    const res = parseVercelBypassArgs(['--vercel-bypass']);
+    expect(res.secret).toBeUndefined();
+    expect(res.args).toEqual([]);
+    expect(res.invalid).toBe(true);
+  });
+
+  it('builds the vercel bypass header when provided', () => {
+    const { createVercelBypassHeader } = __test__;
+    expect(createVercelBypassHeader('abc')).toEqual({ 'x-vercel-protection-bypass': 'abc' });
+    expect(createVercelBypassHeader('')).toEqual({});
+  });
 });

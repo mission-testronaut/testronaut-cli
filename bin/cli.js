@@ -13,6 +13,7 @@
  *   --model <id> / --model=<id>         → sets TESTRONAUT_MODEL env (wins over config file)
  *   --turns <n> / --turns=<n>           → sets TESTRONAUT_TURNS env (wins over config file)
  *   --init                               → scaffolds project + optional Playwright browsers
+ *   --dev                                → use staging API base URL
  *   --help                               → prints help
  *
  * Notable helpers (defined below):
@@ -55,11 +56,72 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = process.env.PLAYWRIGHT_BROWSERS_PATH || '
 const TMP_DIR = path.resolve('./missions/tmp');
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// const apiBase = `http://localhost:3002` //
-const apiBase = 'http://api.testronaut.app'; // Replace with your actual API base URL
+const DEFAULT_API_BASE = 'http://api.testronaut.app';
+const DEV_API_BASE = 'https://staging.api.testronaut.app';
 
+let args = process.argv.slice(2);
 
-const args = process.argv.slice(2);
+// Look for --dev / --developer / --developer-mode / --staging
+const devFlagIndex = args.findIndex(a =>
+  a === '--dev' ||
+  a === '--developer' ||
+  a === '--developer-mode' ||
+  a === '--staging'
+);
+let apiBase = process.env.TESTRONAUT_API_BASE || DEFAULT_API_BASE;
+if (devFlagIndex >= 0) {
+  apiBase = DEV_API_BASE;
+  console.log(`🧪 Developer mode: using ${apiBase}`);
+  args.splice(devFlagIndex, 1);
+}
+
+function parseVercelBypassArgs(argsList) {
+  const nextArgs = [...argsList];
+  let secret;
+  let invalid = false;
+  const idx = nextArgs.findIndex(a =>
+    a === '--vercel-bypass' ||
+    a.startsWith('--vercel-bypass=') ||
+    a === '--vercel_bypass' ||
+    a.startsWith('--vercel_bypass=')
+  );
+  if (idx >= 0) {
+    const rawArg = nextArgs[idx];
+    const hasInline = rawArg.includes('=');
+    if (hasInline) {
+      secret = rawArg.split('=')[1];
+    } else if (nextArgs[idx + 1]) {
+      secret = nextArgs[idx + 1];
+    }
+
+    if (!secret) invalid = true;
+
+    // Remove flag & value so they aren’t treated as filenames
+    const consume = hasInline ? 1 : (secret ? 2 : 1);
+    nextArgs.splice(idx, consume);
+  }
+  return { secret, args: nextArgs, invalid };
+}
+
+const vercelBypassResult = parseVercelBypassArgs(args);
+if (vercelBypassResult.invalid) {
+  console.warn('⚠️ Invalid --vercel-bypass value. Provide a non-empty secret.');
+}
+args = vercelBypassResult.args;
+const vercelBypassOverride = vercelBypassResult.secret;
+
+const vercelBypassSecret =
+  vercelBypassOverride ||
+  process.env.VERCEL_AUTOMATION_BYPASS_SECRET ||
+  process.env.TESTRONAUT_VERCEL_BYPASS;
+function createVercelBypassHeader(secret) {
+  return secret ? { 'x-vercel-protection-bypass': secret } : {};
+}
+const vercelBypassHeader = createVercelBypassHeader(vercelBypassSecret);
+
+function buildApiHeaders(extra = {}) {
+  return { ...extra, ...vercelBypassHeader };
+}
 
 /**
  * Read a JSONL steps file into an array of objects.
@@ -133,6 +195,8 @@ export const __test__ = {
   findLatestReportPair,
   mergeDuplicateTurns,
   readJsonlSteps,
+  parseVercelBypassArgs,
+  createVercelBypassHeader,
 };
 
 // Look for --model=<id> or --model <id>
@@ -270,6 +334,8 @@ Options:
   --init                    Scaffold project folders and a welcome mission
   --turns=<n>               Override max turns for this run (e.g., --turns=30)
   --debug[=<bool>]          Enable verbose debug logs (or set TESTRONAUT_DEBUG=1)
+  --dev                     Use the staging API base URL
+  --vercel-bypass=<secret>  Send Vercel protection bypass header for protected deployments
   --help                    Show this help message
   --retry_limit=<n>         Override agent turn retry limits (minimum 1, maximum 10)
 
@@ -592,13 +658,13 @@ async function handleLogin() {
   try {
     const response = await fetch(`${apiBase}/api/user/cli`, {  // Replace with your actual URL
       method: 'POST',
-      headers: {
+      headers: buildApiHeaders({
         'Content-Type': 'application/x-www-form-urlencoded',
-      },
+      }),
       body: formData.toString(),
     });
 
-    const data = await response.json();
+    const data = await parseJsonSafe(response, 'login');
 
     if (data.error) {
       console.error('❌ Authentication failed:', data.error);
@@ -659,7 +725,7 @@ async function uploadReport() {
   try {
     const res = await fetch(`${apiBase}/api/user/cli/${sessionToken}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: buildApiHeaders({ 'Content-Type': 'application/json' }),
       body: reportJson,
     });
     const data = await res.json();
@@ -735,7 +801,7 @@ async function uploadReport() {
       // console.log(` the fetch url is: ${apiBase}/api/user/cli/${sessionToken}/uploads/start`);
       const startRes = await fetch(`${apiBase}/api/user/cli/${sessionToken}/uploads/start`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: buildApiHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ reportId: savedReportId, stepIndex, fileName: path.basename(filePath), mime, size: stat.size, sha1: hash }),
       });
       const start = await parseJsonSafe(startRes, 'uploads/start');
@@ -757,7 +823,7 @@ async function uploadReport() {
       // console.log(`     finalizing upload…`);
       const finishRes = await fetch(`${apiBase}/api/user/cli/${sessionToken}/uploads/finish`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: buildApiHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ 
           reportId: savedReportId, 
           stepIndex, 
