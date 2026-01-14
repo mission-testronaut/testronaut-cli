@@ -1,9 +1,9 @@
 {
   "name": "testronaut",
-  "version": "1.3.2",
+  "version": "1.3.3",
   "main": "./runner/testronaut.js",
   "bin": {
-    "testronaut": "./bin/cli.js"
+    "testronaut": "bin/cli.js"
   },
   "exports": {
     ".": "./runner/testronaut.js",

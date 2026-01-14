@@ -154,6 +154,27 @@ await runMissions({
   postMission: logoutMission,
 }, "Contact Form Flow");
 ```
+
+---
+
+## 🧰 Developer Mode (Staging API)
+
+Use the staging API base URL:
+```bash
+npx testronaut --dev
+```
+
+If the staging deployment is protected by Vercel, pass the bypass secret:
+```bash
+npx testronaut --dev --vercel-bypass=YOUR_SECRET login
+```
+
+You can also set the bypass secret via environment variables:
+```bash
+export VERCEL_AUTOMATION_BYPASS_SECRET=YOUR_SECRET
+# or
+export TESTRONAUT_VERCEL_BYPASS=YOUR_SECRET
+```
 ---
 
 ## 📋 Reports
