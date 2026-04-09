@@ -1,8 +1,6 @@
 {
   "name": "Testronaut Multi-Repo Codespace",
-
-  "image": "mcr.microsoft.com/devcontainers/universal:2",
-
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
   "customizations": {
     "codespaces": {
       "repositories": {
@@ -12,56 +10,21 @@
         "mission-testronaut/testronaut-examples": {
           "permissions": "write-all"
         }
-      },
-      "openFiles": [
-        "README.md"
-      ]
+      }
     },
     "vscode": {
-      "settings": {
-        "files.autoSave": "onFocusChange",
-        "terminal.integrated.defaultProfile.linux": "bash",
-        "git.confirmSync": false,
-        "explorer.confirmDelete": false,
-        "extensions.autoCheckUpdates": true,
-        "extensions.autoUpdate": true
-      },
       "extensions": [
         "github.vscode-github-actions",
         "github.codespaces",
         "eamodio.gitlens",
-        "ms-azuretools.vscode-docker",
         "esbenp.prettier-vscode",
         "dbaeumer.vscode-eslint"
       ]
     }
   },
-
-  "features": {
-    "ghcr.io/devcontainers/features/github-cli:1": {},
-    "ghcr.io/devcontainers/features/git:1": {},
-    "ghcr.io/devcontainers/features/node:1": {
-      "version": "22"
-    },
-    "ghcr.io/devcontainers/features/python:1": {
-      "version": "3.12"
-    }
-  },
-
-  "remoteUser": "codespace",
-
   "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
-
-  "postCreateCommand": "bash -lc '\nset -e\nmkdir -p /workspaces/your-org\ncd /workspaces/your-org\nrepos=(testronaut-cli testronaut-examples)\nfor repo in \"${repos[@]}\"; do\n  if [ ! -d \"$repo\" ]; then\n    git clone https://github.com/your-org/$repo.git\n  fi\ndone\n'",
-
-  "postStartCommand": "bash -lc 'git config --global pull.rebase false && git config --global init.defaultBranch main'",
-
-  "secrets": {
-    "GH_TOKEN": {
-      "description": "Optional GitHub token for extra automation, if needed"
-    }
-  },
-
+  "postCreateCommand": "bash -lc 'set -e; mkdir -p /workspaces/mission-testronaut; cd /workspaces/mission-testronaut; for repo in testronaut-cli testronaut-examples; do if [ ! -d \"$repo/.git\" ]; then git clone https://github.com/mission-testronaut/$repo.git; fi; done'",
+  "postStartCommand": "git config --global pull.rebase false && git config --global init.defaultBranch main",
   "hostRequirements": {
     "cpus": 4,
     "memory": "8gb",
