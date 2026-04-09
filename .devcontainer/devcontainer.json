@@ -1,0 +1,48 @@
+{
+  "name": "Testronaut Multi-Repo Codespace",
+
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
+
+  "customizations": {
+    "codespaces": {
+      "repositories": {
+        "mission-testronaut/testronaut-cli": {
+          "permissions": "write-all"
+        },
+        "mission-testronaut/testronaut-examples": {
+          "permissions": "write-all"
+        }
+      }
+    },
+    "vscode": {
+      "settings": {
+        "files.autoSave": "onFocusChange",
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "git.confirmSync": false,
+        "explorer.confirmDelete": false,
+        "extensions.autoCheckUpdates": true,
+        "extensions.autoUpdate": true
+      },
+      "extensions": [
+        "github.vscode-github-actions",
+        "github.codespaces",
+        "eamodio.gitlens",
+        "esbenp.prettier-vscode",
+        "dbaeumer.vscode-eslint",
+        "openai.chatgpt"
+      ]
+    }
+  },
+
+  "workspaceFolder": "/workspaces",
+
+  "postCreateCommand": "bash -lc 'set -e; cd /workspaces; if [ ! -d \"testronaut-examples/.git\" ]; then git clone https://github.com/mission-testronaut/testronaut-examples.git; fi'",
+
+  "postStartCommand": "bash -lc 'git config --global pull.rebase false && git config --global init.defaultBranch main'",
+
+  "hostRequirements": {
+    "cpus": 4,
+    "memory": "8gb",
+    "storage": "32gb"
+  }
+}
