@@ -6,7 +6,10 @@
   "customizations": {
     "codespaces": {
       "repositories": {
-        "mission-testronaut/*": {
+        "mission-testronaut/testronaut-cli": {
+          "permissions": "write-all"
+        },
+        "mission-testronaut/testronaut-examples": {
           "permissions": "write-all"
         }
       },
@@ -49,7 +52,7 @@
 
   "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
 
-  "postCreateCommand": "bash -lc '\nset -e\nmkdir -p /workspaces/your-org\ncd /workspaces/your-org\nrepos=(testronaut-cli testronaut-examples testronaut-demo)\nfor repo in \"${repos[@]}\"; do\n  if [ ! -d \"$repo\" ]; then\n    git clone https://github.com/your-org/$repo.git\n  fi\ndone\n'",
+  "postCreateCommand": "bash -lc '\nset -e\nmkdir -p /workspaces/your-org\ncd /workspaces/your-org\nrepos=(testronaut-cli testronaut-examples)\nfor repo in \"${repos[@]}\"; do\n  if [ ! -d \"$repo\" ]; then\n    git clone https://github.com/your-org/$repo.git\n  fi\ndone\n'",
 
   "postStartCommand": "bash -lc 'git config --global pull.rebase false && git config --global init.defaultBranch main'",
 
