@@ -11,6 +11,7 @@
  *
  * Key flags:
  *   --model <id> / --model=<id>         → sets TESTRONAUT_MODEL env (wins over config file)
+ *   --provider <id> / --provider=<id>   → sets TESTRONAUT_PROVIDER env (wins over config file)
  *   --turns <n> / --turns=<n>           → sets TESTRONAUT_TURNS env (wins over config file)
  *   --init                               → scaffolds project + optional Playwright browsers
  *   --dev                                → use staging API base URL
@@ -43,6 +44,7 @@ import inquirer from 'inquirer';
 import fetch from 'node-fetch';
 import crypto from 'crypto';
 import http from 'http';
+import { resolveProviderModel } from '../llm/modelResolver.js';
 import { exec as execCmd } from 'child_process';
 import { promisify } from 'util';
 const exec = promisify(execCmd);
@@ -102,6 +104,40 @@ function parseVercelBypassArgs(argsList) {
   }
   return { secret, args: nextArgs, invalid };
 }
+
+function parseProviderArgs(argsList) {
+  const nextArgs = [...argsList];
+  let provider;
+  let invalid = false;
+  const idx = nextArgs.findIndex(a => a === '--provider' || a.startsWith('--provider='));
+  if (idx >= 0) {
+    const rawArg = nextArgs[idx];
+    const hasInline = rawArg.includes('=');
+    const nextVal = !hasInline && nextArgs[idx + 1] && !nextArgs[idx + 1].startsWith('-') ? nextArgs[idx + 1] : undefined;
+    if (hasInline) {
+      provider = rawArg.split('=')[1];
+    } else if (nextVal) {
+      provider = nextVal;
+    }
+
+    if (provider) {
+      provider = provider.trim();
+    }
+
+    const supportedProviders = new Set(['openai', 'gemini']);
+    const isValid = (v) => !!v && supportedProviders.has(String(v).toLowerCase());
+    if (!isValid(provider)) {
+      invalid = true;
+      provider = undefined;
+    }
+
+    // Remove flag & value so they aren’t treated as filenames
+    const consume = hasInline ? 1 : (nextVal ? 2 : 1);
+    nextArgs.splice(idx, consume);
+  }
+  return { provider, args: nextArgs, invalid };
+}
+
 
 const vercelBypassResult = parseVercelBypassArgs(args);
 if (vercelBypassResult.invalid) {
@@ -197,6 +233,7 @@ export const __test__ = {
   readJsonlSteps,
   parseVercelBypassArgs,
   createVercelBypassHeader,
+  parseProviderArgs,
 };
 
 // Look for --model=<id> or --model <id>
@@ -216,6 +253,18 @@ if (modelFlagIndex >= 0) {
 
   // Remove flag & value from args so they don't look like mission filenames
   args.splice(modelFlagIndex, modelOverride ? 2 : 1);
+}
+
+// Look for --provider=<id> or --provider <id>
+const providerResult = parseProviderArgs(args);
+if (providerResult.invalid) {
+  console.warn('⚠️ Invalid --provider value. Provide a non-empty provider id.');
+}
+args = providerResult.args;
+const providerOverride = providerResult.provider;
+if (providerOverride) {
+  process.env.TESTRONAUT_PROVIDER = providerOverride.trim();
+  console.log(`🧩 Provider override: ${process.env.TESTRONAUT_PROVIDER}`);
 }
 
 // Look for --debug / --debug=<bool> / --no-debug
@@ -334,6 +383,7 @@ Options:
   --init                    Scaffold project folders and a welcome mission
   --turns=<n>               Override max turns for this run (e.g., --turns=30)
   --debug[=<bool>]          Enable verbose debug logs (or set TESTRONAUT_DEBUG=1)
+  --provider=<id>           Override LLM provider for this run (e.g., --provider=openai)
   --dev                     Use the staging API base URL
   --vercel-bypass=<secret>  Send Vercel protection bypass header for protected deployments
   --help                    Show this help message
@@ -469,25 +519,8 @@ const flatMissions = allResults.flatMap(entry => {
   });
 });
 
-// Read provider/model from config (allow env override for model)
-const cfgPath = path.resolve(process.cwd(), 'testronaut-config.json');
-let llmProvider = 'openai';
-let llmModel = 'gpt-4o';
-
-if (fs.existsSync(cfgPath)) {
-  try {
-    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
-    if (cfg?.provider) llmProvider = String(cfg.provider);
-    if (cfg?.model) llmModel = String(cfg.model);
-  } catch (e) {
-    console.warn('⚠️ Could not read testronaut-config.json:', e.message);
-  }
-}
-
-// Env override takes precedence for the model (matches runtime behavior)
-if (process.env.TESTRONAUT_MODEL?.trim()) {
-  llmModel = process.env.TESTRONAUT_MODEL.trim();
-}
+// Read provider/model from config (allow env override)
+const { provider: llmProvider, model: llmModel } = resolveProviderModel({ cwd: process.cwd() });
 
 
 const report = {

@@ -67,6 +67,49 @@ describe('cli helpers', () => {
     expect(res.invalid).toBe(true);
   });
 
+  it('parses provider flag with inline value and removes it from args', () => {
+    const { parseProviderArgs } = __test__;
+    const res = parseProviderArgs(['--provider=openai', 'login']);
+    expect(res.provider).toBe('openai');
+    expect(res.args).toEqual(['login']);
+    expect(res.invalid).toBe(false);
+  });
+
+  it('parses provider flag value from next arg', () => {
+    const { parseProviderArgs } = __test__;
+    const res = parseProviderArgs(['--provider', 'gemini', 'login']);
+    expect(res.provider).toBe('gemini');
+    expect(res.args).toEqual(['login']);
+    expect(res.invalid).toBe(false);
+  });
+
+  it('accepts supported provider names', () => {
+    const { parseProviderArgs } = __test__;
+    const res1 = parseProviderArgs(['--provider', 'openai', 'login']);
+    expect(res1.provider).toBe('openai');
+    expect(res1.invalid).toBe(false);
+
+    const res2 = parseProviderArgs(['--provider=gemini', 'login']);
+    expect(res2.provider).toBe('gemini');
+    expect(res2.invalid).toBe(false);
+  });
+
+  it('flags invalid provider name', () => {
+    const { parseProviderArgs } = __test__;
+    const res = parseProviderArgs(['--provider', 'bad provider', 'login']);
+    expect(res.provider).toBeUndefined();
+    expect(res.args).toEqual(['login']);
+    expect(res.invalid).toBe(true);
+  });
+
+  it('handles missing provider value', () => {
+    const { parseProviderArgs } = __test__;
+    const res = parseProviderArgs(['--provider']);
+    expect(res.provider).toBeUndefined();
+    expect(res.args).toEqual([]);
+    expect(res.invalid).toBe(true);
+  });
+
   it('builds the vercel bypass header when provided', () => {
     const { createVercelBypassHeader } = __test__;
     expect(createVercelBypassHeader('abc')).toEqual({ 'x-vercel-protection-bypass': 'abc' });
