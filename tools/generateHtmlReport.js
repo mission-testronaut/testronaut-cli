@@ -35,8 +35,8 @@ export function generateHtmlReport(report, outputPath) {
   // Escaping helpers for text and HTML attributes
   const esc = (s) => String(s ?? '')
     .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-  const escAttr = (s) => esc(s).replace(/"/g, '&quot;'); // for HTML attributes
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
   const badge = (status) =>
     status === 'passed' ? '✅ Passed' :
     status === 'failed' ? '❌ Failed' : (status || '—');
@@ -70,7 +70,7 @@ export function generateHtmlReport(report, outputPath) {
         ? step.summary.trim()
         : '';
       const planSpan = plan
-        ? `<span class="plan" title="${escAttr(plan)}">${esc(plan)}</span>`
+        ? `<span class="plan" title="${esc(plan)}">${esc(plan)}</span>`
         : '';
 
       return `
@@ -78,7 +78,7 @@ export function generateHtmlReport(report, outputPath) {
           <summary>
             <span class="turn">Turn ${esc((step.turn ?? idx) + 1)}${esc(attemptLabel)}</span>
             ${planSpan}
-            <span class="step-result ${ok ? 'ok' : 'bad'}" ${resultTooltip ? `title="${escAttr(resultTooltip)}"` : ''}>${esc(resultRaw)}</span>
+            <span class="step-result ${ok ? 'ok' : 'bad'}" ${resultTooltip ? `title="${esc(resultTooltip)}"` : ''}>${esc(resultRaw)}</span>
             <span class="tokens">tokens: ${esc(step.tokensUsed ?? '—')} / total: ${esc(step.totalTokensUsed ?? '—')}</span>
           </summary>
           <pre class="events">${esc(events.join('\n')) || '(no events)'}</pre>
