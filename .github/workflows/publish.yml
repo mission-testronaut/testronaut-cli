@@ -1,0 +1,133 @@
+name: Publish Package
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - package.json
+      - package-lock.json
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: publish-package
+  cancel-in-progress: false
+
+jobs:
+  publish-package:
+    name: Publish Package
+    runs-on: ubuntu-latest
+    environment:
+      # Use the same environment name in npm trusted publisher settings if you
+      # want npm to bind publishing to this protected environment.
+      name: package-publish
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect release version
+        id: release
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          VERSION="$(node -e 'process.stdout.write(require("./package.json").version)')"
+          PACKAGE_NAME="$(node -e 'process.stdout.write(require("./package.json").name)')"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "package_name=${PACKAGE_NAME}" >> "$GITHUB_OUTPUT"
+
+          if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
+            if [ "${REF_NAME}" != "main" ]; then
+              echo "Manual publishing is only allowed from main."
+              exit 1
+            fi
+
+            echo "should_publish=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ -z "${BEFORE_SHA}" ] || [ "${BEFORE_SHA}" = "0000000000000000000000000000000000000000" ]; then
+            echo "should_publish=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          PREVIOUS_VERSION="$(git show "${BEFORE_SHA}:package.json" | node -e 'let data=""; process.stdin.on("data", chunk => data += chunk); process.stdin.on("end", () => process.stdout.write(JSON.parse(data).version));')"
+
+          if [ "${PREVIOUS_VERSION}" = "${VERSION}" ]; then
+            echo "Version is unchanged at ${VERSION}; skipping publish."
+            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Version changed from ${PREVIOUS_VERSION} to ${VERSION}."
+            echo "should_publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Node
+        if: steps.release.outputs.should_publish == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        if: steps.release.outputs.should_publish == 'true'
+        run: npm ci
+
+      - name: Run automated test suite
+        if: steps.release.outputs.should_publish == 'true'
+        run: npm test
+
+      - name: Check whether version already exists on npm
+        if: steps.release.outputs.should_publish == 'true'
+        id: npm-check
+        env:
+          PACKAGE_NAME: ${{ steps.release.outputs.package_name }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          if npm view "${PACKAGE_NAME}@${VERSION}" version >/dev/null 2>&1; then
+            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+            echo "Version ${VERSION} is already published to npm."
+          else
+            echo "should_publish=true" >> "$GITHUB_OUTPUT"
+            echo "Version ${VERSION} is not yet published to npm."
+          fi
+
+      - name: Publish to npm with trusted publishing
+        if: steps.release.outputs.should_publish == 'true' && steps.npm-check.outputs.should_publish == 'true'
+        run: npm publish --provenance --access public
+
+      - name: Tag published version
+        if: steps.release.outputs.should_publish == 'true' && steps.npm-check.outputs.should_publish == 'true'
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          if git rev-parse "v${VERSION}" >/dev/null 2>&1; then
+            echo "Tag v${VERSION} already exists locally."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag "v${VERSION}"
+          git push origin "refs/tags/v${VERSION}"
+
+      - name: Write job summary
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          SHOULD_PUBLISH: ${{ steps.release.outputs.should_publish }}
+          NPM_PUBLISH: ${{ steps.npm-check.outputs.should_publish }}
+        run: |
+          {
+            echo "## Publish summary"
+            echo
+            echo "- Version: \`${VERSION}\`"
+            echo "- Trigger requested publish: \`${SHOULD_PUBLISH:-false}\`"
+            echo "- npm publish executed: \`${NPM_PUBLISH:-false}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

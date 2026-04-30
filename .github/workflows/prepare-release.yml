@@ -1,0 +1,168 @@
+name: Prepare Package Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: Semver increment to prepare
+        required: true
+        type: choice
+        default: patch
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prepare-package-release
+  cancel-in-progress: false
+
+jobs:
+  authorize-release:
+    name: Authorize Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require main branch
+        run: |
+          if [ "${GITHUB_REF_NAME}" != "main" ]; then
+            echo "Manual release preparation is only allowed from main."
+            exit 1
+          fi
+
+      - name: Require repository admin permission
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const actor = context.actor;
+
+            if (owner.toLowerCase() === actor.toLowerCase()) {
+              core.info(`Actor ${actor} matches the repository owner and is treated as admin.`);
+              return;
+            }
+
+            const response = await github.rest.repos.getCollaboratorPermissionLevel({
+              owner,
+              repo,
+              username: actor,
+            });
+
+            const { permission, role_name: roleName } = response.data;
+            core.info(`Actor ${actor} permission=${permission}, role_name=${roleName}`);
+
+            if (permission !== "admin" && roleName !== "admin") {
+              core.setFailed(`Only repository admins can prepare package releases. ${actor} has ${roleName || permission}.`);
+            }
+
+  prepare-release:
+    name: Prepare Release Pull Request
+    needs: authorize-release
+    runs-on: ubuntu-latest
+    permissions:
+      # Required because this workflow pushes a release branch and opens a PR.
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run automated test suite
+        run: npm test
+
+      - name: Bump package version
+        run: npm version "${{ inputs.release_type }}" --no-git-tag-version
+
+      - name: Read new version
+        id: version
+        run: |
+          VERSION="$(node -e 'process.stdout.write(require("./package.json").version)')"
+          echo "value=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "branch=release/v${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure release branch is not already open
+        env:
+          RELEASE_BRANCH: ${{ steps.version.outputs.branch }}
+        run: |
+          if git ls-remote --exit-code --heads origin "${RELEASE_BRANCH}" >/dev/null 2>&1; then
+            echo "Release branch ${RELEASE_BRANCH} already exists on origin."
+            exit 1
+          fi
+
+      - name: Create release branch
+        env:
+          RELEASE_BRANCH: ${{ steps.version.outputs.branch }}
+        run: git switch -c "${RELEASE_BRANCH}"
+
+      - name: Configure git author
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit release version
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          git add package.json package-lock.json
+          git commit -m "chore(release): v${VERSION}"
+
+      - name: Push release branch
+        env:
+          RELEASE_BRANCH: ${{ steps.version.outputs.branch }}
+        run: git push --set-upstream origin "${RELEASE_BRANCH}"
+
+      - name: Open release pull request
+        id: pull-request
+        uses: actions/github-script@v7
+        env:
+          RELEASE_BRANCH: ${{ steps.version.outputs.branch }}
+          VERSION: ${{ steps.version.outputs.value }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const head = process.env.RELEASE_BRANCH;
+            const version = process.env.VERSION;
+
+            const pr = await github.rest.pulls.create({
+              owner,
+              repo,
+              title: `chore(release): v${version}`,
+              head,
+              base: "main",
+              body: [
+                `Prepares \`v${version}\` for npm publication.`,
+                "",
+                "After this pull request merges into `main`, the publish workflow will release the package to npm.",
+              ].join("\n"),
+            });
+
+            core.setOutput("url", pr.data.html_url);
+
+      - name: Write job summary
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+          RELEASE_BRANCH: ${{ steps.version.outputs.branch }}
+          PR_URL: ${{ steps.pull-request.outputs.url }}
+        run: |
+          {
+            echo "## Release PR created"
+            echo
+            echo "- Version: \`${VERSION}\`"
+            echo "- Release branch: \`${RELEASE_BRANCH}\`"
+            echo "- Pull request: ${PR_URL}"
+          } >> "$GITHUB_STEP_SUMMARY"
