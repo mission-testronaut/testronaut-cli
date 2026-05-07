@@ -173,6 +173,71 @@ export function getResourceGuardConfig(cfg) {
   return { enabled, hrefIncludes: finalHref, dataTypes: finalTypes };
 }
 
+function parseBool(raw) {
+  if (raw === undefined || raw === null) return null;
+  const lower = String(raw).trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on', 'allow', 'enabled'].includes(lower)) return true;
+  if (['0', 'false', 'no', 'off', 'deny', 'disabled'].includes(lower)) return false;
+  return null;
+}
+
+/**
+ * Resolve human-in-the-loop verification input settings.
+ * Priority: CLI/env overrides → testronaut-config.json → built-in defaults.
+ *
+ * Supported config:
+ *   humanInput: { enabled: true, timeoutSeconds: 60 }
+ *   humanInputEnabled / allowHumanInput
+ *   humanInputTimeoutSeconds / humanInputTimeout
+ *
+ * Supported env (set by CLI flags too):
+ *   TESTRONAUT_HUMAN_INPUT=true|false
+ *   TESTRONAUT_HUMAN_INPUT_TIMEOUT_SECONDS=60
+ *
+ * @param {object} cfg
+ * @param {{ enabled?: boolean, timeoutSeconds?: number }} [fallback]
+ * @returns {{ enabled:boolean, timeoutSeconds:number, source:{ enabled:'env'|'config'|'default', timeout:'env'|'config'|'default' }, clamped:boolean }}
+ */
+export function getHumanInputConfig(cfg, fallback = { enabled: true, timeoutSeconds: 60 }) {
+  const clampTimeout = (raw, fb) => {
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return { value: fb, clamped: false };
+    const clamped = Math.min(300, Math.max(5, Math.trunc(n)));
+    return { value: clamped, clamped: clamped !== n };
+  };
+
+  const envEnabled = parseBool(process.env.TESTRONAUT_HUMAN_INPUT);
+  const cfgEnabled = parseBool(cfg?.humanInput?.enabled ?? cfg?.humanInputEnabled ?? cfg?.allowHumanInput);
+  const enabled =
+    envEnabled !== null ? envEnabled :
+    cfgEnabled !== null ? cfgEnabled :
+    fallback.enabled !== false;
+  const enabledSource =
+    envEnabled !== null ? 'env' :
+    cfgEnabled !== null ? 'config' :
+    'default';
+
+  const cfgTimeoutRaw = cfg?.humanInput?.timeoutSeconds ?? cfg?.humanInput?.timeout ?? cfg?.humanInputTimeoutSeconds ?? cfg?.humanInputTimeout;
+  const envTimeoutRaw = process.env.TESTRONAUT_HUMAN_INPUT_TIMEOUT_SECONDS;
+  let timeoutSource = 'default';
+  let timeoutRaw = fallback.timeoutSeconds ?? 60;
+  if (envTimeoutRaw !== undefined) {
+    timeoutRaw = envTimeoutRaw;
+    timeoutSource = 'env';
+  } else if (cfgTimeoutRaw !== undefined) {
+    timeoutRaw = cfgTimeoutRaw;
+    timeoutSource = 'config';
+  }
+
+  const timeout = clampTimeout(timeoutRaw, 60);
+  return {
+    enabled,
+    timeoutSeconds: timeout.value,
+    source: { enabled: enabledSource, timeout: timeoutSource },
+    clamped: timeout.clamped,
+  };
+}
+
 /**
  * Baseline limits for mission runs. Adjust here for global defaults.
  *

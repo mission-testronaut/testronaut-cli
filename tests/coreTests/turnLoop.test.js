@@ -94,6 +94,7 @@ vi.mock('../../core/turnIntent.js', () => ({
 }));
 
 vi.mock('../../core/redaction.js', () => ({
+  maskPreview: (value) => `masked:${String(value ?? '').length}`,
   redactArgs: (name, args) => args,
 }));
 

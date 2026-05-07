@@ -75,6 +75,14 @@ describe('redaction utilities', () => {
       const redacted = redactArgs('fill', args);
       expect(redacted.text).toBe('hello world');
     });
+
+    it('masks human input tool values', () => {
+      const args = { prompt: 'Enter code', value: '123456', code: '654321' };
+      const redacted = redactArgs('request_human_input', args);
+      expect(redacted.prompt).toBe('Enter code');
+      expect(redacted.value).toBe('•••••• (6)');
+      expect(redacted.code).toBe('•••••• (6)');
+    });
   });
 
   describe('redactPasswordInText', () => {

@@ -79,6 +79,8 @@ describe('initializeTestronautProject', () => {
     expect(typeof cfg.maxTurns).toBe('number');
     expect(cfg.dom?.listItemLimit).toBe(3);
     expect(cfg.resourceGuard?.enabled).toBe(true);
+    expect(cfg.humanInput?.enabled).toBe(true);
+    expect(cfg.humanInput?.timeoutSeconds).toBe(60);
 
     // .env
     const envPath = path.join(temp, '.env');
@@ -112,6 +114,8 @@ describe('initializeTestronautProject', () => {
     expect(cfg.model).toBe('gemini-2.5-flash');
     expect(cfg.dom?.listItemLimit).toBe(3);
     expect(cfg.resourceGuard?.enabled).toBe(true);
+    expect(cfg.humanInput?.enabled).toBe(true);
+    expect(cfg.humanInput?.timeoutSeconds).toBe(60);
 
     const envTxt = fs.readFileSync(path.join(temp, '.env'), 'utf8');
     expect(envTxt).toMatch(/GEMINI_API_KEY=AIza/);
@@ -191,5 +195,7 @@ describe('initializeTestronautProject', () => {
     expect(cfg.maxTurns).toBe(20); // default filled in
     expect(cfg.dom?.listItemLimit).toBe(3);
     expect(cfg.resourceGuard?.enabled).toBe(true);
+    expect(cfg.humanInput?.enabled).toBe(true);
+    expect(cfg.humanInput?.timeoutSeconds).toBe(60);
   });
 });

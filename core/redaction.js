@@ -44,6 +44,9 @@ export const SENSITIVE_KEYWORDS = [
   'auth',
   'pin',
   'otp',
+  'code',
+  'totp',
+  'mfa',
 ];
 
 /**
@@ -140,6 +143,13 @@ function isSensitiveCall(fnName, args = {}) {
  */
 export function redactArgs(fnName, args = {}, { showLength = true } = {}) {
   const out = clone(args);
+
+  if (fnName === 'request_human_input') {
+    for (const key of ['value', 'code', 'input', 'answer', 'redactedValue']) {
+      if (key in out) out[key] = maskPreview(out[key], showLength);
+    }
+    return out;
+  }
 
   // Mask direct props with sensitive-looking keys
   for (const k of Object.keys(out || {})) {

@@ -12,10 +12,11 @@ vi.mock('../../core/config.js', () => ({
   getRetryLimit: vi.fn(),
   getDomListLimit: vi.fn(),
   getResourceGuardConfig: vi.fn(),
+  getHumanInputConfig: vi.fn(),
 }));
 
 import { runAgent } from '../../core/agent.js';
-import { loadConfig, enforceTurnBudget, getRetryLimit, getDomListLimit, getResourceGuardConfig } from '../../core/config.js';
+import { loadConfig, enforceTurnBudget, getRetryLimit, getDomListLimit, getResourceGuardConfig, getHumanInputConfig } from '../../core/config.js';
 
 // Adjust the import path if your file lives elsewhere
 import { runMissions, __test__ as testronautInternals } from '../../runner/testronaut.js';
@@ -29,6 +30,7 @@ describe('cli/testronaut.runMissions (with enforceTurnBudget)', () => {
     getRetryLimit.mockReturnValue({ value: 2, source: 'default', clamped: false });
     getDomListLimit.mockReturnValue({ value: 3, mode: 'number', source: 'default', clamped: false });
     getResourceGuardConfig.mockReturnValue({ enabled: true, hrefIncludes: ['/document/'], dataTypes: ['document'] });
+    getHumanInputConfig.mockReturnValue({ enabled: true, timeoutSeconds: 60, source: { enabled: 'default', timeout: 'default' }, clamped: false });
   });
 
   it('passes effectiveMax to runAgent and logs any notes', async () => {
@@ -56,7 +58,7 @@ describe('cli/testronaut.runMissions (with enforceTurnBudget)', () => {
       expect.stringContaining('Clamping to 200')
     );
     expect(runAgent).toHaveBeenCalledWith(
-      expect.any(Array), 'Budgeted Run', 200, 2, { domListLimit: 3, debug: false, resourceGuard: { enabled: true, hrefIncludes: ['/document/'], dataTypes: ['document'] } }
+      expect.any(Array), 'Budgeted Run', 200, 2, { domListLimit: 3, debug: false, resourceGuard: { enabled: true, hrefIncludes: ['/document/'], dataTypes: ['document'] }, humanInput: { enabled: true, timeoutSeconds: 60, source: { enabled: 'default', timeout: 'default' }, clamped: false } }
     );
 
     warn.mockRestore();
@@ -83,7 +85,7 @@ describe('cli/testronaut.runMissions (with enforceTurnBudget)', () => {
     await runMissions({ mission: 'No warnings' }, 'Clean');
 
     expect(warn).not.toHaveBeenCalled();
-    expect(runAgent).toHaveBeenCalledWith(expect.any(Array), 'Clean', 20, 3, { domListLimit: 3, debug: false, resourceGuard: { enabled: true, hrefIncludes: ['/document/'], dataTypes: ['document'] } });
+    expect(runAgent).toHaveBeenCalledWith(expect.any(Array), 'Clean', 20, 3, { domListLimit: 3, debug: false, resourceGuard: { enabled: true, hrefIncludes: ['/document/'], dataTypes: ['document'] }, humanInput: { enabled: true, timeoutSeconds: 60, source: { enabled: 'default', timeout: 'default' }, clamped: false } });
 
     warn.mockRestore();
     log.mockRestore();
@@ -176,7 +178,7 @@ describe('cli/testronaut.runMissions (with enforceTurnBudget)', () => {
     expect(goals[1].submissionName).toMatch(/^My Mission/);
 
     // Effective max turns and retry limit passed through
-    expect(runAgent).toHaveBeenCalledWith(expect.any(Array), 'My Mission', 15, 2, { domListLimit: 3, debug: false, resourceGuard: { enabled: true, hrefIncludes: ['/document/'], dataTypes: ['document'] } });
+    expect(runAgent).toHaveBeenCalledWith(expect.any(Array), 'My Mission', 15, 2, { domListLimit: 3, debug: false, resourceGuard: { enabled: true, hrefIncludes: ['/document/'], dataTypes: ['document'] }, humanInput: { enabled: true, timeoutSeconds: 60, source: { enabled: 'default', timeout: 'default' }, clamped: false } });
 
     log.mockRestore();
   });
@@ -215,7 +217,7 @@ describe('cli/testronaut.runMissions (with enforceTurnBudget)', () => {
 
     await runMissions({ mission: 'Debug' }, 'Debug Mission');
 
-    expect(runAgent).toHaveBeenCalledWith(expect.any(Array), 'Debug Mission', 20, 2, { domListLimit: 3, debug: true, resourceGuard: { enabled: true, hrefIncludes: ['/document/'], dataTypes: ['document'] } });
+    expect(runAgent).toHaveBeenCalledWith(expect.any(Array), 'Debug Mission', 20, 2, { domListLimit: 3, debug: true, resourceGuard: { enabled: true, hrefIncludes: ['/document/'], dataTypes: ['document'] }, humanInput: { enabled: true, timeoutSeconds: 60, source: { enabled: 'default', timeout: 'default' }, clamped: false } });
 
     log.mockRestore();
   });

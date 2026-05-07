@@ -11,6 +11,9 @@
         },
         "mission-testronaut/testronaut-examples": {
           "permissions": "write-all"
+        },
+        "mission-testronaut/testronaut-demo": {
+          "permissions": "write-all"
         }
       }
     },
