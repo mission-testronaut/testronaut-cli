@@ -13,7 +13,7 @@
           "permissions": "write-all"
         },
         "mission-testronaut/testronaut-demo": {
-          "permissions": "write-all"
+          "permissions": "read-all"
         }
       }
     },
@@ -40,7 +40,7 @@
 
   "workspaceFolder": "/workspaces",
 
-  "postCreateCommand": "bash -lc 'set -e; cd /workspaces; if [ ! -d \"testronaut-examples/.git\" ]; then git clone https://github.com/mission-testronaut/testronaut-examples.git; fi'",
+  "postCreateCommand": "bash -lc 'set -e; cd /workspaces; if [ ! -d \"testronaut-examples/.git\" ]; then git clone https://github.com/mission-testronaut/testronaut-examples.git; fi; if [ ! -d \"testronaut-demo/.git\" ]; then git clone https://github.com/mission-testronaut/testronaut-demo.git; fi'",
 
   "postStartCommand": "bash -lc 'git config --global pull.rebase false && git config --global init.defaultBranch main'",
 
