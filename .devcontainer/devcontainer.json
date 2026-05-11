@@ -3,6 +3,20 @@
 
   "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
 
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+
+  "secrets": {
+    "GH_TOKEN": {
+      "description": "A GitHub PAT with read access to mission-testronaut/testronaut-demo."
+    }
+  },
+
+  "containerEnv": {
+    "GH_TOKEN": "${localEnv:GH_TOKEN}"
+  },
+
   "customizations": {
     "codespaces": {
       "repositories": {
@@ -40,9 +54,9 @@
 
   "workspaceFolder": "/workspaces",
 
-  "postCreateCommand": "bash -lc 'set -e; cd /workspaces; if [ ! -d \"testronaut-examples/.git\" ]; then git clone https://github.com/mission-testronaut/testronaut-examples.git; fi; if [ ! -d \"testronaut-demo/.git\" ]; then git clone https://github.com/mission-testronaut/testronaut-demo.git; fi'",
+  "postCreateCommand": "bash /workspaces/testronaut-cli/.devcontainer/setup-github-auth.sh",
 
-  "postStartCommand": "bash -lc 'git config --global pull.rebase false && git config --global init.defaultBranch main'",
+  "postStartCommand": "bash /workspaces/testronaut-cli/.devcontainer/setup-github-auth.sh",
 
   "hostRequirements": {
     "cpus": 4,
