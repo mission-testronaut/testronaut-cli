@@ -13,7 +13,7 @@
           "permissions": "write-all"
         },
         "mission-testronaut/testronaut-demo": {
-          "permissions": "read-all"
+          "permissions": "write-all"
         }
       }
     },
