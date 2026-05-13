@@ -11,5 +11,7 @@ describe('defaultConfig', () => {
     expect(cfg.dom?.listItemLimit).toBe(3);
     expect(cfg.resourceGuard?.enabled).toBe(true);
     expect(cfg.resourceGuard?.hrefIncludes).toContain('/document/');
+    expect(cfg.humanInput?.enabled).toBe(true);
+    expect(cfg.humanInput?.timeoutSeconds).toBe(60);
   });
 });

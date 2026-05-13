@@ -331,6 +331,34 @@ const toolsSchema = [
   {
     type: 'function',
     function: {
+      name: 'request_human_input',
+      description:
+        'Pause for a human to enter a short verification code such as TOTP, SMS, or email confirmation. Use only when the page requires a code the agent cannot obtain itself.',
+      parameters: {
+        type: 'object',
+        properties: {
+          prompt: {
+            type: 'string',
+            description: 'Short prompt shown to the human. Do not ask for passwords or long free-form text.'
+          },
+          codeType: {
+            type: 'string',
+            enum: ['totp', 'sms', 'email', 'verification_code', 'other_code'],
+            default: 'verification_code'
+          },
+          maxLength: {
+            type: 'number',
+            default: 64,
+            description: 'Maximum accepted code length. Values are clamped to 1-64.'
+          }
+        },
+        required: ['prompt']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
       name: 'set_ground_control_state',
       description: 'Update stable mission facts for Ground Control: app URL, current page role, login status, and constraints. Use this when you learn something that should remain true across future turns and should not be forgotten.',
       parameters: {

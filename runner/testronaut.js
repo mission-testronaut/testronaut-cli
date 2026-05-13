@@ -27,7 +27,7 @@ import fs from 'fs';
 import path from 'path';
 import { runAgent } from '../core/agent.js';
 import { redactPasswordInText } from '../core/redaction.js';
-import { loadConfig, enforceTurnBudget, getRetryLimit, getDomListLimit, getResourceGuardConfig } from '../core/config.js';
+import { loadConfig, enforceTurnBudget, getRetryLimit, getDomListLimit, getResourceGuardConfig, getHumanInputConfig } from '../core/config.js';
 
 // Check process env for debug toggles (shared helper for tests and CLI).
 const isDebugEnabled = () => {
@@ -53,6 +53,7 @@ export async function runMissions({ preMission, mission, postMission }, missionN
   const retryLimit = retryInfo.value;
   const domListLimitInfo = getDomListLimit(cfg);
   const resourceGuard = getResourceGuardConfig(cfg);
+  const humanInput = getHumanInputConfig(cfg);
   const debugEnabled = isDebugEnabled();
   if (notes.length) {
     console.warn(notes.join('\n'));
@@ -65,6 +66,12 @@ export async function runMissions({ preMission, mission, postMission }, missionN
   }
   if (domListLimitInfo?.mode === 'all') {
     console.warn('⚠️ DOM list limit is set to "all". This can dramatically increase token usage and may break flows on heavy pages.');
+  }
+  if (humanInput.clamped) {
+    console.warn(`⚠️ Human input timeout clamped to ${humanInput.timeoutSeconds}s (allowed 5-300).`);
+  }
+  if (!humanInput.enabled) {
+    console.log('👤 Human-in-the-loop input tool disabled for this run.');
   }
   if (debugEnabled) {
     const cfgDomRaw = cfg?.dom?.listItemLimit ?? cfg?.dom?.listLimit ?? cfg?.domListLimit;
@@ -88,6 +95,12 @@ export async function runMissions({ preMission, mission, postMission }, missionN
       enabled: resourceGuard.enabled,
       hrefIncludes: resourceGuard.hrefIncludes,
       dataTypes: resourceGuard.dataTypes,
+    });
+    console.log('[debug] Human input', {
+      enabled: humanInput.enabled,
+      timeoutSeconds: humanInput.timeoutSeconds,
+      source: humanInput.source,
+      clamped: humanInput.clamped,
     });
     // Helpful for upload missions: show missions/files contents
     const filesDir = path.resolve(process.cwd(), 'missions/files');
@@ -188,7 +201,7 @@ export async function runMissions({ preMission, mission, postMission }, missionN
     missionName,
     maxTurns,
     retryLimit,
-    { domListLimit: domListLimitInfo?.value, debug: debugEnabled, resourceGuard }
+    { domListLimit: domListLimitInfo?.value, debug: debugEnabled, resourceGuard, humanInput }
   );
   if (!success) {
     console.log(`❌ Aborting after failed goal.`);

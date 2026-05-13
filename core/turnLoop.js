@@ -46,7 +46,7 @@ import {
 import { resolveProviderModel } from '../llm/modelResolver.js';
 import { getLLM } from '../llm/llmFactory.js';
 import { summarizeTurnIntentFromMessage } from './turnIntent.js';
-import { redactArgs } from './redaction.js';
+import { maskPreview, redactArgs } from './redaction.js';
 import { 
   sanitizeHeavyToolHistory, 
   pruneConversationContext,
@@ -132,6 +132,7 @@ const FIRE_AND_FORGET_TOOLS = new Set([
   'click_and_follow_popup',
   'switch_to_page',
   'close_current_page',
+  'request_human_input',
 ]);
 
 /**
@@ -227,7 +228,11 @@ export const turnLoop = async (
   const retryLimitClamped = Math.min(10, Math.max(1, Number.isFinite(retryLimitRaw) ? retryLimitRaw : DEFAULT_TURN_RETRY_LIMIT)); // retries allowed (excludes initial)
   const maxAttempts = retryLimitClamped + 1; // includes initial attempt
   ctx.groundControl = groundControl;
-  let agentMemory = { lastMenuExpanded: false };
+  const humanInput = ctx.humanInput || { enabled: true, timeoutSeconds: 60 };
+  const activeToolsSchema = humanInput.enabled === false
+    ? toolsSchema.filter(t => t?.function?.name !== 'request_human_input')
+    : toolsSchema;
+  let agentMemory = { lastMenuExpanded: false, humanInput };
   ensureDocProgress(agentMemory, resourceGuardCfg);
   let turnRetries = 0;
   let stepSeq = ctx._stepSeq || 0;
@@ -325,7 +330,7 @@ export const turnLoop = async (
       const { message, usage, headers } = await llm.chat({
         model: MODEL_ID,
         messages,
-        tools: toolsSchema,
+        tools: activeToolsSchema,
       });
       response = { message, usage, headers };
 
@@ -412,6 +417,19 @@ export const turnLoop = async (
           hadToolIssues = true;
         }
 
+        if (fnName === 'request_human_input') {
+          step.humanInput = step.humanInput || {};
+          step.humanInput.requested = true;
+          step.humanInput.codeType = args.codeType || 'verification_code';
+          step.humanInput.timeoutSeconds = humanInput.timeoutSeconds;
+          step.humanInput.status = errorMessage
+            ? (String(errorMessage).toLowerCase().includes('timed out') ? 'timeout' : 'invalid')
+            : 'provided';
+          step.events.push(errorMessage
+            ? `👤 Human-in-the-loop input ${step.humanInput.status}: ${errorMessage.replace(/^ERROR:\s*/, '')}`
+            : '👤 Human-in-the-loop input provided.');
+        }
+
         // Capture and log any file upload/download events (for reports)
         try {
           const maybeJson = JSON.parse(result);
@@ -443,7 +461,20 @@ export const turnLoop = async (
         }
 
         console.log(`[tool ] ← ${fnName} result:`, errorMessage ? '❌ Failed' : '✅ Success');
-        const truncated = result.length > 1000 ? result.slice(0, 1000) + '…' : result;
+        let resultForLog = result;
+        if (fnName === 'request_human_input') {
+          try {
+            const parsed = JSON.parse(result);
+            resultForLog = JSON.stringify({
+              ...parsed,
+              value: maskPreview(parsed.value),
+              redactedValue: maskPreview(parsed.value),
+            });
+          } catch {
+            resultForLog = errorMessage || 'Human input received.';
+          }
+        }
+        const truncated = resultForLog.length > 1000 ? resultForLog.slice(0, 1000) + '…' : resultForLog;
         step.events.push(`[tool ] ← ${fnName} result: ${errorMessage ? '❌ Failed' : '✅ Success'}`);
         step.events.push(`[tool ] ← ${truncated}`);
 

@@ -62,6 +62,9 @@ export function generateHtmlReport(report, outputPath) {
       const attemptLabel = retryNumber > 0
         ? ` (re-attempt ${retryNumber}/${retryTotal || retryNumber})`
         : '';
+      const humanInput = step.humanInput?.requested
+        ? `<span class="hitl" title="Human-in-the-loop input: ${esc(step.humanInput.status || 'requested')}">👤 Human in-the-loop</span>`
+        : '';
       const imgTag = step.screenshotPath
         ? `<img src="${esc(step.screenshotPath)}" alt="screenshot turn ${esc(step.turn ?? idx)}">`
         : '';
@@ -77,6 +80,7 @@ export function generateHtmlReport(report, outputPath) {
         <details class="step" ${ok ? '' : 'open'}>
           <summary>
             <span class="turn">Turn ${esc((step.turn ?? idx) + 1)}${esc(attemptLabel)}</span>
+            ${humanInput}
             ${planSpan}
             <span class="step-result ${ok ? 'ok' : 'bad'}" ${resultTooltip ? `title="${esc(resultTooltip)}"` : ''}>${esc(resultRaw)}</span>
             <span class="tokens">tokens: ${esc(step.tokensUsed ?? '—')} / total: ${esc(step.totalTokensUsed ?? '—')}</span>
@@ -276,6 +280,11 @@ export function generateHtmlReport(report, outputPath) {
     .step summary:hover{ background: rgba(255,255,255,.08); }
 
     .turn{ font-weight:700; }
+    .hitl{
+      color:#fbbf24; border:1px solid rgba(251,191,36,.45);
+      background:rgba(251,191,36,.12); border-radius:999px;
+      padding:2px 8px; font-size:12px; font-weight:700;
+    }
     .plan{
       flex:1; color: var(--text-muted); font-size:12px;
       white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
