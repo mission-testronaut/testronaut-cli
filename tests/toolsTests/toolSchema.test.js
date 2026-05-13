@@ -15,6 +15,14 @@ describe('tools/toolSchema', () => {
     expect(entry.function.parameters?.properties).toHaveProperty('dir');
   });
 
+  it('includes request_human_input for verification codes', () => {
+    const entry = toolsSchema.find(t => t.function?.name === 'request_human_input');
+    expect(entry?.type).toBe('function');
+    expect(entry.function.description).toMatch(/verification code/i);
+    expect(entry.function.parameters?.properties?.codeType?.enum).toContain('totp');
+    expect(entry.function.parameters?.properties?.maxLength?.default).toBe(64);
+  });
+
   it('defines navigate and download_file with required fields', () => {
     const nav = toolsSchema.find(t => t.function?.name === 'navigate');
     const download = toolsSchema.find(t => t.function?.name === 'download_file');

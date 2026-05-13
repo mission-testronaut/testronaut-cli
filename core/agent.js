@@ -36,7 +36,7 @@ import path from 'path';
  * @param {string} missionName
  * @param {number} [maxTurns=20] - upper bound for turnLoop per goal
  * @param {number} [retryLimit]
- * @param {{ domListLimit?: number|typeof Infinity, debug?: boolean, resourceGuard?: { enabled:boolean, hrefIncludes:string[], dataTypes:string[] } }} [opts]
+ * @param {{ domListLimit?: number|typeof Infinity, debug?: boolean, resourceGuard?: { enabled:boolean, hrefIncludes:string[], dataTypes:string[] }, humanInput?: { enabled:boolean, timeoutSeconds:number } }} [opts]
  * @returns {Promise<Array<{missionName:string, submissionType:string, submissionName:string|null, status:'passed'|'failed', steps:any[], startTime:number, endTime:number}>>}
  */
 export async function runAgent(goals, missionName, maxTurns = 20, retryLimit, opts = {}) {
@@ -135,6 +135,17 @@ Use Ground Control as your persistent mission memory about:
 - Any constraints about staying on the correct site.
       `.trim();
 
+      if (opts.humanInput?.enabled !== false) {
+        systemContent +=
+          '\n\n' +
+          `
+Human-in-the-loop verification:
+- If the app requires a TOTP, SMS, email, or similar short verification code that you cannot retrieve yourself, call request_human_input.
+- Do not ask for passwords, API keys, or long free-form text with this tool.
+- After receiving the code from the tool result, enter it into the appropriate field and continue the mission.
+          `.trim();
+      }
+
       if (groundSummary) {
         systemContent +=
           '\n\n' +
@@ -164,6 +175,7 @@ Use Ground Control as your persistent mission memory about:
           retryLimit, 
           groundControl,
           resourceGuard: opts.resourceGuard,
+          humanInput: opts.humanInput,
           onStep: (s) => {
             // Append each step as a JSON line
             try {
