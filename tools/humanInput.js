@@ -1,4 +1,5 @@
-import { createInterface } from 'node:readline/promises';
+import { createInterface } from 'node:readline';
+import { Writable } from 'node:stream';
 import { stdin as input, stdout as output } from 'node:process';
 import { maskPreview } from '../core/redaction.js';
 
@@ -9,6 +10,21 @@ const DEFAULT_MAX_CODE_LENGTH = 64;
 const MIN_CODE_LENGTH = 1;
 const MAX_CODE_LENGTH = 64;
 const CODE_RE = /^[A-Za-z0-9_-]+$/;
+
+class HiddenInputOutput extends Writable {
+  constructor(realOutput) {
+    super();
+    this.realOutput = realOutput;
+    this.hidden = false;
+  }
+
+  _write(chunk, encoding, callback) {
+    if (!this.hidden) {
+      this.realOutput.write(chunk, encoding);
+    }
+    callback();
+  }
+}
 
 function clampNumber(raw, fallback, min, max) {
   const n = Number(raw);
@@ -57,6 +73,43 @@ export function sanitizeHumanCodeInput(raw, { maxLength = DEFAULT_MAX_CODE_LENGT
   return { ok: true, value };
 }
 
+export function questionWithHiddenInput(prompt, { timeoutMs } = {}) {
+  return new Promise((resolve, reject) => {
+    const maskedOutput = new HiddenInputOutput(output);
+    const rl = createInterface({
+      input,
+      output: maskedOutput,
+      terminal: Boolean(output.isTTY),
+    });
+
+    let settled = false;
+    let timeout;
+
+    function finish(err, answer) {
+      if (settled) return;
+      settled = true;
+      if (timeout) clearTimeout(timeout);
+      maskedOutput.hidden = false;
+      output.write('\n');
+      rl.close();
+      if (err) reject(err);
+      else resolve(answer);
+    }
+
+    if (timeoutMs) {
+      timeout = setTimeout(() => {
+        const err = new Error('Human input timed out.');
+        err.name = 'AbortError';
+        finish(err);
+      }, timeoutMs);
+    }
+
+    output.write(prompt);
+    maskedOutput.hidden = true;
+    rl.question('', (answer) => finish(null, answer));
+  });
+}
+
 export async function requestHumanInput(args = {}, options = {}) {
   const opts = normalizeHumanInputOptions({
     ...options,
@@ -76,19 +129,14 @@ export async function requestHumanInput(args = {}, options = {}) {
   const label = prompt.endsWith(':') ? prompt : `${prompt}:`;
   const timeoutMs = opts.timeoutSeconds * 1000;
 
-  const rl = createInterface({ input, output });
   let answer;
   try {
-    answer = await rl.question(`\n👤 ${label} `, {
-      signal: AbortSignal.timeout(timeoutMs),
-    });
+    answer = await questionWithHiddenInput(`\n👤 ${label} `, { timeoutMs });
   } catch (err) {
     if (err?.name === 'AbortError') {
       throw new Error(`Human input timed out after ${opts.timeoutSeconds}s.`);
     }
     throw err;
-  } finally {
-    rl.close();
   }
 
   const sanitized = sanitizeHumanCodeInput(answer, { maxLength: opts.maxLength });
@@ -113,4 +161,5 @@ export const __test__ = {
   MAX_CODE_LENGTH,
   sanitizeHumanCodeInput,
   normalizeHumanInputOptions,
+  questionWithHiddenInput,
 };

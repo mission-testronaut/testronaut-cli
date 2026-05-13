@@ -49,6 +49,8 @@ export const SENSITIVE_KEYWORDS = [
   'mfa',
 ];
 
+const VERIFICATION_CODE_KEYWORDS = new Set(['otp', 'code', 'totp', 'mfa']);
+
 /**
  * Builds a single RegExp that treats hyphens as `[-_\s]?` to catch variants.
  * @returns {RegExp}
@@ -175,8 +177,8 @@ export function redactArgs(fnName, args = {}, { showLength = true } = {}) {
  * 1) Sensitive-word ... "VALUE"
  *    e.g., `password is "hunter2"`
  *
- * 2) Sensitive-word ... (with|as|to|=) VALUE
- *    e.g., `token=abcd1234`, `auth with xyz`
+ * 2) Sensitive-word ... (with|as|to|=|entered|provided|used|submitted|filled) VALUE
+ *    e.g., `token=abcd1234`, `auth with xyz`, `MFA (entered 123456)`
  *
  * 3) "VALUE" ... into/in/on/to TARGET  (TARGET contains a sensitive hint)
  *    e.g., `Type "Imp0st3r123!" into #access`
@@ -189,18 +191,29 @@ export function redactPasswordInText(text = '', { showLength = true } = {}) {
   let s = String(text ?? '');
 
   // Build a reusable source pattern for SENSITIVE_KEYWORDS with hyphen expansion
-  const kwParts = SENSITIVE_KEYWORDS.map(k => k.replace(/-/g, '[-_\\s]?'));
-  const kwGroup = `(${kwParts.join('|')})`;
+  const strongKwParts = SENSITIVE_KEYWORDS
+    .filter(k => !VERIFICATION_CODE_KEYWORDS.has(k))
+    .map(k => k.replace(/-/g, '[-_\\s]?'));
+  const verificationKwParts = [...VERIFICATION_CODE_KEYWORDS].map(k => k.replace(/-/g, '[-_\\s]?'));
+  const strongKwGroup = `(${strongKwParts.join('|')})`;
+  const verificationKwGroup = `(${verificationKwParts.join('|')})`;
 
   // Case 1: keyword ... "VALUE"
   s = s.replace(
-    new RegExp(`(\\b${kwGroup}\\b[^"'\\\\\\n]{0,80}["'])([^"']+)(["'])`, 'gi'),
+    new RegExp(`(\\b${strongKwGroup}\\b[^"'\\\\\\n]{0,80}(?:[:=]|\\s)["'])([^"'\\n]+)(["'])`, 'gi'),
     (_m, pre, _kw, secret, post) => pre + maskPreview(secret, showLength) + post
   );
 
-  // Case 2: keyword ... (with|as|to|=) VALUE
+  // Case 2: keyword ... (with|as|to|=|entered|provided|used|submitted|filled) VALUE
   s = s.replace(
-    new RegExp(`(\\b${kwGroup}\\b[^.\\n]{0,80}?\\b(with|as|to|=)\\s*)([^\\s"'\\\`]+)`, 'gi'),
+    new RegExp(`(\\b${strongKwGroup}\\b[^.\\n]{0,80}?(?:\\b(with|as|to|entered|provided|used|submitted|filled)\\b|=)\\s*\\(?)([^\\s"'\\\`),.;:]+)`, 'gi'),
+    (_m, pre, _kw1, _kw2, secret) => pre + maskPreview(secret, showLength)
+  );
+
+  // Verification-code words are common UI text. Only redact them when the
+  // phrasing says a concrete value was entered/provided/etc.
+  s = s.replace(
+    new RegExp(`(\\b${verificationKwGroup}\\b[^.\\n]{0,80}?\\b(entered|provided|used|submitted|filled)\\b\\s*\\(?)([A-Za-z0-9_-]{4,64})`, 'gi'),
     (_m, pre, _kw1, _kw2, secret) => pre + maskPreview(secret, showLength)
   );
 

@@ -99,6 +99,13 @@ describe('redaction utilities', () => {
       expect(out).toContain(`auth with •••••• (3)`);
     });
 
+    it('masks MFA codes mentioned as entered in final text', () => {
+      const input = `SUCCESS: Logged in as ISAAC, completed MFA (entered 123456), and reached the dashboard.`;
+      const out = redactPasswordInText(input);
+      expect(out).toContain(`MFA (entered •••••• (6))`);
+      expect(out).not.toContain('123456');
+    });
+
     it('Case 3: "VALUE" into sensitive target (#access)', () => {
       const input = `Type "Imp0st3r123!" into #access`;
       const out = redactPasswordInText(input);
@@ -109,6 +116,21 @@ describe('redaction utilities', () => {
       const input = `Click the button and type "hello" into #search`;
       const out = redactPasswordInText(input);
       expect(out).toBe(input);
+    });
+
+    it('does not mangle MFA mission instructions while masking the access value', () => {
+      const input = `Fill the access code field (#access) with sword.
+Check the "Challenge with MFA code" checkbox.
+Set MFA code digits to 8.
+There should be an MFA challenge. Prompt the user for an MFA code, then fill the MFA Code field (#mfa-code) with that code.
+Click the "Verify Code" button (#mfa-submit).`;
+      const out = redactPasswordInText(input);
+      expect(out).toContain('Fill the access code field (#access) with •••••• (5)');
+      expect(out).toContain('Check the "Challenge with MFA code" checkbox.');
+      expect(out).toContain('Set MFA code digits to 8.');
+      expect(out).toContain('with that code.');
+      expect(out).toContain('Click the "Verify Code" button (#mfa-submit).');
+      expect(out).not.toContain('sword');
     });
 
     it('handles api key forms with spaces/underscores/hyphens', () => {
