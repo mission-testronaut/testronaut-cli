@@ -63,6 +63,16 @@ const DEV_API_BASE = 'https://staging.api.testronaut.app';
 
 let args = process.argv.slice(2);
 
+// Detect how the CLI was invoked so help text matches the actual command
+function detectCliName(npmCommand = process.env.npm_command, argv1 = process.argv[1]) {
+  // npx sets npm_command to 'exec'
+  if (npmCommand === 'exec') return 'npx testronaut';
+  // global install: argv[1] is the bin symlink named 'testronaut'
+  if (path.basename(argv1 || '') === 'testronaut') return 'testronaut';
+  return 'npx testronaut';
+}
+const cliName = detectCliName();
+
 // Look for --dev / --developer / --developer-mode / --staging
 const devFlagIndex = args.findIndex(a =>
   a === '--dev' ||
@@ -234,6 +244,7 @@ export const __test__ = {
   parseVercelBypassArgs,
   createVercelBypassHeader,
   parseProviderArgs,
+  detectCliName,
 };
 
 // Look for --model=<id> or --model <id>
@@ -436,12 +447,12 @@ const HELP_TEXT = `
 🧑‍🚀 testronaut - Autonomous Agent Mission Runner
 
 Usage:
-  npx testronaut                 Run all missions in the ./missions directory
-  npx testronaut <file>         Run a specific mission file (e.g., login.mission.js)
-  npx testronaut login          Log in and store session token
-  npx testronaut upload         Upload the most recent report JSON
-  npx testronaut serve        Serve & open the most recent HTML report (read-only)
-  npx testronaut view         Alias of 'serve'
+  ${cliName}                 Run all missions in the ./missions directory
+  ${cliName} <file>         Run a specific mission file (e.g., login.mission.js)
+  ${cliName} login          Log in and store session token
+  ${cliName} upload         Upload the most recent report JSON
+  ${cliName} serve        Serve & open the most recent HTML report (read-only)
+  ${cliName} view         Alias of 'serve'
 
 Options:
   --init                    Scaffold project folders and a welcome mission
@@ -457,11 +468,11 @@ Options:
   --retry_limit=<n>         Override agent turn retry limits (minimum 1, maximum 10)
 
 Examples:
-  npx testronaut
-  npx testronaut login
-  npx testronaut upload
-  npx testronaut serve
-  npx testronaut --init
+  ${cliName}
+  ${cliName} login
+  ${cliName} upload
+  ${cliName} serve
+  ${cliName} --init
 `;
 
 if (args.includes('--init')) {
@@ -494,7 +505,7 @@ Next steps:
   1. Get an API key from your AI provider
   2. Add it to your .env file
   3. Run your first mission:
-       npx testronaut
+       ${cliName}
 
 📚 Docs: https://docs.testronaut.app/docs/guides/cli-auth
   `);

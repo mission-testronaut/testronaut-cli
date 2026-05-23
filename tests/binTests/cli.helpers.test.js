@@ -115,4 +115,32 @@ describe('cli helpers', () => {
     expect(createVercelBypassHeader('abc')).toEqual({ 'x-vercel-protection-bypass': 'abc' });
     expect(createVercelBypassHeader('')).toEqual({});
   });
+
+  describe('detectCliName', () => {
+    const { detectCliName } = __test__;
+
+    it('returns "npx testronaut" when npm_command is exec (npx invocation)', () => {
+      expect(detectCliName('exec', '/some/path/cli.js')).toBe('npx testronaut');
+    });
+
+    it('returns "testronaut" when argv[1] basename is testronaut (global install)', () => {
+      expect(detectCliName(undefined, '/usr/local/bin/testronaut')).toBe('testronaut');
+    });
+
+    it('returns "npx testronaut" when argv[1] is cli.js (direct node invocation)', () => {
+      expect(detectCliName(undefined, '/home/user/testronaut-cli/bin/cli.js')).toBe('npx testronaut');
+    });
+
+    it('npm_command=exec takes precedence over a global-bin argv[1]', () => {
+      expect(detectCliName('exec', '/usr/local/bin/testronaut')).toBe('npx testronaut');
+    });
+
+    it('returns "npx testronaut" when argv[1] is undefined', () => {
+      expect(detectCliName(undefined, undefined)).toBe('npx testronaut');
+    });
+
+    it('returns "npx testronaut" when argv[1] is empty string', () => {
+      expect(detectCliName(undefined, '')).toBe('npx testronaut');
+    });
+  });
 });
