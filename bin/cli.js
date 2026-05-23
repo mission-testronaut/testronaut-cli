@@ -364,6 +364,70 @@ if (retryFlagIndex >= 0) {
   args.splice(retryFlagIndex, retryOverride ? 2 : 1);
 }
 
+// Look for --human-input / --no-human-input / --disable-human-input
+let humanInputOverride;
+let humanInputConsumesNext = false;
+const humanInputFlagIndex = args.findIndex(a =>
+  a === '--human-input' ||
+  a.startsWith('--human-input=') ||
+  a === '--human_input' ||
+  a.startsWith('--human_input=') ||
+  a === '--no-human-input' ||
+  a === '--disable-human-input'
+);
+if (humanInputFlagIndex >= 0) {
+  const rawArg = args[humanInputFlagIndex];
+  if (rawArg.includes('=')) {
+    humanInputOverride = parseBool(rawArg.split('=')[1]);
+  } else if (rawArg === '--no-human-input' || rawArg === '--disable-human-input') {
+    humanInputOverride = false;
+  } else if (args[humanInputFlagIndex + 1] && !args[humanInputFlagIndex + 1].startsWith('-')) {
+    humanInputOverride = parseBool(args[humanInputFlagIndex + 1]);
+    humanInputConsumesNext = true;
+  } else {
+    humanInputOverride = true;
+  }
+
+  if (humanInputOverride !== null) {
+    process.env.TESTRONAUT_HUMAN_INPUT = humanInputOverride ? '1' : '0';
+    console.log(`👤 Human input tool ${humanInputOverride ? 'enabled' : 'disabled'} (TESTRONAUT_HUMAN_INPUT=${process.env.TESTRONAUT_HUMAN_INPUT})`);
+  } else {
+    console.warn('⚠️ Invalid --human-input value. Use true/false, 1/0, yes/no.');
+  }
+
+  const consume = 1 + (humanInputConsumesNext && humanInputOverride !== null ? 1 : 0);
+  args.splice(humanInputFlagIndex, consume);
+}
+
+// Look for --human-input-timeout / --human_input_timeout in seconds
+let humanInputTimeoutOverride;
+const humanInputTimeoutFlagIndex = args.findIndex(a =>
+  a === '--human-input-timeout' ||
+  a.startsWith('--human-input-timeout=') ||
+  a === '--human_input_timeout' ||
+  a.startsWith('--human_input_timeout=')
+);
+if (humanInputTimeoutFlagIndex >= 0) {
+  const rawArg = args[humanInputTimeoutFlagIndex];
+  if (rawArg.includes('=')) {
+    humanInputTimeoutOverride = rawArg.split('=')[1];
+  } else if (args[humanInputTimeoutFlagIndex + 1]) {
+    humanInputTimeoutOverride = args[humanInputTimeoutFlagIndex + 1];
+  }
+
+  if (humanInputTimeoutOverride) {
+    const n = Number(humanInputTimeoutOverride.trim());
+    if (Number.isFinite(n) && n > 0) {
+      process.env.TESTRONAUT_HUMAN_INPUT_TIMEOUT_SECONDS = String(n);
+      console.log(`⏱️ Human input timeout override: ${process.env.TESTRONAUT_HUMAN_INPUT_TIMEOUT_SECONDS}s`);
+    } else {
+      console.warn(`⚠️ Invalid --human-input-timeout value "${humanInputTimeoutOverride}". Ignoring.`);
+    }
+  }
+
+  args.splice(humanInputTimeoutFlagIndex, humanInputTimeoutOverride ? 2 : 1);
+}
+
 const allResults = [];
 const runId = `run_${Date.now()}`;
 const startTime = new Date();
@@ -386,6 +450,9 @@ Options:
   --provider=<id>           Override LLM provider for this run (e.g., --provider=openai)
   --dev                     Use the staging API base URL
   --vercel-bypass=<secret>  Send Vercel protection bypass header for protected deployments
+  --human-input[=<bool>]    Allow the agent to pause for short verification codes (default: true)
+  --no-human-input          Disable human-in-the-loop verification prompts for automated runs
+  --human-input-timeout=<s> Override human input wait timeout in seconds (default: 60)
   --help                    Show this help message
   --retry_limit=<n>         Override agent turn retry limits (minimum 1, maximum 10)
 

@@ -13,6 +13,7 @@ import {
   enforceTurnBudget,
   getDomListLimit,
   getResourceGuardConfig,
+  getHumanInputConfig,
 } from '../../core/config.js';
 
 describe('core/config', () => {
@@ -198,6 +199,45 @@ describe('core/config', () => {
       expect(res.enabled).toBe(true);
       expect(res.hrefIncludes).toEqual(['/x', '/y']);
       expect(res.dataTypes).toEqual(['row']);
+    });
+  });
+
+  describe('getHumanInputConfig', () => {
+    const OLD_ENV = { ...process.env };
+    beforeEach(() => {
+      process.env = { ...OLD_ENV };
+      delete process.env.TESTRONAUT_HUMAN_INPUT;
+      delete process.env.TESTRONAUT_HUMAN_INPUT_TIMEOUT_SECONDS;
+    });
+    afterEach(() => {
+      process.env = { ...OLD_ENV };
+    });
+
+    it('defaults to enabled with a 60 second timeout', () => {
+      const res = getHumanInputConfig({});
+      expect(res.enabled).toBe(true);
+      expect(res.timeoutSeconds).toBe(60);
+      expect(res.source.enabled).toBe('default');
+      expect(res.source.timeout).toBe('default');
+    });
+
+    it('uses config values and clamps timeout', () => {
+      const res = getHumanInputConfig({ humanInput: { enabled: false, timeoutSeconds: 999 } });
+      expect(res.enabled).toBe(false);
+      expect(res.timeoutSeconds).toBe(300);
+      expect(res.source.enabled).toBe('config');
+      expect(res.source.timeout).toBe('config');
+      expect(res.clamped).toBe(true);
+    });
+
+    it('prefers env overrides over config', () => {
+      process.env.TESTRONAUT_HUMAN_INPUT = 'true';
+      process.env.TESTRONAUT_HUMAN_INPUT_TIMEOUT_SECONDS = '7';
+      const res = getHumanInputConfig({ humanInput: { enabled: false, timeoutSeconds: 120 } });
+      expect(res.enabled).toBe(true);
+      expect(res.timeoutSeconds).toBe(7);
+      expect(res.source.enabled).toBe('env');
+      expect(res.source.timeout).toBe('env');
     });
   });
 

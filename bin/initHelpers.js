@@ -60,6 +60,10 @@ export function defaultConfig(rootBasename) {
       hrefIncludes: ['/document/', '/file/', '/download', '/attachment/'],
       dataTypes: ['document', 'file', 'item', 'row'],
     },
+    humanInput: {
+      enabled: true,
+      timeoutSeconds: 60,
+    },
   };
 }
 
