@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
+const { readFile } = vi.hoisted(() => ({ readFile: vi.fn() }));
+
 vi.mock('node:fs/promises', () => ({
-  readFile: vi.fn(),
+  readFile,
 }));
 
-import { readFile } from 'node:fs/promises';
 import {
   loadConfig,
   getMaxTurns,
