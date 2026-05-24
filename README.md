@@ -44,6 +44,7 @@ Includes:
 
 ## 📦 Installation
 
+**Global install** (recommended — use `testronaut` directly):
 ```bash
 npm install -g testronaut
 ```
@@ -51,11 +52,17 @@ npm install -g testronaut
 Then initialize your project:
 
 ```bash
-npx testronaut --init
+testronaut --init
 ```
 
 Run the sample mission:
 ```bash
+testronaut welcome.mission.js
+```
+
+**One-off / no install** (use `npx` to run without installing):
+```bash
+npx testronaut --init
 npx testronaut welcome.mission.js
 ```
 
@@ -117,10 +124,10 @@ Choose your preferred LLM at init or via environment variables.
 
 ```bash
 # During init
-npx testronaut --init
+testronaut --init
 
 # Or override anytime
-TESTRONAUT_PROVIDER=gemini TESTRONAUT_MODEL=gemini-2.5-pro npx testronaut
+TESTRONAUT_PROVIDER=gemini TESTRONAUT_MODEL=gemini-2.5-pro testronaut
 ```
 
 Current supported providers:
@@ -138,12 +145,12 @@ More providers coming soon (Anthropic, Mistral, etc.).
 
 Run all missions:
 ```bash
-npx testronaut
+testronaut
 ```
 
 Run a specific mission:
 ```bash
-npx testronaut login.mission.js
+testronaut login.mission.js
 ```
 
 Chain missions together:
@@ -161,12 +168,12 @@ await runMissions({
 
 Use the staging API base URL:
 ```bash
-npx testronaut --dev
+testronaut --dev
 ```
 
 If the staging deployment is protected by Vercel, pass the bypass secret:
 ```bash
-npx testronaut --dev --vercel-bypass=YOUR_SECRET login
+testronaut --dev --vercel-bypass=YOUR_SECRET login
 ```
 
 You can also set the bypass secret via environment variables:
