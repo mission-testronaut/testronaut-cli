@@ -10,3 +10,6 @@ node_modules/
 missions/*
 scripts/*
 testronaut-report-*/*
+periapsis-local.tgz
+.github/workflows/*-local.yml
+policy/reports/
