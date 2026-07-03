@@ -71,6 +71,17 @@ function detectCliName(npmCommand = process.env.npm_command, argv1 = process.arg
   if (path.basename(argv1 || '') === 'testronaut') return 'testronaut';
   return 'npx testronaut';
 }
+
+function isDirectInvocation(argv1 = process.argv[1], moduleUrl = import.meta.url) {
+  if (!argv1) return false;
+  const modulePath = fileURLToPath(moduleUrl);
+  try {
+    return fs.realpathSync(argv1) === fs.realpathSync(modulePath);
+  } catch {
+    return path.resolve(argv1) === path.resolve(modulePath);
+  }
+}
+
 const cliName = detectCliName();
 
 // Look for --dev / --developer / --developer-mode / --staging
@@ -297,6 +308,7 @@ export const __test__ = {
   parseProviderArgs,
   parseRunOptionsArgs,
   detectCliName,
+  isDirectInvocation,
 };
 
 // Look for --model=<id> or --model <id>
@@ -542,6 +554,7 @@ Examples:
   ${cliName} --init
 `;
 
+async function main() {
 if (args.includes('--init')) {
   await initializeTestronautProject();
   await createWelcomeMission();
@@ -688,6 +701,18 @@ const outputDir = './missions/mission_reports';
 fs.mkdirSync(outputDir, { recursive: true });
 fs.writeFileSync(`${outputDir}/${runId}.json`, JSON.stringify(report, null, 2));
 generateHtmlReport(report, `${outputDir}/${runId}.html`);
+
+  try {
+    if (!process.env.TN_KEEP_TMP && fs.existsSync(TMP_DIR)) {
+      fs.rmSync(TMP_DIR, { recursive: true, force: true });
+      console.log('🧹 Cleaned up temporary files.');
+    } else {
+      console.log('⚠️ Skipped tmp cleanup (TN_KEEP_TMP set).');
+    }
+  } catch (err) {
+    console.warn(`⚠️ Could not remove tmp folder: ${err.message}`);
+  }
+}
 
 /**
  * Parse a fetch Response safely and return JSON or throw a rich error.
@@ -1191,13 +1216,6 @@ async function serveLatestReport() {
   await openInBrowser(reportUrl).catch(() => {});
 }
 
-try {
-  if (!process.env.TN_KEEP_TMP && fs.existsSync(TMP_DIR)) {
-    fs.rmSync(TMP_DIR, { recursive: true, force: true });
-    console.log('🧹 Cleaned up temporary files.');
-  } else {
-    console.log('⚠️ Skipped tmp cleanup (TN_KEEP_TMP set).');
-  }
-} catch (err) {
-  console.warn(`⚠️ Could not remove tmp folder: ${err.message}`);
+if (isDirectInvocation()) {
+  await main();
 }
