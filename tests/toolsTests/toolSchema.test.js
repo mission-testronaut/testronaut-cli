@@ -23,6 +23,14 @@ describe('tools/toolSchema', () => {
     expect(entry.function.parameters?.properties?.maxLength?.default).toBe(64);
   });
 
+  it('includes get_mfa_code for automated TOTP retrieval', () => {
+    const entry = toolsSchema.find(t => t.function?.name === 'get_mfa_code');
+    expect(entry?.type).toBe('function');
+    expect(entry.function.description).toMatch(/TOTP MFA code/i);
+    expect(entry.function.parameters?.properties).toHaveProperty('nickname');
+    expect(entry.function.parameters?.properties?.minSecondsRemaining?.default).toBe(5);
+  });
+
   it('defines navigate and download_file with required fields', () => {
     const nav = toolsSchema.find(t => t.function?.name === 'navigate');
     const download = toolsSchema.find(t => t.function?.name === 'download_file');
