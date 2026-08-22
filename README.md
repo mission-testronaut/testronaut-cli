@@ -182,6 +182,63 @@ export VERCEL_AUTOMATION_BYPASS_SECRET=YOUR_SECRET
 # or
 export TESTRONAUT_VERCEL_BYPASS=YOUR_SECRET
 ```
+
+---
+
+## 🔐 Automated MFA Codes
+
+Testronaut can retrieve a stored TOTP MFA code from the Testronaut API during a mission. This uses the `sessionToken` saved by `testronaut login` in the project root `testronaut-config.json`.
+
+The agent will prefer the automated `get_mfa_code` tool when an MFA nickname is known, then fall back to the manual human input tool if the code is unavailable, the entry is missing, the feature is disabled, or the API session cannot access it.
+
+If the nickname is missing or does not match exactly, the tool can call the MFA list endpoint to see available nicknames. It will retry simple case, spacing, or punctuation mismatches, such as `rudy poo` matching `rudy-poo`.
+
+Add a default MFA nickname to `testronaut-config.json`:
+
+```json
+{
+  "sessionToken": "eyJ...",
+  "mfaName": "github-test-mfa"
+}
+```
+
+Or pass the nickname for a single run:
+
+```bash
+testronaut login.mission.js -o mfa=github-test-mfa
+```
+
+Mission text can also name the MFA entry:
+
+```js
+export const loginMission = `
+Log in to GitHub.
+When prompted for MFA, use the MFA nickname github-test-mfa.
+`;
+```
+
+Use staging API endpoints with the same developer flag:
+
+```bash
+testronaut --dev login.mission.js -o mfa=github-test-mfa
+```
+
+To inspect MFA API traffic during a run, enable debug logging:
+
+```bash
+testronaut --debug --dev login.mission.js -o mfa=github-test-mfa
+# or
+TESTRONAUT_API_DEBUG=1 testronaut --dev login.mission.js -o mfa=github-test-mfa
+```
+
+This writes sanitized request and response details to `missions/mission_reports/api-debug.log`, including the resolved endpoint URL, status, content type, response keys, body preview, parsed response shape, and list endpoint nicknames. Session tokens, bypass secrets, and MFA code values are redacted.
+
+Notes:
+- Run `testronaut login` first so `sessionToken` exists.
+- The CLI calls the API host, not the app host.
+- The MFA API feature flag must be enabled.
+- Paid access is required by the API for paid-gated MFA operations. If the API returns a payment or access error, the mission can still ask for a manual code when human input is enabled.
+
 ---
 
 ## 📋 Reports

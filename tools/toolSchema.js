@@ -331,6 +331,34 @@ const toolsSchema = [
   {
     type: 'function',
     function: {
+      name: 'get_mfa_code',
+      description:
+        'Retrieve a current TOTP MFA code from the Testronaut API using the configured sessionToken. Prefer this before request_human_input. If the nickname is missing or does not match, the tool can list available MFA nicknames and retry simple case/spacing/punctuation mismatches.',
+      parameters: {
+        type: 'object',
+        properties: {
+          nickname: {
+            type: 'string',
+            description: 'Nickname of the stored MFA entry, such as "github-test-mfa". Optional if mfaName is configured.'
+          },
+          minSecondsRemaining: {
+            type: 'number',
+            default: 5,
+            description: 'If the code is about to expire, wait for a fresher code when possible.'
+          },
+          waitForFreshCode: {
+            type: 'boolean',
+            default: true,
+            description: 'Whether to wait and retry when the current TOTP code has very little time remaining.'
+          }
+        },
+        required: []
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
       name: 'request_human_input',
       description:
         'Pause for a human to enter a short verification code such as TOTP, SMS, or email confirmation. Use only when the page requires a code the agent cannot obtain itself.',

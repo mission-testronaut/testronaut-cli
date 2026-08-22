@@ -135,15 +135,28 @@ Use Ground Control as your persistent mission memory about:
 - Any constraints about staying on the correct site.
       `.trim();
 
+      systemContent +=
+        '\n\n' +
+        `
+Verification codes:
+- If the app requires a TOTP/MFA code, first try get_mfa_code when an MFA nickname is known from the mission text, config, or CLI options.
+- Use the returned value promptly. If the app rejects it as expired or invalid, call get_mfa_code once more for a fresh code and retry carefully.
+- Never invent, guess, or reuse placeholder MFA digits. Only enter an MFA value that came from get_mfa_code or request_human_input.
+        `.trim();
+
       if (opts.humanInput?.enabled !== false) {
         systemContent +=
-          '\n\n' +
+          '\n' +
           `
-Human-in-the-loop verification:
-- If the app requires a TOTP, SMS, email, or similar short verification code that you cannot retrieve yourself, call request_human_input.
-- Do not ask for passwords, API keys, or long free-form text with this tool.
-- After receiving the code from the tool result, enter it into the appropriate field and continue the mission.
+- If get_mfa_code returns that MFA is unavailable, not configured, not found, not enabled, or the account lacks access, gracefully fall back to request_human_input when human input is enabled.
+- Use request_human_input for SMS, email, or other short verification codes that cannot be retrieved automatically.
+- Do not ask for passwords, API keys, or long free-form text with request_human_input.
+- After receiving a code from either tool, enter it into the appropriate field and continue the mission.
           `.trim();
+      } else {
+        systemContent +=
+          '\n' +
+          'Human input is disabled for this run. If get_mfa_code cannot provide a usable MFA code, report a graceful FAILURE with the reason.';
       }
 
       if (groundSummary) {

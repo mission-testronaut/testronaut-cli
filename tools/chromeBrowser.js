@@ -23,6 +23,7 @@ import fs from 'fs';
 import path from 'path';
 import { ensureBrowsers } from '../tools/playwrightSetup.js';
 import { requestHumanInput } from './humanInput.js';
+import { getMfaCode } from './mfaCode.js';
 
 const FILES_DIR = path.join('missions', 'files');
 const REPORTS_DIR = path.join('missions', 'mission_reports');
@@ -1362,6 +1363,7 @@ export const CHROME_TOOL_MAP = {
   upload_file: (b, args) => b.upload_file(args),
   download_file: (b, args) => b.download_file(args),
   list_local_files: (b, args) => b.list_local_files(args),
+  get_mfa_code: (b, args) => getMfaCode(args),
   request_human_input: (b, args, agentMemory) => requestHumanInput(args, agentMemory?.humanInput),
   resource_progress: (b, args, agentMemory) => {
     const prog = agentMemory?.docProgress;

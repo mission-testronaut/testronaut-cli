@@ -116,6 +116,33 @@ describe('cli helpers', () => {
     expect(createVercelBypassHeader('')).toEqual({});
   });
 
+  it('parses run options from -o and removes them from args', () => {
+    const { parseRunOptionsArgs } = __test__;
+    const res = parseRunOptionsArgs(['-o', 'mfa=github-test-mfa', 'login.mission.js']);
+
+    expect(res.options).toEqual({ mfa: 'github-test-mfa' });
+    expect(res.args).toEqual(['login.mission.js']);
+    expect(res.invalid).toBe(false);
+  });
+
+  it('parses comma-separated inline run options', () => {
+    const { parseRunOptionsArgs } = __test__;
+    const res = parseRunOptionsArgs(['--options=mfa=github-test-mfa,foo=bar', 'login']);
+
+    expect(res.options).toEqual({ mfa: 'github-test-mfa', foo: 'bar' });
+    expect(res.args).toEqual(['login']);
+    expect(res.invalid).toBe(false);
+  });
+
+  it('flags invalid run options', () => {
+    const { parseRunOptionsArgs } = __test__;
+    const res = parseRunOptionsArgs(['--options', 'mfa', 'login']);
+
+    expect(res.options).toEqual({});
+    expect(res.args).toEqual(['login']);
+    expect(res.invalid).toBe(true);
+  });
+
   describe('detectCliName', () => {
     const { detectCliName } = __test__;
 

@@ -107,6 +107,28 @@ function extractDocIdFromUrl(url = '') {
   return m ? m[1] : '';
 }
 
+function isMfaLikeFill(fnName, args = {}) {
+  if (fnName !== 'fill') return false;
+  const haystack = [
+    args.selector,
+    args.label,
+    args.placeholder,
+    args.name,
+    args.testId,
+    args.role,
+  ].map(v => String(v || '').toLowerCase()).join(' ');
+
+  return /\b(mfa|totp|otp|verification|2fa|code)\b/.test(haystack);
+}
+
+function getFillText(args = {}) {
+  return String(args.text ?? args.value ?? args.input ?? args.keys ?? '');
+}
+
+function safeListLabel(list = []) {
+  return Array.isArray(list) && list.length ? list.join(', ') : '(none)';
+}
+
 // Rolling token counters used for self-throttling
 let totalTokensUsed = 0;
 let turnTimestamps = [];
@@ -428,6 +450,97 @@ export const turnLoop = async (
           step.events.push(errorMessage
             ? `👤 Human-in-the-loop input ${step.humanInput.status}: ${errorMessage.replace(/^ERROR:\s*/, '')}`
             : '👤 Human-in-the-loop input provided.');
+
+          if (!errorMessage) {
+            try {
+              const parsed = JSON.parse(result);
+              agentMemory.lastVerificationInput = {
+                source: 'human_input',
+                value: parsed.value,
+                codeType: parsed.codeType || args.codeType || 'verification_code',
+              };
+            } catch {
+              // ignore malformed tool result
+            }
+          }
+        }
+
+        if (fnName === 'get_mfa_code') {
+          step.mfa = step.mfa || {};
+          step.mfa.requested = true;
+          try {
+            const parsed = JSON.parse(result);
+            step.mfa.nickname = parsed.nickname || args.nickname || null;
+            step.mfa.status = parsed.ok ? 'provided' : parsed.code || 'unavailable';
+            step.mfa.availableNicknames = parsed.availableNicknames || [];
+            step.mfa.responseKeys = parsed.responseKeys || [];
+            step.mfa.listStatus = parsed.mfaListStatus || null;
+            agentMemory.lastMfaLookup = parsed.ok
+              ? {
+                  ok: true,
+                  nickname: parsed.nickname || args.nickname || null,
+                  value: parsed.value,
+                  secondsRemaining: parsed.mfaCode?.secondsRemaining,
+                  resolvedFromList: !!parsed.resolvedFromList,
+                  requestedNickname: parsed.requestedNickname,
+                  availableNicknames: parsed.availableNicknames || [],
+                }
+              : {
+                  ok: false,
+                  nickname: parsed.nickname || args.nickname || null,
+                  code: parsed.code,
+                  error: parsed.error,
+                  availableNicknames: parsed.availableNicknames || [],
+                  responseKeys: parsed.responseKeys || [],
+                  mfaListStatus: parsed.mfaListStatus || null,
+                };
+
+            step.events.push(
+              parsed.ok
+                ? `🔐 MFA code retrieved for "${step.mfa.nickname || 'configured MFA'}".`
+                : `🔐 MFA code unavailable: ${parsed.error || parsed.code || 'unknown error'}`
+            );
+            if (parsed.ok) {
+              const detailLine = [
+                `🔐 MFA source: API`,
+                `nickname="${step.mfa.nickname || 'configured MFA'}"`,
+                parsed.resolvedFromList ? `resolvedFromList=true` : null,
+                Number.isFinite(parsed.mfaCode?.secondsRemaining)
+                  ? `secondsRemaining=${parsed.mfaCode.secondsRemaining}`
+                  : null,
+              ].filter(Boolean).join(' ');
+              console.log(detailLine);
+              step.events.push(detailLine);
+            } else {
+              const reasonLine = `🔐 MFA unavailable reason: ${parsed.code || 'unknown'} - ${parsed.error || 'unknown error'}`;
+              console.log(reasonLine);
+              step.events.push(reasonLine);
+
+              if (Array.isArray(parsed.availableNicknames)) {
+                const listLine = `🔐 MFA list endpoint nicknames: ${safeListLabel(parsed.availableNicknames)}`;
+                console.log(listLine);
+                step.events.push(listLine);
+              }
+
+              if (parsed.mfaListStatus && parsed.mfaListStatus !== 'available') {
+                const listStatusLine = `🔐 MFA list endpoint status: ${JSON.stringify(parsed.mfaListStatus)}`;
+                console.log(listStatusLine);
+                step.events.push(listStatusLine);
+              } else if (parsed.mfaListStatus === 'available') {
+                const listStatusLine = '🔐 MFA list endpoint status: available';
+                console.log(listStatusLine);
+                step.events.push(listStatusLine);
+              }
+
+              if (Array.isArray(parsed.responseKeys) && parsed.responseKeys.length) {
+                const keysLine = `🔐 MFA API response keys: ${parsed.responseKeys.join(', ')}`;
+                console.log(keysLine);
+                step.events.push(keysLine);
+              }
+            }
+          } catch {
+            step.mfa.status = errorMessage ? 'error' : 'unknown';
+          }
         }
 
         // Capture and log any file upload/download events (for reports)
@@ -460,7 +573,36 @@ export const turnLoop = async (
           // non-JSON results ignored
         }
 
-        console.log(`[tool ] ← ${fnName} result:`, errorMessage ? '❌ Failed' : '✅ Success');
+        let toolStatusLabel = errorMessage ? '❌ Failed' : '✅ Success';
+        if (fnName === 'get_mfa_code' && !errorMessage) {
+          try {
+            const parsed = JSON.parse(result);
+            toolStatusLabel = parsed.ok
+              ? '✅ Code retrieved'
+              : `⚠️ Unavailable${parsed.code ? ` (${parsed.code})` : ''}`;
+          } catch {
+            toolStatusLabel = '⚠️ Unavailable';
+          }
+        }
+
+        console.log(`[tool ] ← ${fnName} result:`, toolStatusLabel);
+
+        if (isMfaLikeFill(fnName, args)) {
+          const fillText = getFillText(args);
+          let sourceLine;
+          if (agentMemory.lastMfaLookup?.ok && fillText === agentMemory.lastMfaLookup.value) {
+            sourceLine = `🔐 MFA fill source: get_mfa_code nickname="${agentMemory.lastMfaLookup.nickname || 'configured MFA'}"`;
+          } else if (agentMemory.lastVerificationInput?.value && fillText === agentMemory.lastVerificationInput.value) {
+            sourceLine = `🔐 MFA fill source: request_human_input codeType="${agentMemory.lastVerificationInput.codeType}"`;
+          } else if (agentMemory.lastMfaLookup && !agentMemory.lastMfaLookup.ok) {
+            sourceLine = `⚠️ MFA fill source: not from get_mfa_code. Last MFA lookup failed with ${agentMemory.lastMfaLookup.code || 'unknown'}: ${agentMemory.lastMfaLookup.error || 'unknown error'}`;
+          } else {
+            sourceLine = '⚠️ MFA fill source: not from a recorded get_mfa_code or request_human_input result.';
+          }
+          console.log(sourceLine);
+          step.events.push(sourceLine);
+        }
+
         let resultForLog = result;
         if (fnName === 'request_human_input') {
           try {
@@ -474,8 +616,26 @@ export const turnLoop = async (
             resultForLog = errorMessage || 'Human input received.';
           }
         }
+        if (fnName === 'get_mfa_code') {
+          try {
+            const parsed = JSON.parse(result);
+            resultForLog = JSON.stringify({
+              ...parsed,
+              value: maskPreview(parsed.value),
+              redactedValue: maskPreview(parsed.value),
+              mfaCode: parsed.mfaCode
+                ? {
+                    ...parsed.mfaCode,
+                    code: maskPreview(parsed.mfaCode.code),
+                  }
+                : parsed.mfaCode,
+            });
+          } catch {
+            resultForLog = errorMessage || 'MFA code lookup completed.';
+          }
+        }
         const truncated = resultForLog.length > 1000 ? resultForLog.slice(0, 1000) + '…' : resultForLog;
-        step.events.push(`[tool ] ← ${fnName} result: ${errorMessage ? '❌ Failed' : '✅ Success'}`);
+        step.events.push(`[tool ] ← ${fnName} result: ${toolStatusLabel}`);
         step.events.push(`[tool ] ← ${truncated}`);
 
         // Screenshot detection (for report metadata only)
