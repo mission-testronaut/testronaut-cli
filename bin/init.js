@@ -32,10 +32,10 @@ import {
   migrateLegacyConfig,
   defaultConfig,
   makeEnvTemplate,
-  openAIModels,
   geminiModels,
   pickInitialIndex
 } from './initHelpers.js';
+import { DEFAULT_OPENAI_MODEL, OPENAI_MODELS } from '../llm/openAI/models.js';
 
 export async function initializeTestronautProject() {
   // ─────────────────────────────────────────────
@@ -81,36 +81,36 @@ export async function initializeTestronautProject() {
 
     // 2b) Provider-specific model selection
     if (llmProvider === 'openai') {
-      const models = openAIModels();
+      const currentModels = OPENAI_MODELS.filter(model => !model.legacy);
+      const legacyModels = OPENAI_MODELS.filter(model => model.legacy);
+      const choices = [
+        ...currentModels.map(model => ({
+          title: `${model.label} (${model.description})`,
+          value: model.id,
+        })),
+        { title: '── Legacy models ──', disabled: true },
+        ...legacyModels.map(model => ({
+          title: `${model.label} (${model.description})`,
+          value: model.id,
+        })),
+      ];
+      const selectedIndex = choices.findIndex(choice => choice.value === config.model);
+      const defaultIndex = choices.findIndex(choice => choice.value === DEFAULT_OPENAI_MODEL);
       const { openaiModel } = await prompts({
         type: 'select',
         name: 'openaiModel',
         message: 'Select an OpenAI model for agentic workflows (function/tool calling):',
-        choices: [
-          { title: 'GPT-4.1 (general purpose)', value: 'gpt-4.1' },
-          { title: 'GPT-4.1 mini (faster, cheaper)', value: 'gpt-4.1-mini' },
-          { title: 'GPT-4o (multimodal, tool use)', value: 'gpt-4o' },
-          { title: 'GPT-4o mini (speed/cost optimized)', value: 'gpt-4o-mini' },
-          { title: 'o3 (reasoning w/ native tool use)', value: 'o3' },
-          { title: 'o4-mini (reasoning, cost-effective)', value: 'o4-mini' },
-          // GPT-5 family (availability varies)
-          { title: 'GPT-5 (previous reasoning model)', value: 'gpt-5' },
-          { title: 'GPT-5 mini (faster)', value: 'gpt-5-mini' },
-          { title: 'GPT-5 nano (lightweight)', value: 'gpt-5-nano' },
-          { title: 'GPT-5.1 (latest reasoning model)', value: 'gpt-5.1' },
-        ],
-        // Keep prior selection highlighted if present; fallback to 4.1-mini.
-        initial: pickInitialIndex(models, config.model, 'gpt-4.1-mini')
+        choices,
+        // Keep a prior selection highlighted; otherwise default to GPT-5.6.
+        initial: selectedIndex >= 0 ? selectedIndex : defaultIndex,
       });
 
       config.model = openaiModel;
 
-      // Helpful heads-up: GPT-5 access varies by account/region.
+      // API access and rate limits vary by OpenAI account and project.
       if (openaiModel?.startsWith('gpt-5')) {
         console.log(`
-⚠️  Warning: GPT-5 support may not be available for all users.
-    - Access depends on your OpenAI account/region
-    - Some capabilities may be gated or rate-limited
+ℹ️  GPT-5 availability and rate limits depend on your OpenAI account and project.
 `);
       }
     } else if (llmProvider === 'gemini') {

@@ -25,6 +25,8 @@
  *   const models = openAIModels();
  */
 
+import { OPENAI_MODELS } from '../llm/openAI/models.js';
+
 /**
  * Ensures backward compatibility for older configs where
  * provider information may have been implied by the model field.
@@ -94,18 +96,7 @@ GEMINI_API_KEY=AIza...
  * @returns {string[]} Array of OpenAI model names
  */
 export function openAIModels() {
-  return [
-    'gpt-4.1',
-    'gpt-4.1-mini',
-    'gpt-4o',
-    'gpt-4o-mini',
-    'o3',
-    'o4-mini',
-    'gpt-5',
-    'gpt-5-mini',
-    'gpt-5-nano',
-    'gpt-5.1',
-  ];
+  return OPENAI_MODELS.map(({ id }) => id);
 }
 
 /**

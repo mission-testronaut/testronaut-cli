@@ -22,6 +22,7 @@
 
 import { encoding_for_model, get_encoding } from '@dqbd/tiktoken';
 import { wait } from './turnLoopUtils.js';
+import { getOpenAIModel } from '../llm/openAI/models.js';
 
 /**
  * Dynamic token-per-minute limits by model family.
@@ -35,10 +36,16 @@ import { wait } from './turnLoopUtils.js';
  */
 const DEFAULT_LIMITS = [
   // ── OpenAI (newer first) ────────────────────────────────────────────────
+  { test: /^gpt-5\.6-luna(-|$)/i,        tpm: 500000 },
+  { test: /^gpt-5\.6(-|$)/i,             tpm: 500000 },
+  { test: /^gpt-5\.5(-|$)/i,             tpm: 500000 },
+  { test: /^gpt-5\.4-nano(-|$)/i,        tpm: 200000 },
+  { test: /^gpt-5\.4(-|$)/i,             tpm: 500000 },
+  { test: /^gpt-5\.2(-|$)/i,             tpm: 500000 },
   { test: /^gpt-5.1(-|$)/i,             tpm: 120000 },
-  { test: /^gpt-5(-|$)/i,               tpm:  90000 },
   { test: /^gpt-5-mini(-|$)/i,          tpm: 240000 },
   { test: /^gpt-5-nano(-|$)/i,          tpm: 600000 },
+  { test: /^gpt-5(-|$)/i,               tpm:  90000 },
 
   { test: /^gpt-4o(-|$)/i,              tpm: 450000 },
   { test: /^gpt-4\.1(-|$)/i,            tpm:1000000 },
@@ -142,6 +149,25 @@ export const tokenEstimate = async (model, text) => {
   console.log(`🧠 Estimated token count (approx, ${model}): ${approx}`);
   return approx;
 };
+
+/**
+ * Warn when a request is close to a known model context window. This is a
+ * diagnostic only: Testronaut does not truncate or compact content here.
+ */
+export async function warnIfContextNearLimit(model, payload, threshold = 0.9) {
+  const contextWindow = getOpenAIModel(model)?.contextWindow;
+  if (!contextWindow) return { warned: false };
+
+  const estimatedTokens = await tokenEstimate(model, payload);
+  const warned = estimatedTokens >= contextWindow * threshold;
+  if (warned) {
+    console.warn(
+      `⚠️ Estimated request context for ${model} is ${estimatedTokens}/${contextWindow} tokens. ` +
+      'Testronaut will send it unchanged; consider reducing mission or tool history.'
+    );
+  }
+  return { warned, estimatedTokens, contextWindow };
+}
 
 /* ---------------- Dynamic limit resolution ---------------- */
 

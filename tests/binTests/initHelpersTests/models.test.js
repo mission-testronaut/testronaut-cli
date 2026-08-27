@@ -4,6 +4,17 @@ import { openAIModels, geminiModels, isKnownModel, pickInitialIndex } from '../.
 describe('model helpers', () => {
   it('lists known models', () => {
     expect(openAIModels()).toContain('gpt-4o');
+    expect(openAIModels()).toEqual(expect.arrayContaining([
+      'gpt-5.2',
+      'gpt-5.4',
+      'gpt-5.4-mini',
+      'gpt-5.4-nano',
+      'gpt-5.5',
+      'gpt-5.6',
+      'gpt-5.6-terra',
+      'gpt-5.6-luna',
+    ]));
+    expect(openAIModels()).not.toContain('gpt-5.3');
     expect(geminiModels()).toContain('gemini-2.5-flash');
   });
 

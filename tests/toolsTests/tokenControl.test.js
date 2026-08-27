@@ -33,6 +33,7 @@ import {
   tokenUseCoolOff,
   recordTokenUsage,
   pruneOldTokenUsage,
+  warnIfContextNearLimit,
   __resetTokenControlForTests,
 } from '../../tools/tokenControl.js';
 
@@ -111,6 +112,24 @@ describe('tokenControl', () => {
       // sanity check it actually changed (unless defaults already 1234)
       if (before.tpm !== 1234) expect(after.tpm).not.toBe(before.tpm);
     });
+
+    it('uses tier-1 defaults without letting generic GPT-5 rules shadow variants', () => {
+      expect(getCurrentTokenLimit('gpt-5.6').tpm).toBe(500000);
+      expect(getCurrentTokenLimit('gpt-5.6-luna').tpm).toBe(500000);
+      expect(getCurrentTokenLimit('gpt-5.4-nano').tpm).toBe(200000);
+      expect(getCurrentTokenLimit('gpt-5-mini').tpm).toBe(240000);
+      expect(getCurrentTokenLimit('gpt-5-nano').tpm).toBe(600000);
+    });
+  });
+
+  it('warns without truncating when known context usage crosses the threshold', async () => {
+    tiktokenMocks.encoding_for_model_impl.mockReturnValue(encMock);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = await warnIfContextNearLimit('gpt-5.2', '1234567890', 0.00002);
+    expect(result.warned).toBe(true);
+    expect(result.contextWindow).toBe(400000);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
   });
 
   describe('rolling window + cooldown', () => {

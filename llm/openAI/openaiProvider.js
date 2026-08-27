@@ -20,6 +20,7 @@
  */
 
 import OpenAI from 'openai';
+import { getOpenAIModel } from './models.js';
 
 export class OpenAIProvider {
   constructor({ apiKey } = {}) {
@@ -33,11 +34,21 @@ export class OpenAIProvider {
    * @returns {Promise<{message:any, usage?:{total_tokens?:number, providerRaw?:any}, headers?:any}>}
    */
   async chat({ model, messages, tools }) {
-    const res = await this.client.chat.completions.create({
+    const request = {
       model,
       messages,
       tools,
-    });
+    };
+
+    // GPT-5.6 defaults to medium reasoning, but Chat Completions does not
+    // support combining reasoning with function tools. Responses API support
+    // is tracked separately; keep the current tool loop compatible meanwhile.
+    const chatToolReasoningEffort = getOpenAIModel(model)?.chatToolReasoningEffort;
+    if (tools?.length && chatToolReasoningEffort) {
+      request.reasoning_effort = chatToolReasoningEffort;
+    }
+
+    const res = await this.client.chat.completions.create(request);
 
     // OpenAI already returns an OpenAI-like message and usage structure.
     const message = res.choices?.[0]?.message ?? { role: 'assistant', content: '' };

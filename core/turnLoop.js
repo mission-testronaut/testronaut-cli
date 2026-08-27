@@ -41,7 +41,8 @@ import {
   tokenUseCoolOff, 
   recordTokenUsage, 
   pruneOldTokenUsage,
-  updateLimitsFromHeaders
+  updateLimitsFromHeaders,
+  warnIfContextNearLimit
 } from '../tools/tokenControl.js';
 import { resolveProviderModel } from '../llm/modelResolver.js';
 import { getLLM } from '../llm/llmFactory.js';
@@ -349,6 +350,7 @@ export const turnLoop = async (
       // ─────────────────────────────────────────────
       // STEP 2: Request next reasoning turn from model
       // ─────────────────────────────────────────────
+      await warnIfContextNearLimit(MODEL_ID, { messages, tools: activeToolsSchema });
       const { message, usage, headers } = await llm.chat({
         model: MODEL_ID,
         messages,
