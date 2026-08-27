@@ -9,7 +9,7 @@
  *   1) Env: TESTRONAUT_PROVIDER / TESTRONAUT_MODEL
  *   2) Config file (provider + model)
  *   3) Legacy config (model === "openai", no provider)
- *   4) Default: { provider: "openai", model: "gpt-4o" }
+ *   4) Default: { provider: "openai", model: "gpt-5.6" }
  *
  * Related tests: tests/llmTests/modelResolver.test.js
  * Used by: core/turnLoop.js, llm/llmFactory.js
@@ -17,6 +17,7 @@
 
 import path from 'path';
 import fs from 'fs';
+import { DEFAULT_OPENAI_MODEL } from './openAI/models.js';
 
 /**
  * Resolve provider & model, honoring env overrides and safe defaults.
@@ -50,7 +51,7 @@ export function resolveProviderModel(opts = {}) {
 
       // Legacy: model === "openai" and no provider
       if (!cfg?.provider && cfg?.model === 'openai') {
-        return { provider: 'openai', model: envModel || 'gpt-4o' };
+        return { provider: 'openai', model: envModel || DEFAULT_OPENAI_MODEL };
       }
     }
   } catch (e) {
@@ -60,6 +61,6 @@ export function resolveProviderModel(opts = {}) {
   // 3) Defaults
   return {
     provider: envProvider || 'openai',
-    model: envModel || 'gpt-4o',
+    model: envModel || DEFAULT_OPENAI_MODEL,
   };
 }

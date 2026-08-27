@@ -78,6 +78,24 @@ describe('OpenAIProvider', () => {
     });
   });
 
+  it.each(['gpt-5.6', 'gpt-5.6-terra', 'gpt-5.6-luna'])(
+    'disables reasoning for %s function tools on Chat Completions',
+    async (model) => {
+      const prov = new OpenAIProvider({ apiKey: 'sk-abc' });
+      const tools = [{ type: 'function', function: { name: 'doThing', parameters: { type: 'object' } } }];
+
+      await prov.chat({ model, messages: [{ role: 'user', content: 'go' }], tools });
+
+      expect(shared.lastCreateArgs).toMatchObject({ model, tools, reasoning_effort: 'none' });
+    }
+  );
+
+  it('does not add a reasoning override to GPT-5.6 requests without tools', async () => {
+    const prov = new OpenAIProvider({ apiKey: 'sk-abc' });
+    await prov.chat({ model: 'gpt-5.6', messages: [] });
+    expect(shared.lastCreateArgs).not.toHaveProperty('reasoning_effort');
+  });
+
   it('returns normalized message, usage, and headers', async () => {
     const prov = new OpenAIProvider({ apiKey: 'sk-abc' });
     const { message, usage, headers } = await prov.chat({

@@ -62,13 +62,13 @@ describe('resolveProviderModel', () => {
     writeConfig(temp, { model: 'openai' });
 
     const res = resolveProviderModel({ cwd: temp });
-    expect(res).toEqual({ provider: 'openai', model: 'gpt-4o' });
+    expect(res).toEqual({ provider: 'openai', model: 'gpt-5.6' });
   });
 
   it('returns defaults when config missing', () => {
     const temp = makeTempProject();
     const res = resolveProviderModel({ cwd: temp });
-    expect(res).toEqual({ provider: 'openai', model: 'gpt-4o' });
+    expect(res).toEqual({ provider: 'openai', model: 'gpt-5.6' });
   });
 
   it('returns defaults when JSON parsing fails', () => {
@@ -77,7 +77,7 @@ describe('resolveProviderModel', () => {
 
     const res = resolveProviderModel({ cwd: temp });
     expect(res.provider).toBe('openai');
-    expect(res.model).toBe('gpt-4o');
+    expect(res.model).toBe('gpt-5.6');
   });
 
   it('trims env vars and treats empty strings as absent', () => {
@@ -90,7 +90,7 @@ describe('resolveProviderModel', () => {
     process.env.TESTRONAUT_MODEL = '   ';
     res = resolveProviderModel();
     // falls back to defaults when env vars are just whitespace
-    expect(res).toEqual({ provider: 'openai', model: 'gpt-4o' });
+    expect(res).toEqual({ provider: 'openai', model: 'gpt-5.6' });
   });
 
   it('prefers config when only provider is in env and model only in config', () => {
