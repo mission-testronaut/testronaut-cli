@@ -54,6 +54,9 @@ export function defaultConfig(rootBasename) {
     outputDir: 'missions/mission_reports',
     projectName: rootBasename,
     maxTurns: 20,
+    tags: [],
+    tagMatch: 'any',
+    addTags: [],
     dom: {
       listItemLimit: 3,
     },

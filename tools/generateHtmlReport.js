@@ -17,6 +17,7 @@
  */
 import fs from 'fs';
 import path from 'path';
+import { normalizeTags } from '../core/tags.js';
 
 /**
  * Render and write a Testronaut run report to disk.
@@ -27,6 +28,7 @@ import path from 'path';
  */
 export function generateHtmlReport(report, outputPath) {
   const { runId, startTime, endTime, missions = [], summary = {}, llm = {} } = report;
+  const reportTags = normalizeTags(report.tags ?? missions.flatMap(m => m.submissionType === 'mission' ? (m.tags ?? []) : []));
   const durationSec =
     (startTime && endTime)
       ? ((new Date(endTime) - new Date(startTime)) / 1000).toFixed(2)
@@ -40,6 +42,16 @@ export function generateHtmlReport(report, outputPath) {
   const badge = (status) =>
     status === 'passed' ? '✅ Passed' :
     status === 'failed' ? '❌ Failed' : (status || '—');
+  const tagPalette = [
+    ['#60a5fa', 'rgba(96,165,250,.18)'], ['#a78bfa', 'rgba(167,139,250,.18)'],
+    ['#34d399', 'rgba(52,211,153,.18)'], ['#f472b6', 'rgba(244,114,182,.18)'],
+    ['#fbbf24', 'rgba(251,191,36,.18)'], ['#22d3ee', 'rgba(34,211,238,.18)'],
+  ];
+  const tagStyle = (tag) => {
+    const index = [...tag].reduce((sum, char) => sum + char.charCodeAt(0), 0) % tagPalette.length;
+    const [color, background] = tagPalette[index];
+    return `color:${color};background:${background};border-color:${color}66`;
+  };
 
   const submissionBlock = (m) => {
     const mDurationSec =
@@ -128,6 +140,7 @@ export function generateHtmlReport(report, outputPath) {
     const firstStart = Math.min(...subs.map(s => s.startTime || 0).filter(Boolean));
     const lastEnd    = Math.max(...subs.map(s => s.endTime || 0).filter(Boolean));
     const groupDur   = (firstStart && lastEnd) ? ((lastEnd - firstStart) / 1000).toFixed(2) : '—';
+    const tags = normalizeTags(subs.flatMap(s => s.submissionType === 'mission' ? (s.tags ?? []) : []));
 
     // pre → mission → post
     const order = { premission: 0, mission: 1, postmission: 2 };
@@ -137,9 +150,10 @@ export function generateHtmlReport(report, outputPath) {
     );
 
     return `
-      <details class="mission-group">
+      <details class="mission-group" data-tags="${esc(tags.join(','))}">
         <summary>
           <span class="name">${esc(missionName)}</span>
+          <span class="mission-tags">${tags.map(tag => `<span class="tag-small" style="${tagStyle(tag)}">${esc(tag)}</span>`).join('')}</span>
           <span class="status ${status === 'failed' ? 'bad' : 'ok'}">${badge(status)}</span>
           <span class="meta">submissions: ${subs.length} • steps: ${totalSteps} • duration: ${groupDur}s</span>
           <span class="toolbar">
@@ -233,6 +247,21 @@ export function generateHtmlReport(report, outputPath) {
     }
     .pill.ok{ background: var(--chip-ok-bg); color: var(--ok); border-color: var(--chip-ok-border); font-weight:700; }
     .pill.bad{ background: var(--chip-bad-bg); color: var(--bad); border-color: var(--chip-bad-border); font-weight:700; }
+    .tag-filter{max-width:928px;margin:0 auto 20px;padding:18px 16px;background:rgba(2,6,23,.30);}
+    .tag-filter-heading{display:flex;align-items:center;gap:7px;margin-bottom:12px;flex-wrap:wrap;}
+    .tag-filter-title{font-size:14px;color:var(--text);font-weight:800;}
+    .info{display:inline-grid;place-items:center;width:17px;height:17px;border:1px solid var(--chip-border);border-radius:50%;font-size:11px;color:var(--text-muted);cursor:help;}
+    .match-count{margin-left:auto;color:var(--text-muted);font-size:12px;}
+    .tag-buttons,.mission-tags{display:flex;gap:6px;flex-wrap:wrap;align-items:center;}
+    .tag-button,.tag-small{border:1px solid var(--chip-border);background:rgba(255,255,255,.06);color:var(--text);border-radius:999px;padding:5px 10px;font-size:11px;font-weight:700;}
+    .tag-button{cursor:pointer;transition:transform .15s ease,background .15s ease}.tag-button:hover{transform:translateY(-1px);background:rgba(255,255,255,.11)}.tag-button.active{box-shadow:0 0 0 2px rgba(96,165,250,.38);}
+    .filter-controls{display:flex;gap:16px;align-items:center;margin-top:14px;font-size:12px;color:var(--text-muted);flex-wrap:wrap;}
+    .filter-controls select{color:var(--text);background:#111a31;border:1px solid var(--chip-border);border-radius:8px;padding:6px 24px 6px 8px;}
+    .show-control{cursor:help;display:flex;align-items:center;gap:5px;}
+    .filter-empty{max-width:928px;margin:12px auto;padding:28px 16px;text-align:center;border:1px dashed var(--hairline-strong);border-radius:16px;color:var(--text-muted);}
+    .filter-empty strong{display:block;color:var(--text);font-size:18px;margin-bottom:6px;}
+    .mission-group.nonmatching{opacity:.45;}
+    @media(max-width:640px){.match-count{width:100%;margin-left:0}.tag-filter{padding:14px 12px}.meta{display:none}}
 
     /* ===== Disclosure blocks ===== */
     details{ background: rgba(255,255,255,.05); border:1px solid var(--hairline); border-radius:16px; margin:10px 0; overflow:hidden; }
@@ -328,14 +357,76 @@ export function generateHtmlReport(report, outputPath) {
     <div class="pill">Missions: ${esc(summary.totalMissions ?? totals.total)}</div>
     <div class="pill ok">Passed: ${esc(summary.passed ?? totals.passed)}</div>
     <div class="pill bad">Failed: ${esc(summary.failed ?? totals.failed)}</div>
-    <div class="pill">LLM: ${esc(llm.provider ?? '—')} • ${esc(llm.model ?? '')}</div>
+  </div>
+
+  <div class="tag-filter glass">
+    <div class="tag-filter-heading">
+      <span class="tag-filter-title">Filter missions by tag</span>
+      <span class="info" title="Select one or more tags to focus the report. Match Any uses OR; Match All requires every selected tag.">i</span>
+      <span class="match-count" id="match-count">${totals.total} of ${totals.total} missions match</span>
+    </div>
+    <div class="tag-buttons">
+      ${reportTags.map(tag => `<button type="button" class="tag-button" data-tag="${esc(tag)}" style="${tagStyle(tag)}">${esc(tag)}</button>`).join('')}
+      <button type="button" class="tag-button" data-tag="untagged">untagged</button>
+    </div>
+    <div class="filter-controls">
+      <label>Match <select id="tag-match"><option value="any">any</option><option value="all">all</option></select></label>
+      <label class="show-control" title="Keep missions that do not match visible in a muted style instead of hiding them."><input id="show-nonmatching" type="checkbox"> Show nonmatching missions <span class="info">i</span></label>
+      <button type="button" id="clear-tags" class="tag-button" hidden>Clear filters</button>
+    </div>
   </div>
 
   <div class="container">
     ${groupsHtml || '<div class="glass empty">No missions recorded.</div>'}
   </div>
+  <div class="filter-empty" id="filter-empty" hidden>
+    <strong>No missions match these tags</strong>
+    Try removing a tag, switching to “Any,” or showing nonmatching missions.
+  </div>
   <script>
   (function () {
+    var selectedTags = [];
+    function applyTagFilter() {
+      var match = document.getElementById('tag-match');
+      var show = document.getElementById('show-nonmatching');
+      var matchedCount = 0;
+      var totalCount = 0;
+      document.querySelectorAll('.mission-group').forEach(function (group) {
+        totalCount += 1;
+        var tags = (group.getAttribute('data-tags') || '').split(',').filter(Boolean);
+        var test = function (tag) { return tag === 'untagged' ? tags.length === 0 : tags.indexOf(tag) >= 0; };
+        var matches = !selectedTags.length || ((match && match.value === 'all') ? selectedTags.every(test) : selectedTags.some(test));
+        if (matches) matchedCount += 1;
+        group.hidden = !matches && !(show && show.checked);
+        group.classList.toggle('nonmatching', !matches);
+      });
+      var count = document.getElementById('match-count');
+      var empty = document.getElementById('filter-empty');
+      var clear = document.getElementById('clear-tags');
+      if (count) count.textContent = matchedCount + ' of ' + totalCount + ' missions match';
+      if (empty) empty.hidden = matchedCount !== 0 || !selectedTags.length || !!(show && show.checked);
+      if (clear) clear.hidden = selectedTags.length === 0;
+    }
+    document.querySelectorAll('.tag-button[data-tag]').forEach(function (button) {
+      button.addEventListener('click', function () {
+        var tag = button.getAttribute('data-tag');
+        var idx = selectedTags.indexOf(tag);
+        if (idx >= 0) selectedTags.splice(idx, 1); else selectedTags.push(tag);
+        button.classList.toggle('active', idx < 0);
+        applyTagFilter();
+      });
+    });
+    var tagMatch = document.getElementById('tag-match');
+    var showNonmatching = document.getElementById('show-nonmatching');
+    var clearTags = document.getElementById('clear-tags');
+    if (tagMatch) tagMatch.addEventListener('change', applyTagFilter);
+    if (showNonmatching) showNonmatching.addEventListener('change', applyTagFilter);
+    if (clearTags) clearTags.addEventListener('click', function () {
+      selectedTags = [];
+      document.querySelectorAll('.tag-button[data-tag]').forEach(function (button) { button.classList.remove('active'); });
+      applyTagFilter();
+    });
+    applyTagFilter();
     function setOpenAll(root, selector, open) {
       root.querySelectorAll(selector).forEach(function (el) {
         if (el && 'open' in el) el.open = open;
