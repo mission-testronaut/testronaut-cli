@@ -27,6 +27,7 @@ describe('generateHtmlReport', () => {
           submissionType: 'mission',
           submissionName: 'Main',
           status: 'passed',
+          tags: ['smoke'],
           steps: [
             {
               turn: 0,
@@ -54,6 +55,13 @@ describe('generateHtmlReport', () => {
     expect(html).toContain('Mission A');
     expect(html).toContain('Turn 1 (re-attempt 1/5)');
     expect(html).toContain('⚠️ Turn Issues');
+    expect(html).toContain('data-tag="smoke"');
+    expect(html).toContain('data-tags="smoke"');
+    expect(html).toContain('data-tag="untagged"');
+    expect(html).toContain('id="match-count"');
+    expect(html).toContain('No missions match these tags');
+    expect(html).toContain('Keep missions that do not match visible');
+    expect(html).not.toContain('<div class="pill">LLM:');
   });
 
   it('escapes unsafe text in output', () => {

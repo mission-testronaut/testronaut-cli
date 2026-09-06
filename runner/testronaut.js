@@ -28,6 +28,7 @@ import path from 'path';
 import { runAgent } from '../core/agent.js';
 import { redactPasswordInText } from '../core/redaction.js';
 import { loadConfig, enforceTurnBudget, getRetryLimit, getDomListLimit, getResourceGuardConfig, getHumanInputConfig } from '../core/config.js';
+import { normalizeTags } from '../core/tags.js';
 
 // Check process env for debug toggles (shared helper for tests and CLI).
 const isDebugEnabled = () => {
@@ -44,7 +45,7 @@ const formatListLimit = (v) => v === Infinity ? 'all' : v;
  * @param {{ preMission?: any|any[], mission?: any|any[], postMission?: any|any[] }} params
  * @param {string} missionName
  */
-export async function runMissions({ preMission, mission, postMission }, missionName) {
+export async function runMissions({ preMission, mission, postMission, tags = [] }, missionName) {
   // 1) Config and turn budget (with guardrails)
   const cfg = await loadConfig();
   const { effectiveMax, limits, notes } = enforceTurnBudget(cfg);
@@ -55,6 +56,11 @@ export async function runMissions({ preMission, mission, postMission }, missionN
   const resourceGuard = getResourceGuardConfig(cfg);
   const humanInput = getHumanInputConfig(cfg);
   const debugEnabled = isDebugEnabled();
+  const missionTags = normalizeTags([
+    ...normalizeTags(tags),
+    ...normalizeTags(cfg?.addTags),
+    ...normalizeTags(process.env.TESTRONAUT_ADD_TAGS),
+  ]);
   if (notes.length) {
     console.warn(notes.join('\n'));
   }
@@ -206,6 +212,10 @@ export async function runMissions({ preMission, mission, postMission }, missionN
   if (!success) {
     console.log(`❌ Aborting after failed goal.`);
     return;
+  }
+
+  for (const result of success) {
+    result.tags = result.submissionType === 'mission' ? missionTags : [];
   }
 
   const missionStatus = success[0].steps[success[0].steps.length - 1].result;

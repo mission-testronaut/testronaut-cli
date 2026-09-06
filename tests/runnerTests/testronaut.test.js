@@ -137,6 +137,41 @@ describe('cli/testronaut.runMissions (with enforceTurnBudget)', () => {
     log.mockRestore();
   });
 
+  it('adds normalized tags only to main mission submissions', async () => {
+    loadConfig.mockResolvedValue({ addTags: ['staging', 'Smoke'] });
+    enforceTurnBudget.mockReturnValue({ effectiveMax: 20, limits: {}, notes: [], strict: false });
+    process.env.TESTRONAUT_ADD_TAGS = 'full-test-run,smoke';
+    runAgent.mockResolvedValue([
+      { submissionType: 'premission', steps: [{ result: 'SUCCESS' }], status: 'passed' },
+      { submissionType: 'mission', steps: [{ result: 'SUCCESS' }], status: 'passed' },
+      { submissionType: 'postmission', steps: [{ result: 'SUCCESS' }], status: 'passed' },
+    ]);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const result = await runMissions({ preMission: 'setup', mission: 'test', postMission: 'cleanup', tags: ['authentication'] }, 'Tagged');
+
+    expect(result[0].tags).toEqual([]);
+    expect(result[1].tags).toEqual(['authentication', 'full-test-run', 'smoke', 'staging']);
+    expect(result[2].tags).toEqual([]);
+    log.mockRestore();
+  });
+
+  it('runs an untagged mission when optional additive tags are blank', async () => {
+    loadConfig.mockResolvedValue({ addTags: [] });
+    enforceTurnBudget.mockReturnValue({ effectiveMax: 20, limits: {}, notes: [], strict: false });
+    process.env.TESTRONAUT_ADD_TAGS = '';
+    runAgent.mockResolvedValue([
+      { submissionType: 'mission', steps: [{ result: 'SUCCESS' }], status: 'passed' },
+    ]);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const result = await runMissions({ mission: 'untagged mission' }, 'Untagged');
+
+    expect(result[0].tags).toEqual([]);
+    expect(runAgent).toHaveBeenCalledOnce();
+    log.mockRestore();
+  });
+
   it('normalizes single strings and functions into arrays and names missions', async () => {
     loadConfig.mockResolvedValue({});
     enforceTurnBudget.mockReturnValue({

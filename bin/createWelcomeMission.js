@@ -15,7 +15,9 @@ export const createWelcomeMission = async () => {
     return;
   }
 
-  const content = `import { runMissions } from 'testronaut';
+const content = `import { runMissions } from 'testronaut';
+
+export const tags = [];
 
 const welcomeGoal = \`
 Welcome to Testronaut!
@@ -29,7 +31,8 @@ If you cannot reach this message, report FAILURE.
 
 export async function executeMission() {
   return await runMissions({
-    mission: welcomeGoal
+    mission: welcomeGoal,
+    tags
   }, 'Welcome Mission!');
 }
 

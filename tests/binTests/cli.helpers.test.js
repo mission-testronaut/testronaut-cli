@@ -143,6 +143,49 @@ describe('cli helpers', () => {
     expect(res.invalid).toBe(true);
   });
 
+  it('parses tag flags and aliases without leaving mission-like arguments', () => {
+    const { parseTagArgs } = __test__;
+    const res = parseTagArgs([
+      '--tags=smoke,authentication',
+      '--tag-match', 'all',
+      '--add_tags', 'staging',
+      'login.mission.js',
+    ]);
+    expect(res.tags.value).toBe('smoke,authentication');
+    expect(res.tagMatch.value).toBe('all');
+    expect(res.addTags.value).toBe('staging');
+    expect(res.args).toEqual(['login.mission.js']);
+  });
+
+  it('combines repeated singular and plural tag flags', () => {
+    const { parseTagArgs } = __test__;
+    const res = parseTagArgs([
+      '--tag', 'authentication',
+      '--tag=smoke',
+      '--tags', 'checkout, navigation',
+      '--add-tag', 'staging',
+      '--add-tags=nightly,full-test-run',
+    ]);
+    expect(res.tags.value).toBe('authentication,smoke,checkout, navigation');
+    expect(res.addTags.value).toBe('staging,nightly,full-test-run');
+    expect(res.hasUnquotedCommaSpace).toBe(false);
+    expect(res.args).toEqual([]);
+  });
+
+  it('detects the common unquoted comma-space form for a friendly error', () => {
+    const { parseTagArgs } = __test__;
+    const res = parseTagArgs(['--tags', 'authentication,', 'smoke']);
+    expect(res.hasUnquotedCommaSpace).toBe(true);
+    expect(res.args).toEqual(['smoke']);
+  });
+
+  it('records missing values even when another repeated flag is valid', () => {
+    const { parseTagArgs } = __test__;
+    const res = parseTagArgs(['--tag', '--tag', 'smoke']);
+    expect(res.tags.missingValue).toBe(true);
+    expect(res.tags.value).toBe('smoke');
+  });
+
   describe('detectCliName', () => {
     const { detectCliName } = __test__;
 

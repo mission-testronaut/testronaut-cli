@@ -51,6 +51,8 @@ const exec = promisify(execCmd);
 import url from 'url';
 import { ensureBrowsers } from '../tools/playwrightSetup.js';
 import { discoverMissionFiles } from '../core/missionDiscovery.js';
+import { loadConfig } from '../core/config.js';
+import { matchesTagFilter, normalizeTagMatch, normalizeTags } from '../core/tags.js';
 
 // Keep PW browsers inside the project to avoid global cache skew
 process.env.PLAYWRIGHT_BROWSERS_PATH = process.env.PLAYWRIGHT_BROWSERS_PATH || '0';
@@ -311,6 +313,61 @@ export const __test__ = {
   isDirectInvocation,
 };
 
+function parseTagArgs(argsList) {
+  const nextArgs = [];
+  const tagValues = [];
+  const addTagValues = [];
+  let tagMatchValue;
+  let tagsPresent = false;
+  let addTagsPresent = false;
+  let tagMatchPresent = false;
+  let tagsMissingValue = false;
+  let addTagsMissingValue = false;
+
+  const matchFlag = (raw, names) => names.some(name => raw === name || raw.startsWith(`${name}=`));
+  const readValue = (raw, index) => {
+    if (raw.includes('=')) return { value: raw.slice(raw.indexOf('=') + 1), consumed: 1 };
+    const candidate = argsList[index + 1];
+    return candidate && !candidate.startsWith('-')
+      ? { value: candidate, consumed: 2 }
+      : { value: undefined, consumed: 1 };
+  };
+
+  for (let index = 0; index < argsList.length;) {
+    const raw = argsList[index];
+    if (matchFlag(raw, ['--tag', '--tags'])) {
+      const { value, consumed } = readValue(raw, index);
+      tagsPresent = true;
+      if (value !== undefined) tagValues.push(value);
+      else tagsMissingValue = true;
+      index += consumed;
+    } else if (matchFlag(raw, ['--add-tag', '--add-tags', '--add_tag', '--add_tags'])) {
+      const { value, consumed } = readValue(raw, index);
+      addTagsPresent = true;
+      if (value !== undefined) addTagValues.push(value);
+      else addTagsMissingValue = true;
+      index += consumed;
+    } else if (matchFlag(raw, ['--tag-match', '--tag_match'])) {
+      const { value, consumed } = readValue(raw, index);
+      tagMatchPresent = true;
+      tagMatchValue = value;
+      index += consumed;
+    } else {
+      nextArgs.push(raw);
+      index += 1;
+    }
+  }
+
+  return {
+    args: nextArgs,
+    tags: { present: tagsPresent, value: tagValues.length ? tagValues.join(',') : undefined, missingValue: tagsMissingValue },
+    addTags: { present: addTagsPresent, value: addTagValues.length ? addTagValues.join(',') : undefined, missingValue: addTagsMissingValue },
+    tagMatch: { present: tagMatchPresent, value: tagMatchValue },
+    hasUnquotedCommaSpace: [...tagValues, ...addTagValues].some(value => value.trimEnd().endsWith(',')),
+  };
+}
+__test__.parseTagArgs = parseTagArgs;
+
 // Look for --model=<id> or --model <id>
 let modelOverride;
 const modelFlagIndex = args.findIndex(a => a === '--model' || a.startsWith('--model='));
@@ -354,6 +411,26 @@ const cliMfaName =
 if (cliMfaName) {
   process.env.TESTRONAUT_MFA_NAME = String(cliMfaName).trim();
   console.log(`🔐 MFA nickname override: ${process.env.TESTRONAUT_MFA_NAME}`);
+}
+
+const tagArgs = parseTagArgs(args);
+args = tagArgs.args;
+let cliTags;
+let cliAddTags = [];
+let cliTagMatch;
+try {
+  if (tagArgs.hasUnquotedCommaSpace) {
+    throw new Error('A tag list ends with a comma. Quote comma-and-space lists (for example --tags "authentication, smoke") or repeat --tag for each tag.');
+  }
+  if (tagArgs.tags.missingValue || (tagArgs.tags.present && !tagArgs.tags.value)) throw new Error('--tag/--tags requires a tag value.');
+  if (tagArgs.addTags.missingValue || (tagArgs.addTags.present && !tagArgs.addTags.value)) throw new Error('--add-tag/--add-tags requires a tag value.');
+  if (tagArgs.tagMatch.present && !tagArgs.tagMatch.value) throw new Error('--tag-match requires "any" or "all".');
+  if (tagArgs.tags.present) cliTags = normalizeTags(tagArgs.tags.value, { allowUntagged: true });
+  if (tagArgs.addTags.present) cliAddTags = normalizeTags(tagArgs.addTags.value);
+  if (tagArgs.tagMatch.present) cliTagMatch = normalizeTagMatch(tagArgs.tagMatch.value);
+} catch (error) {
+  console.error(`❌ ${error.message}`);
+  process.exit(1);
 }
 
 // Look for --debug / --debug=<bool> / --no-debug
@@ -545,6 +622,11 @@ Options:
   --human-input-timeout=<s> Override human input wait timeout in seconds (default: 60)
   --help                    Show this help message
   --retry_limit=<n>         Override agent turn retry limits (minimum 1, maximum 10)
+  --tag=<tag>               Run missions matching a tag; repeat for multiple tags
+  --tags=<tag,...>          Compact comma-list form (OR/any by default)
+  --tag-match=<any|all>     Match any or all requested tags
+  --add-tag=<tag>           Add one report tag; repeat for multiple tags
+  --add-tags=<tag,...>      Compact comma-list form for report tags
 
 Examples:
   ${cliName}
@@ -552,6 +634,8 @@ Examples:
   ${cliName} upload
   ${cliName} serve
   ${cliName} --init
+  ${cliName} --tag authentication --tag smoke
+  ${cliName} --add-tag staging --add-tag full-test-run
 `;
 
 async function main() {
@@ -619,6 +703,21 @@ if (args.includes('serve') || args.includes('view')) {
 }
 
 const { root: missionsRoot, files: discoveredMissions } = await discoverMissionFiles({ cwd: process.cwd() });
+const tagConfig = await loadConfig(process.cwd());
+const explicitFiles = args.length > 0;
+let requestedTags = [];
+let tagMatch = 'any';
+try {
+  requestedTags = explicitFiles ? [] : (cliTags ?? normalizeTags(tagConfig?.tags, { allowUntagged: true }));
+  tagMatch = explicitFiles ? 'any' : normalizeTagMatch(cliTagMatch ?? tagConfig?.tagMatch);
+  process.env.TESTRONAUT_ADD_TAGS = normalizeTags([
+    ...normalizeTags(tagConfig?.addTags),
+    ...cliAddTags,
+  ]).join(',');
+} catch (error) {
+  console.error(`❌ ${error.message}`);
+  process.exit(1);
+}
 
 if (!fs.existsSync(missionsRoot)) {
   console.error(`❌ Missions directory not found: ${path.relative(process.cwd(), missionsRoot)}`);
@@ -630,17 +729,24 @@ const runFile = async (filePath) => {
     const modulePath = path.resolve(missionsRoot, filePath);
     const missionsModule = await import(`file://${modulePath}`);
 
+    if (!explicitFiles) {
+      const moduleTags = normalizeTags(missionsModule.tags);
+      if (!matchesTagFilter(moduleTags, requestedTags, tagMatch)) return false;
+    }
+
     if (typeof missionsModule.executeMission === 'function') {
       const result = await missionsModule.executeMission();
       allResults.push({
         file: filePath,
         result
       });
+      return true;
     }
   } catch (err) {
     console.error(`❌ Error running mission: ${filePath}`);
     console.error(err);
   }
+  return false;
 };
 
 if (args.length > 0) {
@@ -653,6 +759,11 @@ if (args.length > 0) {
   for (const file of discoveredMissions) {
     await runFile(file);
   }
+}
+
+if (!explicitFiles && requestedTags.length && allResults.length === 0) {
+  console.error(`❌ No missions matched ${tagMatch === 'all' ? 'all' : 'any'} of: ${requestedTags.join(', ')}`);
+  process.exit(1);
 }
 
 const endTime = new Date();
@@ -696,6 +807,9 @@ const report = {
   },
   missions: flatMissions
 };
+report.tags = normalizeTags(flatMissions.flatMap(m =>
+  m.submissionType === 'mission' ? (m.tags ?? []) : []
+));
 
 const outputDir = './missions/mission_reports';
 fs.mkdirSync(outputDir, { recursive: true });
