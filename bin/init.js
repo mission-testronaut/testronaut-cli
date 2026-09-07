@@ -43,7 +43,6 @@ export async function initializeTestronautProject() {
   // ─────────────────────────────────────────────
   const root = process.cwd();
   const missionsDir = path.join(root, 'missions');
-  const reportsDir = path.join(missionsDir, 'mission_reports');
   const configPath = path.join(root, 'testronaut-config.json');
   const envPath = path.join(root, '.env');
 
@@ -139,6 +138,9 @@ export async function initializeTestronautProject() {
     config.outputDir = config.outputDir || defaults.outputDir;
     config.projectName = config.projectName || defaults.projectName;
     config.maxTurns = config.maxTurns ?? defaults.maxTurns;
+    config.tags = config.tags ?? defaults.tags;
+    config.tagMatch = config.tagMatch ?? defaults.tagMatch;
+    config.addTags = config.addTags ?? defaults.addTags;
     config.dom = { ...defaults.dom, ...(config.dom || {}) };
     config.resourceGuard = { ...defaults.resourceGuard, ...(config.resourceGuard || {}) };
     config.humanInput = { ...defaults.humanInput, ...(config.humanInput || {}) };
@@ -197,12 +199,13 @@ export async function initializeTestronautProject() {
   // ─────────────────────────────────────────────
   // STEP 5: Ensure folder structure exists (safe to call every run)
   // ─────────────────────────────────────────────
+  const reportsDir = path.resolve(root, config.outputDir || 'missions/mission_reports');
   if (!fs.existsSync(missionsDir)) {
     fs.mkdirSync(missionsDir);
     console.log('📁 Created missions/');
   }
   if (!fs.existsSync(reportsDir)) {
     fs.mkdirSync(reportsDir);
-    console.log('📁 Created missions/mission_reports/');
+    console.log(`📁 Created ${path.relative(root, reportsDir) || reportsDir}/`);
   }
 }

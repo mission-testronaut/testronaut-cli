@@ -9,7 +9,10 @@ export const DEV_API_BASE = 'https://staging.api.testronaut.app';
 
 const MIN_REMAINING_SECONDS = 5;
 const MAX_REMAINING_SECONDS = 25;
-const API_DEBUG_LOG_RELATIVE_PATH = 'missions/mission_reports/api-debug.log';
+const API_DEBUG_LOG_RELATIVE_PATH = path.join(
+  process.env.TESTRONAUT_OUTPUT_DIR || 'missions/mission_reports',
+  'api-debug.log'
+);
 const REDACTED = '<redacted>';
 
 const SENSITIVE_LOG_KEYS = new Set([

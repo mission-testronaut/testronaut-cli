@@ -77,6 +77,9 @@ describe('initializeTestronautProject', () => {
     expect(cfg.initialized).toBe(true);
     expect(cfg.outputDir).toBe('missions/mission_reports');
     expect(typeof cfg.maxTurns).toBe('number');
+    expect(cfg.tags).toEqual([]);
+    expect(cfg.tagMatch).toBe('any');
+    expect(cfg.addTags).toEqual([]);
     expect(cfg.dom?.listItemLimit).toBe(3);
     expect(cfg.resourceGuard?.enabled).toBe(true);
     expect(cfg.humanInput?.enabled).toBe(true);
@@ -95,6 +98,9 @@ describe('initializeTestronautProject', () => {
     // Welcome mission (name depends on your implementation; we check presence in missions/)
     const files = fs.readdirSync(path.join(temp, 'missions'));
     expect(files.some(f => /welcome/i.test(f))).toBe(true);
+    const welcome = fs.readFileSync(path.join(temp, 'missions', 'welcome.mission.js'), 'utf8');
+    expect(welcome).toContain('export const tags = [];');
+    expect(welcome).toContain('tags\n  },');
 
     // Exactly two prompts were asked
     expect(shared.calls).toBe(2);
@@ -112,6 +118,9 @@ describe('initializeTestronautProject', () => {
     const cfg = readJson(path.join(temp, 'testronaut-config.json'));
     expect(cfg.provider).toBe('gemini');
     expect(cfg.model).toBe('gemini-2.5-flash');
+    expect(cfg.tags).toEqual([]);
+    expect(cfg.tagMatch).toBe('any');
+    expect(cfg.addTags).toEqual([]);
     expect(cfg.dom?.listItemLimit).toBe(3);
     expect(cfg.resourceGuard?.enabled).toBe(true);
     expect(cfg.humanInput?.enabled).toBe(true);

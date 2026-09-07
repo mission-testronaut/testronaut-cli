@@ -30,6 +30,7 @@
     "dotenv": "^17.2.0",
     "fast-glob": "^3.3.3",
     "inquirer": "^12.9.1",
+    "jiti": "^2.7.0",
     "node-fetch": "^3.3.2",
     "openai": "^6.39.0",
     "playwright": "^1.54.1",

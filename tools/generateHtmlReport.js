@@ -27,7 +27,7 @@ import { normalizeTags } from '../core/tags.js';
  * @returns {string} absolute path to the written HTML file
  */
 export function generateHtmlReport(report, outputPath) {
-  const { runId, startTime, endTime, missions = [], summary = {}, llm = {} } = report;
+  const { runId, startTime, endTime, missions = [], summary = {}, llm = {}, cli = {} } = report;
   const reportTags = normalizeTags(report.tags ?? missions.flatMap(m => m.submissionType === 'mission' ? (m.tags ?? []) : []));
   const durationSec =
     (startTime && endTime)
@@ -137,10 +137,13 @@ export function generateHtmlReport(report, outputPath) {
   const missionGroupBlock = (missionName, subs) => {
     const status = groupStatus(subs);
     const totalSteps = subs.reduce((n, s) => n + (Array.isArray(s.steps) ? s.steps.length : 0), 0);
-    const firstStart = Math.min(...subs.map(s => s.startTime || 0).filter(Boolean));
-    const lastEnd    = Math.max(...subs.map(s => s.endTime || 0).filter(Boolean));
-    const groupDur   = (firstStart && lastEnd) ? ((lastEnd - firstStart) / 1000).toFixed(2) : '—';
+    const startTimes = subs.map(s => s.startTime || 0).filter(Boolean);
+    const endTimes = subs.map(s => s.endTime || 0).filter(Boolean);
+    const firstStart = startTimes.length ? Math.min(...startTimes) : null;
+    const lastEnd = endTimes.length ? Math.max(...endTimes) : null;
+    const groupDur = (firstStart != null && lastEnd != null) ? ((lastEnd - firstStart) / 1000).toFixed(2) : '—';
     const tags = normalizeTags(subs.flatMap(s => s.submissionType === 'mission' ? (s.tags ?? []) : []));
+    const sourceFiles = [...new Set(subs.map(s => s.file).filter(Boolean))];
 
     // pre → mission → post
     const order = { premission: 0, mission: 1, postmission: 2 };
@@ -155,7 +158,7 @@ export function generateHtmlReport(report, outputPath) {
           <span class="name">${esc(missionName)}</span>
           <span class="mission-tags">${tags.map(tag => `<span class="tag-small" style="${tagStyle(tag)}">${esc(tag)}</span>`).join('')}</span>
           <span class="status ${status === 'failed' ? 'bad' : 'ok'}">${badge(status)}</span>
-          <span class="meta">submissions: ${subs.length} • steps: ${totalSteps} • duration: ${groupDur}s</span>
+          <span class="meta">${sourceFiles.length ? `${sourceFiles.map(esc).join(', ')} • ` : ''}submissions: ${subs.length} • steps: ${totalSteps} • duration: ${groupDur}s</span>
           <span class="toolbar">
             <button class="btn-mini toggle" data-scope="mission" aria-label="Expand">▼</button>
           </span>
@@ -350,6 +353,7 @@ export function generateHtmlReport(report, outputPath) {
       <div><strong>Start:</strong> ${esc(startTime ?? '—')}</div>
       <div><strong>End:</strong> ${esc(endTime ?? '—')} • <strong>Duration:</strong> ${durationSec}s</div>
       <div><strong>LLM:</strong> ${esc(llm.provider ?? '—')} • <strong>Model:</strong> ${esc(llm.model ?? '—')}</div>
+      <div><strong>CLI version:</strong> ${esc(cli.version ?? '—')}</div>
     </div>
   </div>
 

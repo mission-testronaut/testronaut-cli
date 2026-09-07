@@ -34,6 +34,9 @@
  *   See tests in tests/toolsTests/cli.helpers.test.js
  */
 
+// Missions often interpolate project .env values while their modules load.
+// Load those values before discovery imports any user-authored mission code.
+import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -51,6 +54,7 @@ const exec = promisify(execCmd);
 import url from 'url';
 import { ensureBrowsers } from '../tools/playwrightSetup.js';
 import { discoverMissionFiles } from '../core/missionDiscovery.js';
+import { loadMissionModule } from '../core/missionLoader.js';
 import { loadConfig } from '../core/config.js';
 import { matchesTagFilter, normalizeTagMatch, normalizeTags } from '../core/tags.js';
 
@@ -59,11 +63,31 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = process.env.PLAYWRIGHT_BROWSERS_PATH || '
 
 const TMP_DIR = path.resolve('./missions/tmp');
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const CLI_VERSION = JSON.parse(
+  fs.readFileSync(path.resolve(__dirname, '../package.json'), 'utf8')
+).version;
 
 const DEFAULT_API_BASE = 'http://api.testronaut.app';
 const DEV_API_BASE = 'https://staging.api.testronaut.app';
 
 let args = process.argv.slice(2);
+
+const jsonOutput = args.includes('--json');
+const quietOutput = args.includes('--quiet') || jsonOutput;
+args = args.filter(arg => arg !== '--json' && arg !== '--quiet');
+const writeOutput = value => process.stdout.write(`${typeof value === 'string' ? value : JSON.stringify(value, null, 2)}\n`);
+if (quietOutput) {
+  console.log = () => {};
+  console.warn = () => {};
+}
+
+const dryRun = args.includes('--dry-run');
+args = args.filter(arg => arg !== '--dry-run');
+const screenshotsEnabled = !args.includes('--no-screenshots');
+args = args.filter(arg => arg !== '--no-screenshots');
+const uploadScreenshots = !args.includes('--no-upload-screenshots');
+args = args.filter(arg => arg !== '--no-upload-screenshots');
+process.env.TESTRONAUT_SCREENSHOTS = screenshotsEnabled ? '1' : '0';
 
 // Detect how the CLI was invoked so help text matches the actual command
 function detectCliName(npmCommand = process.env.npm_command, argv1 = process.argv[1]) {
@@ -311,7 +335,96 @@ export const __test__ = {
   parseRunOptionsArgs,
   detectCliName,
   isDirectInvocation,
+  resolveMissionPath,
+  collectReportScreenshotNames,
+  collectReportScreenshotPaths,
+  resolveReportDir,
+  closestMissionMatch,
+  resolveReportFile,
+  buildEffectiveConfig,
 };
+
+function resolveReportDir(config = {}, cwd = process.cwd()) {
+  return path.resolve(cwd, config.outputDir || 'missions/mission_reports');
+}
+
+function resolveReportFile(requested, reportDir, cwd = process.cwd()) {
+  if (!requested) return null;
+  const names = path.extname(requested) ? [requested] : [requested, `${requested}.json`];
+  for (const name of names) {
+    const direct = path.resolve(cwd, name);
+    if (fs.existsSync(direct)) return direct;
+    const inReportDir = path.resolve(reportDir, name);
+    if (fs.existsSync(inReportDir)) return inReportDir;
+  }
+  return path.resolve(reportDir, names.at(-1));
+}
+
+function buildEffectiveConfig(config = {}, cwd = process.cwd()) {
+  const resolved = resolveProviderModel({ cwd });
+  const source = key => process.env[key] ? 'environment' : undefined;
+  return {
+    configFile: path.resolve(cwd, 'testronaut-config.json'),
+    provider: { value: resolved.provider, source: source('TESTRONAUT_PROVIDER') || (config.provider ? 'config' : 'default') },
+    model: { value: resolved.model, source: source('TESTRONAUT_MODEL') || (config.model ? 'config' : 'default') },
+    outputDir: { value: resolveReportDir(config, cwd), source: config.outputDir ? 'config' : 'default' },
+    maxTurns: { value: Number(process.env.TESTRONAUT_TURNS || config.maxTurns || 20), source: source('TESTRONAUT_TURNS') || (config.maxTurns != null ? 'config' : 'default') },
+    tags: config.tags || [],
+    tagMatch: config.tagMatch || 'any',
+    addTags: normalizeTags([...(config.addTags || []), ...cliAddTags]),
+    screenshots: screenshotsEnabled,
+    authenticated: Boolean(config.sessionToken),
+  };
+}
+
+function closestMissionMatch(requested, candidates = []) {
+  const target = path.basename(requested).toLowerCase();
+  const distance = (a, b) => {
+    const row = Array.from({ length: b.length + 1 }, (_, i) => i);
+    for (let i = 1; i <= a.length; i++) {
+      let previous = row[0];
+      row[0] = i;
+      for (let j = 1; j <= b.length; j++) {
+        const saved = row[j];
+        row[j] = Math.min(row[j] + 1, row[j - 1] + 1, previous + (a[i - 1] === b[j - 1] ? 0 : 1));
+        previous = saved;
+      }
+    }
+    return row[b.length];
+  };
+  return candidates
+    .map(file => ({ file, distance: distance(target, path.basename(file).toLowerCase()) }))
+    .sort((a, b) => a.distance - b.distance || a.file.localeCompare(b.file))[0]?.file || null;
+}
+
+function resolveMissionPath(filePath, { cwd = process.cwd(), missionsRoot } = {}) {
+  if (path.isAbsolute(filePath)) return path.normalize(filePath);
+
+  const directPath = path.resolve(cwd, filePath);
+  const hasPathSegments = path.dirname(filePath) !== '.';
+  if (hasPathSegments || fs.existsSync(directPath)) return directPath;
+
+  return path.resolve(missionsRoot || path.join(cwd, 'missions'), filePath);
+}
+
+function collectReportScreenshotNames(report) {
+  return collectReportScreenshotPaths(report).map(file => path.basename(file));
+}
+
+function collectReportScreenshotPaths(report) {
+  const names = [];
+  const seen = new Set();
+  for (const mission of Array.isArray(report?.missions) ? report.missions : []) {
+    for (const step of Array.isArray(mission?.steps) ? mission.steps : []) {
+      if (typeof step?.screenshotPath !== 'string') continue;
+      const name = step.screenshotPath.trim().replace(/^\.\//, '').replaceAll('\\', '/');
+      if (!name || seen.has(name)) continue;
+      seen.add(name);
+      names.push(name);
+    }
+  }
+  return names;
+}
 
 function parseTagArgs(argsList) {
   const nextArgs = [];
@@ -603,9 +716,11 @@ const HELP_TEXT = `
 
 Usage:
   ${cliName}                 Run all missions in the ./missions directory
-  ${cliName} <file>         Run a specific mission file (e.g., login.mission.js)
+  ${cliName} <file>         Run a .mission.js or .mission.ts file by name or path
   ${cliName} login          Log in and store session token
-  ${cliName} upload         Upload the most recent report JSON
+  ${cliName} list           List discovered missions and tags without running them
+  ${cliName} config         Show effective configuration and value sources
+  ${cliName} upload [file]  Upload the latest report or a selected report file/run ID
   ${cliName} serve        Serve & open the most recent HTML report (read-only)
   ${cliName} view         Alias of 'serve'
 
@@ -621,6 +736,11 @@ Options:
   --no-human-input          Disable human-in-the-loop verification prompts for automated runs
   --human-input-timeout=<s> Override human input wait timeout in seconds (default: 60)
   --help                    Show this help message
+  --dry-run                 Show the resolved mission plan without launching a browser
+  --no-screenshots          Remove the screenshot tool for this run
+  --no-upload-screenshots   Upload report JSON without its screenshots
+  --json                    Emit machine-readable command/run output
+  --quiet                   Suppress informational logs
   --retry_limit=<n>         Override agent turn retry limits (minimum 1, maximum 10)
   --tag=<tag>               Run missions matching a tag; repeat for multiple tags
   --tags=<tag,...>          Compact comma-list form (OR/any by default)
@@ -631,6 +751,7 @@ Options:
 Examples:
   ${cliName}
   ${cliName} login
+  ${cliName} list
   ${cliName} upload
   ${cliName} serve
   ${cliName} --init
@@ -689,8 +810,8 @@ if (args.includes('login')) {
 }
 
 // Handle the upload command
-if (args.includes('upload')) {
-  await uploadReport();
+if (args[0] === 'upload') {
+  await uploadReport(args[1], { uploadScreenshots });
   process.exit(0);
 }
 
@@ -704,6 +825,37 @@ if (args.includes('serve') || args.includes('view')) {
 
 const { root: missionsRoot, files: discoveredMissions } = await discoverMissionFiles({ cwd: process.cwd() });
 const tagConfig = await loadConfig(process.cwd());
+const outputDir = resolveReportDir(tagConfig);
+process.env.TESTRONAUT_OUTPUT_DIR = outputDir;
+process.env.TESTRONAUT_RUN_ID = runId;
+
+if (args.length === 1 && args[0] === 'config') {
+  writeOutput(buildEffectiveConfig(tagConfig));
+  return;
+}
+
+if (args.length === 1 && args[0] === 'list') {
+  if (!discoveredMissions.length) {
+    writeOutput(jsonOutput ? { missions: [], root: missionsRoot } : `No missions found in ${path.relative(process.cwd(), missionsRoot) || '.'}.`);
+    return;
+  }
+  const listedMissions = [];
+  if (!jsonOutput) console.log(`Missions in ${path.relative(process.cwd(), missionsRoot) || '.'}:`);
+  for (const file of discoveredMissions) {
+    try {
+      const mission = await loadMissionModule(path.resolve(missionsRoot, file));
+      const tags = normalizeTags(mission.tags);
+      listedMissions.push({ file, tags });
+      if (!jsonOutput) console.log(`  ${file}${tags.length ? `  [${tags.join(', ')}]` : ''}`);
+    } catch (error) {
+      console.log(`  ${file}  [could not load: ${error.message}]`);
+      process.exitCode = 1;
+    }
+  }
+  if (jsonOutput) writeOutput({ root: missionsRoot, missions: listedMissions });
+  return;
+}
+
 const explicitFiles = args.length > 0;
 let requestedTags = [];
 let tagMatch = 'any';
@@ -719,32 +871,71 @@ try {
   process.exit(1);
 }
 
-if (!fs.existsSync(missionsRoot)) {
+if (!explicitFiles && !fs.existsSync(missionsRoot)) {
   console.error(`❌ Missions directory not found: ${path.relative(process.cwd(), missionsRoot)}`);
   process.exit(1);
 }
 
+if (dryRun) {
+  const candidates = explicitFiles ? args : discoveredMissions;
+  const missions = [];
+  let invalid = false;
+  for (const file of candidates) {
+    const modulePath = resolveMissionPath(file, { cwd: process.cwd(), missionsRoot });
+    if (!fs.existsSync(modulePath)) {
+      missions.push({ file, status: 'missing', suggestion: closestMissionMatch(file, discoveredMissions) });
+      invalid = true;
+      continue;
+    }
+    try {
+      const mission = await loadMissionModule(modulePath);
+      const tags = normalizeTags(mission.tags);
+      const selected = explicitFiles || matchesTagFilter(tags, requestedTags, tagMatch);
+      missions.push({ file: path.relative(process.cwd(), modulePath), tags, selected, valid: typeof mission.executeMission === 'function' });
+      if (typeof mission.executeMission !== 'function') invalid = true;
+    } catch (error) {
+      missions.push({ file, status: 'load-error', error: error.message });
+      invalid = true;
+    }
+  }
+  writeOutput({ dryRun: true, outputDir, provider: resolveProviderModel({ cwd: process.cwd() }), screenshots: screenshotsEnabled, missions });
+  if (invalid) process.exitCode = 1;
+  return;
+}
+
 const runFile = async (filePath) => {
+  const modulePath = resolveMissionPath(filePath, { cwd: process.cwd(), missionsRoot });
   try {
-    const modulePath = path.resolve(missionsRoot, filePath);
-    const missionsModule = await import(`file://${modulePath}`);
+    if (!fs.existsSync(modulePath)) {
+      const suggestion = closestMissionMatch(filePath, discoveredMissions);
+      console.error(`❌ Mission file not found: ${filePath}`);
+      if (suggestion) console.error(`   Did you mean "${suggestion}"?`);
+      return false;
+    }
+    const missionsModule = await loadMissionModule(modulePath);
 
     if (!explicitFiles) {
       const moduleTags = normalizeTags(missionsModule.tags);
-      if (!matchesTagFilter(moduleTags, requestedTags, tagMatch)) return false;
+      if (!matchesTagFilter(moduleTags, requestedTags, tagMatch)) return null;
     }
 
     if (typeof missionsModule.executeMission === 'function') {
       const result = await missionsModule.executeMission();
+      if (result == null) {
+        console.error(`❌ Mission did not return a result: ${filePath}`);
+        return false;
+      }
       allResults.push({
-        file: filePath,
+        file: path.relative(process.cwd(), modulePath) || path.basename(modulePath),
         result
       });
-      return true;
+      const missionResults = Array.isArray(result) ? result : [result];
+      return !missionResults.some(item => item?.status === 'failed');
     }
+    console.error(`❌ Mission does not export executeMission(): ${filePath}`);
   } catch (err) {
     console.error(`❌ Error running mission: ${filePath}`);
-    console.error(err);
+    console.error(`   ${err?.message || err}`);
   }
   return false;
 };
@@ -752,19 +943,26 @@ const runFile = async (filePath) => {
 if (args.length > 0) {
   // Run specific file(s)
   for (const file of args) {
-    await runFile(file);
+    if (!await runFile(file)) process.exitCode = 1;
   }
 } else {
   // Run missions discovered from config (or default behavior)
   for (const file of discoveredMissions) {
-    await runFile(file);
+    if (await runFile(file) === false) process.exitCode = 1;
   }
+}
+
+if (!explicitFiles && discoveredMissions.length === 0) {
+  console.error(`❌ No mission files found in ${path.relative(process.cwd(), missionsRoot) || '.'}.`);
+  process.exit(1);
 }
 
 if (!explicitFiles && requestedTags.length && allResults.length === 0) {
   console.error(`❌ No missions matched ${tagMatch === 'all' ? 'all' : 'any'} of: ${requestedTags.join(', ')}`);
   process.exit(1);
 }
+
+if (allResults.length === 0) return;
 
 const endTime = new Date();
 
@@ -794,6 +992,7 @@ const { provider: llmProvider, model: llmModel } = resolveProviderModel({ cwd: p
 
 const report = {
   runId,
+  cli: { version: CLI_VERSION },
   startTime: startTime.toISOString(),
   endTime: endTime.toISOString(),
   llm: {
@@ -811,10 +1010,10 @@ report.tags = normalizeTags(flatMissions.flatMap(m =>
   m.submissionType === 'mission' ? (m.tags ?? []) : []
 ));
 
-const outputDir = './missions/mission_reports';
 fs.mkdirSync(outputDir, { recursive: true });
-fs.writeFileSync(`${outputDir}/${runId}.json`, JSON.stringify(report, null, 2));
-generateHtmlReport(report, `${outputDir}/${runId}.html`);
+fs.writeFileSync(path.join(outputDir, `${runId}.json`), JSON.stringify(report, null, 2));
+generateHtmlReport(report, path.join(outputDir, `${runId}.html`));
+if (jsonOutput) writeOutput(report);
 
   try {
     if (!process.env.TN_KEEP_TMP && fs.existsSync(TMP_DIR)) {
@@ -1010,7 +1209,7 @@ async function handleLogin() {
 }
 
 // Upload the most recent report
-async function uploadReport() {
+async function uploadReport(requestedReport, { uploadScreenshots: shouldUploadScreenshots = true } = {}) {
   const configPath = path.resolve(process.cwd(), 'testronaut-config.json');
   if (!fs.existsSync(configPath)) {
     console.error('❌ Configuration file not found.');
@@ -1025,16 +1224,29 @@ async function uploadReport() {
 
 
   // 1) Find latest report JSON
-  const reportDir = path.resolve(process.cwd(), 'missions/mission_reports');
-  const files = fs.readdirSync(reportDir).filter(f => f.endsWith('.json'));
-  if (files.length === 0) {
+  const reportDir = resolveReportDir(config);
+  if (!requestedReport && !fs.existsSync(reportDir)) {
+    console.error(`❌ Report directory not found: ${path.relative(process.cwd(), reportDir) || reportDir}`);
+    process.exit(1);
+  }
+  const files = fs.existsSync(reportDir) ? fs.readdirSync(reportDir).filter(f => f.endsWith('.json')) : [];
+  if (!requestedReport && files.length === 0) {
     console.error('❌ No report files found.');
     process.exit(1);
   }
   files.sort((a, b) => parseInt(b.split('_')[1]) - parseInt(a.split('_')[1]));
-  const latestReportFile = files[0];
-  const latestReportPath = path.join(reportDir, latestReportFile);
+  const selectedReportPath = requestedReport
+    ? resolveReportFile(requestedReport, reportDir)
+    : path.join(reportDir, files[0]);
+  if (!fs.existsSync(selectedReportPath)) {
+    console.error(`❌ Report file not found: ${requestedReport}`);
+    process.exit(1);
+  }
+  const latestReportPath = selectedReportPath;
+  const latestReportFile = path.basename(selectedReportPath);
   const reportJson = fs.readFileSync(latestReportPath, 'utf8');
+  const report = JSON.parse(reportJson);
+  const selectedReportDir = path.dirname(selectedReportPath);
 
   // 2) Upload report FIRST and capture its ID
   console.log(`🛰️  Uploading report: ${latestReportFile}`);
@@ -1061,10 +1273,17 @@ async function uploadReport() {
     process.exit(1);
   }
 
+  if (!shouldUploadScreenshots) {
+    console.log('ℹ️  Screenshot upload disabled. Report JSON upload complete.');
+    if (jsonOutput) writeOutput({ ok: true, reportId: savedReportId, report: latestReportFile, screenshotsUploaded: 0 });
+    return;
+  }
+
   // 3) Now find the fixed 'screenshots' folder next to JSON
-  const screenshotsDir = path.join(reportDir, 'screenshots');
+  const screenshotsDir = path.join(selectedReportDir, 'screenshots');
   if (!fs.existsSync(screenshotsDir) || !fs.statSync(screenshotsDir).isDirectory()) {
     console.log('ℹ️  No screenshots directory found. Done.');
+    if (jsonOutput) writeOutput({ ok: true, reportId: savedReportId, report: latestReportFile, screenshotsUploaded: 0 });
     return;
   }
 
@@ -1076,13 +1295,22 @@ async function uploadReport() {
     return Date.UTC(+Y, +M - 1, +D, +h, +mnt, +s, +ms);
   };
 
-  let imageFiles = fs
-    .readdirSync(screenshotsDir)
-    .filter(f => /\.(png|jpg|jpeg|webp|gif)$/i.test(f))
-    .sort((a, b) => parseScreenshotTimestamp(a) - parseScreenshotTimestamp(b));
+  const imageFiles = collectReportScreenshotPaths(report)
+    .map(relativePath => ({
+      relativePath,
+      filePath: path.resolve(selectedReportDir, relativePath),
+    }))
+    .filter(({ filePath }) =>
+      filePath.startsWith(`${path.resolve(screenshotsDir)}${path.sep}`) &&
+      fs.existsSync(filePath) &&
+      fs.statSync(filePath).isFile() &&
+      /\.(png|jpg|jpeg|webp|gif)$/i.test(filePath)
+    )
+    .sort((a, b) => parseScreenshotTimestamp(path.basename(a.filePath)) - parseScreenshotTimestamp(path.basename(b.filePath)));
 
   if (!imageFiles.length) {
-    console.log('ℹ️  Screenshots directory is empty. Done.');
+    console.log('ℹ️  This report does not reference any available screenshots. Done.');
+    if (jsonOutput) writeOutput({ ok: true, reportId: savedReportId, report: latestReportFile, screenshotsUploaded: 0 });
     return;
   }
 
@@ -1101,11 +1329,10 @@ async function uploadReport() {
 
   const failures = [];
   for (let i = 0; i < imageFiles.length; i++) {
-    const f = imageFiles[i];
-    const filePath = path.join(screenshotsDir, f);
+    const { filePath, relativePath: f } = imageFiles[i];
     const stepIndex = i;
 
-    process.stdout.write(`   ➜ ${f} (step ${stepIndex}) … `);
+    if (!quietOutput) process.stdout.write(`   ➜ ${f} (step ${stepIndex}) … `);
     try {
       const buf = fs.readFileSync(filePath);
       const stat = fs.statSync(filePath);
@@ -1154,9 +1381,9 @@ async function uploadReport() {
       const finish = await parseJsonSafe(finishRes, 'uploads/finish');
       if (!finish.ok) throw new Error(`uploads/finish responded ok=false`);
 
-      process.stdout.write('ok\n');
+      if (!quietOutput) process.stdout.write('ok\n');
     } catch (err) {
-      process.stdout.write('FAIL\n');
+      if (!quietOutput) process.stdout.write('FAIL\n');
       failures.push({ file: f, error: err.message || String(err) });
     }
   }
@@ -1165,8 +1392,10 @@ async function uploadReport() {
     console.log('\n⚠️  Some screenshots failed to upload:');
     for (const f of failures) console.log(`   - ${f.file}: ${f.error}`);
     process.exitCode = 1;
+    if (jsonOutput) writeOutput({ ok: false, reportId: savedReportId, report: latestReportFile, screenshotsUploaded: imageFiles.length - failures.length, failures });
   } else {
     console.log('✅ All screenshots uploaded.');
+    if (jsonOutput) writeOutput({ ok: true, reportId: savedReportId, report: latestReportFile, screenshotsUploaded: imageFiles.length });
   }
 }
 
@@ -1248,11 +1477,12 @@ function findLatestReportPair(reportDir) {
 }
 
 async function serveLatestReport() {
-  const reportDir = path.resolve(process.cwd(), 'missions/mission_reports');
+  const config = await loadConfig(process.cwd());
+  const reportDir = resolveReportDir(config);
 
   const latest = findLatestReportPair(reportDir);
   if (!latest) {
-    console.error('❌ No HTML reports found in missions/mission_reports.');
+    console.error(`❌ No HTML reports found in ${path.relative(process.cwd(), reportDir) || reportDir}.`);
     process.exit(1);
   }
 

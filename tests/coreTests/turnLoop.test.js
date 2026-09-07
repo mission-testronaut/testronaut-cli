@@ -78,6 +78,7 @@ vi.mock('../../tools/toolSchema.js', () => ({
     { type: 'function', function: { name: 'screenshot', description: 'take a screenshot', parameters: {} } },
     { type: 'function', function: { name: 'list_local_files', description: 'list files', parameters: {} } },
     { type: 'function', function: { name: 'get_mfa_code', description: 'get mfa', parameters: {} } },
+    { type: 'function', function: { name: 'set_ground_control_state', description: 'set state', parameters: {} } },
   ],
 }));
 
@@ -126,6 +127,7 @@ describe('turnLoop', () => {
   let browser;
 
   beforeEach(() => {
+    delete process.env.TESTRONAUT_SCREENSHOTS;
     browser = {};
     // reset spies and chat mock
     shared.chromeToolSpies.fill.mockClear();
@@ -134,6 +136,19 @@ describe('turnLoop', () => {
     shared.chromeToolSpies.screenshot.mockClear();
     shared.chromeToolSpies.get_mfa_code.mockClear();
     if (shared.chatMock) shared.chatMock.mockReset();
+  });
+
+  it('does not expose the screenshot tool when screenshots are disabled', async () => {
+    process.env.TESTRONAUT_SCREENSHOTS = '0';
+    shared.chatMock.mockResolvedValueOnce({
+      message: { role: 'assistant', content: 'FINAL: done' },
+      usage: { total_tokens: 2 },
+    });
+
+    await turnLoop(browser, baseMessages(), 1, 0, 0, {}, { steps: [], missionName: 'demo' });
+
+    const tools = shared.chatMock.mock.calls[0][0].tools;
+    expect(tools.map(tool => tool.function.name)).not.toContain('screenshot');
   });
 
   it('handles a final response in a single turn (no tools)', async () => {
@@ -191,6 +206,31 @@ describe('turnLoop', () => {
 
     const step2 = res.steps[1];
     expect(step2.result).toMatch(/Success/);
+  });
+
+  it('handles Ground Control state locally without dispatching it as a browser tool', async () => {
+    shared.chatMock.mockResolvedValueOnce({
+      message: {
+        role: 'assistant', content: '', tool_calls: [{
+          id: 'tool_gc', type: 'function', function: {
+            name: 'set_ground_control_state',
+            arguments: JSON.stringify({ app: { baseUrl: 'https://example.com' }, session: { loggedIn: false } }),
+          },
+        }],
+      },
+      usage: { total_tokens: 4 },
+    });
+    shared.chatMock.mockResolvedValueOnce({
+      message: { role: 'assistant', content: 'FINAL: done' }, usage: { total_tokens: 2 },
+    });
+
+    const ctx = { steps: [], missionName: 'demo' };
+    const res = await turnLoop(browser, baseMessages(), 2, 0, 0, {}, ctx);
+
+    expect(res.success).toBe(true);
+    expect(ctx.groundControl.app.baseUrl).toBe('https://example.com');
+    expect(ctx.groundControl.session.loggedIn).toBe(false);
+    expect(res.steps[0].events).toContain('[tool ] ← set_ground_control_state result: ✅ Success');
   });
 
   it('retries a turn on tool error before marking issues', async () => {

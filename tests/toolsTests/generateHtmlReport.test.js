@@ -21,11 +21,13 @@ describe('generateHtmlReport', () => {
   it('writes an HTML report containing mission and retry metadata', () => {
     const report = {
       runId: 'run_test',
+      cli: { version: '1.7.0' },
       missions: [
         {
           missionName: 'Mission A',
           submissionType: 'mission',
           submissionName: 'Main',
+          file: 'missions/login.mission.ts',
           status: 'passed',
           tags: ['smoke'],
           steps: [
@@ -57,6 +59,8 @@ describe('generateHtmlReport', () => {
     expect(html).toContain('⚠️ Turn Issues');
     expect(html).toContain('data-tag="smoke"');
     expect(html).toContain('data-tags="smoke"');
+    expect(html).toContain('CLI version:</strong> 1.7.0');
+    expect(html).toContain('missions/login.mission.ts');
     expect(html).toContain('data-tag="untagged"');
     expect(html).toContain('id="match-count"');
     expect(html).toContain('No missions match these tags');

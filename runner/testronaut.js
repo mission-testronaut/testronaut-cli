@@ -23,9 +23,11 @@
  */
 
 
+// Mission modules commonly interpolate project .env values at module load time.
+// Keep env loading eager even though the browser/agent import below is lazy.
+import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
-import { runAgent } from '../core/agent.js';
 import { redactPasswordInText } from '../core/redaction.js';
 import { loadConfig, enforceTurnBudget, getRetryLimit, getDomListLimit, getResourceGuardConfig, getHumanInputConfig } from '../core/config.js';
 import { normalizeTags } from '../core/tags.js';
@@ -202,6 +204,7 @@ export async function runMissions({ preMission, mission, postMission, tags = [] 
   );
 
   // 3) Execute
+  const { runAgent } = await import('../core/agent.js');
   const success = await runAgent(
     goals,
     missionName,

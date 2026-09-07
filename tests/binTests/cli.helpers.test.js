@@ -1,9 +1,21 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect } from 'vitest';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 
 // Import helper exports from cli.js
 import { __test__ } from '../../bin/cli.js';
+
+const tempDirs = [];
+const makeTempDir = (prefix) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tempDirs.push(dir);
+  return dir;
+};
+
+afterEach(() => {
+  while (tempDirs.length) fs.rmSync(tempDirs.pop(), { recursive: true, force: true });
+});
 
 describe('cli helpers', () => {
   it('guessMimeType returns expected types', () => {
@@ -22,7 +34,7 @@ describe('cli helpers', () => {
 
   it('findLatestReportPair finds latest html/json', () => {
     const { findLatestReportPair } = __test__;
-    const tmp = fs.mkdtempSync(path.join(process.cwd(), 'testronaut-report-'));
+    const tmp = makeTempDir('testronaut-report-');
     const r1 = path.join(tmp, 'run_100.html');
     const r2 = path.join(tmp, 'run_200.html');
     fs.writeFileSync(r1, 'a');
@@ -32,6 +44,67 @@ describe('cli helpers', () => {
     const latest = findLatestReportPair(tmp);
     expect(latest?.htmlFile).toBe('run_200.html');
     expect(latest?.jsonFile).toBe('run_200.json');
+  });
+
+  it('resolves bare mission names from the missions root and direct paths from cwd', () => {
+    const { resolveMissionPath } = __test__;
+    const cwd = '/tmp/project';
+    const missionsRoot = '/tmp/project/missions';
+    expect(resolveMissionPath('login.mission.js', { cwd, missionsRoot }))
+      .toBe('/tmp/project/missions/login.mission.js');
+    expect(resolveMissionPath('missions/login.mission.js', { cwd, missionsRoot }))
+      .toBe('/tmp/project/missions/login.mission.js');
+    expect(resolveMissionPath('../shared/login.mission.js', { cwd, missionsRoot }))
+      .toBe('/tmp/shared/login.mission.js');
+  });
+
+  it('collects only unique screenshots referenced by a report', () => {
+    const { collectReportScreenshotNames, collectReportScreenshotPaths } = __test__;
+    const report = { missions: [
+      { steps: [{ screenshotPath: './screenshots/one.png' }, { screenshotPath: './screenshots/two.jpg' }] },
+      { steps: [{ screenshotPath: './screenshots/one.png' }, { events: [] }] },
+    ] };
+    expect(collectReportScreenshotNames(report)).toEqual(['one.png', 'two.jpg']);
+    expect(collectReportScreenshotPaths(report)).toEqual(['screenshots/one.png', 'screenshots/two.jpg']);
+  });
+
+  it('preserves run-specific screenshot paths', () => {
+    const { collectReportScreenshotPaths } = __test__;
+    const report = { missions: [{ steps: [
+      { screenshotPath: './screenshots/run_123/one.png' },
+    ] }] };
+    expect(collectReportScreenshotPaths(report)).toEqual(['screenshots/run_123/one.png']);
+  });
+
+  it('resolves configured report directories and suggests close mission names', () => {
+    const { resolveReportDir, closestMissionMatch } = __test__;
+    expect(resolveReportDir({ outputDir: 'artifacts/reports' }, '/tmp/project'))
+      .toBe('/tmp/project/artifacts/reports');
+    expect(closestMissionMatch('logn.mission.js', ['checkout.mission.js', 'login.mission.js']))
+      .toBe('login.mission.js');
+  });
+
+  it('resolves selected reports by run id, filename, and direct path', () => {
+    const { resolveReportFile } = __test__;
+    const tmp = makeTempDir('testronaut-selected-report-');
+    const reportDir = path.join(tmp, 'reports');
+    fs.mkdirSync(reportDir);
+    const report = path.join(reportDir, 'run_123.json');
+    fs.writeFileSync(report, '{}');
+
+    expect(resolveReportFile('run_123', reportDir, tmp)).toBe(report);
+    expect(resolveReportFile('run_123.json', reportDir, tmp)).toBe(report);
+    expect(resolveReportFile(report, reportDir, tmp)).toBe(report);
+  });
+
+  it('builds a redacted effective config with source information', () => {
+    const { buildEffectiveConfig } = __test__;
+    const effective = buildEffectiveConfig({
+      provider: 'openai', model: 'gpt-5.6', outputDir: 'artifacts', sessionToken: 'secret',
+    }, '/tmp/project');
+    expect(effective.outputDir).toEqual({ value: '/tmp/project/artifacts', source: 'config' });
+    expect(effective.authenticated).toBe(true);
+    expect(JSON.stringify(effective)).not.toContain('secret');
   });
 
   it('parses booleans in a tolerant way', () => {

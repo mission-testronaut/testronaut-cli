@@ -31,11 +31,11 @@ describe('discoverMissionFiles', () => {
     fs.writeFileSync(path.join(missionsDir, 'beta.txt'), '// ignore');
     fs.mkdirSync(path.join(missionsDir, 'nested'), { recursive: true });
     fs.writeFileSync(path.join(missionsDir, 'nested', 'gamma.mission.js'), '// nested');
-    fs.writeFileSync(path.join(missionsDir, 'delta.mission.ts'), '// ts not included by default');
+    fs.writeFileSync(path.join(missionsDir, 'delta.mission.ts'), '// ts');
 
     const res = await discoverMissionFiles({ cwd: tmp });
     expect(res.root).toBe(path.resolve(tmp, 'missions'));
-    expect(res.files).toEqual(['alpha.mission.js']);
+    expect(res.files).toEqual(['alpha.mission.js', 'delta.mission.ts']);
   });
 
   it('respects missions.root with include patterns', async () => {
