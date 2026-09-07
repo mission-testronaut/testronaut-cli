@@ -9,7 +9,7 @@ const DEFAULT_INCLUDE = ['**/*.mission.js', '**/*.mission.ts'];
 /**
  * Discover mission files based on testronaut-config.json.
  * - When no missions block exists, preserve legacy behavior:
- *   read the ./missions folder (non-recursive) for *.mission.js files.
+ *   read the ./missions folder (non-recursive) for JavaScript/TypeScript missions.
  * - When missions is defined, apply root/include/exclude globs relative to root.
  *
  * @param {object} opts
@@ -21,13 +21,13 @@ export async function discoverMissionFiles({ cwd = process.cwd() } = {}) {
   const cfg = await loadConfig(cwd);
   const missionsCfg = cfg?.missions;
 
-  // Legacy behavior: no missions block → non-recursive *.mission.js in ./missions
+  // Legacy behavior remains non-recursive, now with first-class TypeScript support.
   if (!missionsCfg) {
     if (!fs.existsSync(defaultRoot)) {
       return { root: defaultRoot, files: [] };
     }
     const files = fs.readdirSync(defaultRoot)
-      .filter(f => f.endsWith('.mission.js'))
+      .filter(f => f.endsWith('.mission.js') || f.endsWith('.mission.ts'))
       .sort();
     return { root: defaultRoot, files };
   }

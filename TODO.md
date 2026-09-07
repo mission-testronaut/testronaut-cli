@@ -1,5 +1,14 @@
 # TODO
 
+## Quality-of-Life Follow-Ups
+
+- [ ] Add a versioned report schema shared with Mission Control so future report changes can be validated and migrated explicitly.
+- [ ] Add resumable, retryable, and idempotent report uploads so interrupted screenshot transfers do not require starting over or create duplicate reports.
+- [ ] Add `testronaut doctor` to check Node.js, browser installation, configuration, authentication, output-directory access, and API connectivity without running a mission.
+- [ ] Add optional shell completion for commands, flags, mission files, tags, and local report IDs.
+- [ ] Treat `--json` output as a stable automation contract with documented schemas and tests for every supported command.
+- [ ] If authentication ever moves outside project config, continue reading existing `sessionToken` values and provide an opt-in migration path before deprecating legacy storage.
+
 ## Automated MFA Follow-Ups
 
 - [ ] Add an integration smoke test against a local or staging API fixture for `get_mfa_code`.

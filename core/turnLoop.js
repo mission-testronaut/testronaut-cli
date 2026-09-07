@@ -156,6 +156,8 @@ const FIRE_AND_FORGET_TOOLS = new Set([
   'switch_to_page',
   'close_current_page',
   'request_human_input',
+  'set_ground_control_state',
+  'record_mission_telemetry',
 ]);
 
 /**
@@ -252,9 +254,10 @@ export const turnLoop = async (
   const maxAttempts = retryLimitClamped + 1; // includes initial attempt
   ctx.groundControl = groundControl;
   const humanInput = ctx.humanInput || { enabled: true, timeoutSeconds: 60 };
-  const activeToolsSchema = humanInput.enabled === false
-    ? toolsSchema.filter(t => t?.function?.name !== 'request_human_input')
-    : toolsSchema;
+  const disabledTools = new Set();
+  if (humanInput.enabled === false) disabledTools.add('request_human_input');
+  if (process.env.TESTRONAUT_SCREENSHOTS === '0') disabledTools.add('screenshot');
+  const activeToolsSchema = toolsSchema.filter(t => !disabledTools.has(t?.function?.name));
   let agentMemory = { lastMenuExpanded: false, humanInput };
   ensureDocProgress(agentMemory, resourceGuardCfg);
   let turnRetries = 0;
@@ -433,7 +436,17 @@ export const turnLoop = async (
         let result;
         let errorMessage = null;
         try {
-          result = await CHROME_TOOL_MAP[fnName](browser, args, agentMemory);
+          if (fnName === 'set_ground_control_state') {
+            applyGroundControlUpdate(groundControl, args);
+            result = { ok: true, groundControl };
+          } else if (fnName === 'record_mission_telemetry') {
+            const recorded = recordGroundTelemetry(groundControl, args, { turn });
+            result = { ok: true, recorded };
+          } else {
+            const toolHandler = CHROME_TOOL_MAP[fnName];
+            if (typeof toolHandler !== 'function') throw new Error(`Unknown tool: ${fnName}`);
+            result = await toolHandler(browser, args, agentMemory);
+          }
           if (typeof result !== 'string') result = JSON.stringify(result ?? '');
         } catch (e) {
           errorMessage = `ERROR: ${e.message}`;
@@ -647,16 +660,6 @@ export const turnLoop = async (
             step.screenshotPath = match[1];
             step.events.push(`🖼️ Screenshot captured: ${match[1]}`);
           }
-        }
-
-        if (fnName === 'set_ground_control_state') {
-          applyGroundControlUpdate(groundControl, args);
-          result = JSON.stringify({ ok: true, groundControl });
-        }
-
-        if (fnName === 'record_mission_telemetry') {
-          const recorded = recordGroundTelemetry(groundControl, args, { turn });
-          result = JSON.stringify({ ok: true, recorded });
         }
 
         // Decide what to send back to the LLM for this tool.

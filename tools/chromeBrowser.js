@@ -26,7 +26,7 @@ import { requestHumanInput } from './humanInput.js';
 import { getMfaCode } from './mfaCode.js';
 
 const FILES_DIR = path.join('missions', 'files');
-const REPORTS_DIR = path.join('missions', 'mission_reports');
+const REPORTS_DIR = process.env.TESTRONAUT_OUTPUT_DIR || path.join('missions', 'mission_reports');
 const FILES_LOG = path.join(REPORTS_DIR, 'files.jsonl');
 
 function ensureDir(p) {
@@ -752,7 +752,11 @@ export class ChromeBrowser {
     }
     if (!chosen) {
       await this._debugClickableSnapshot({ scope }).catch(()=>{});
-      await this.page.screenshot({ path: 'missions/mission_reports/screenshots/click_fail.png' }).catch(()=>{});
+      if (process.env.TESTRONAUT_SCREENSHOTS !== '0') {
+        const failurePath = path.join(REPORTS_DIR, 'screenshots', process.env.TESTRONAUT_RUN_ID || '', 'click_fail.png');
+        ensureDir(path.dirname(failurePath));
+        await this.page.screenshot({ path: failurePath }).catch(()=>{});
+      }
       throw new Error('No clickable locator became ready');
     }
     // do the click (standard → hover+click → JS click)
@@ -1183,13 +1187,19 @@ export class ChromeBrowser {
   }
 
   async screenshot({ name = 'screenshot' }) {
+    if (process.env.TESTRONAUT_SCREENSHOTS === '0') {
+      throw new Error('Screenshots are disabled for this run (--no-screenshots).');
+    }
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const screenshotPath = `missions/mission_reports/screenshots/${name}_${timestamp}.png`;
+    const screenshotDir = path.join(REPORTS_DIR, 'screenshots', process.env.TESTRONAUT_RUN_ID || '');
+    const screenshotPath = path.join(screenshotDir, `${name}_${timestamp}.png`);
+    ensureDir(screenshotDir);
   
     await this.page.screenshot({ path: screenshotPath });
   
     // ✅ Return relative path for HTML report
-    return `Screenshot saved at: ./screenshots/${name}_${timestamp}.png`;
+    const reportRelativePath = path.relative(REPORTS_DIR, screenshotPath).split(path.sep).join('/');
+    return `Screenshot saved at: ./${reportRelativePath}`;
   }
   
   async upload_file({ selector, fileName, useChooser = false, timeoutMs = 15000 }) {

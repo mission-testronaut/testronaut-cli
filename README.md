@@ -58,12 +58,18 @@ testronaut --init
 Run the sample mission:
 ```bash
 testronaut welcome.mission.js
+
+# Paths work too, which enables shell tab completion
+testronaut missions/welcome.mission.js
 ```
 
 **One-off / no install** (use `npx` to run without installing):
 ```bash
 npx testronaut --init
 npx testronaut welcome.mission.js
+
+# Paths work too, which enables shell tab completion
+npx testronaut missions/welcome.mission.js
 ```
 
 ---
@@ -74,8 +80,12 @@ npx testronaut welcome.mission.js
 missions/
 ├── login.mission.js
 ├── logout.mission.js
-└── dashboard.mission.js
+└── dashboard.mission.ts
 ```
+
+Mission files can use standard `import`/`export` syntax in `.js` or `.ts` files.
+Testronaut loads them independently of your project's module format, so your
+`package.json` does not need `"type": "module"`.
 
 Each mission exports a string or function and calls `runMissions`.
 
@@ -151,6 +161,20 @@ testronaut
 Run a specific mission:
 ```bash
 testronaut login.mission.js
+```
+
+Preview or inspect without launching a browser:
+```bash
+testronaut list
+testronaut --dry-run
+testronaut config
+```
+
+Upload the latest or a selected report:
+```bash
+testronaut upload
+testronaut upload run_1788745106444
+testronaut upload run_1788745106444.json --no-upload-screenshots
 ```
 
 Chain missions together:
@@ -243,7 +267,7 @@ Notes:
 
 ## 📋 Reports
 
-Testronaut generates both JSON and HTML reports automatically under:
+Testronaut generates JSON, HTML, and run-specific screenshots under the configured `outputDir` (default):
 
 ```
 missions/mission_reports/
