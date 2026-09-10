@@ -24,6 +24,7 @@
     "url": "https://github.com/mission-testronaut/testronaut-cli"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.124.0",
     "@dqbd/tiktoken": "^1.0.21",
     "@google/generative-ai": "^0.24.1",
     "cheerio": "^1.1.0",

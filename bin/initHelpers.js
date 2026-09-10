@@ -26,6 +26,7 @@
  */
 
 import { OPENAI_MODELS } from '../llm/openAI/models.js';
+import { ANTHROPIC_MODELS } from '../llm/anthropic/models.js';
 
 /**
  * Ensures backward compatibility for older configs where
@@ -76,7 +77,7 @@ export function defaultConfig(rootBasename) {
  * Returns a provider-specific .env template string.
  * This scaffolds a safe placeholder API key for the user to fill in manually.
  *
- * @param {'openai'|'gemini'} provider - The chosen LLM provider
+ * @param {'openai'|'gemini'|'anthropic'} provider - The chosen LLM provider
  * @returns {string} A multiline template for the .env file
  */
 export function makeEnvTemplate(provider) {
@@ -88,6 +89,11 @@ OPENAI_API_KEY=sk-...
   if (provider === 'gemini') {
     return `# Add your Google Gemini API key below
 GEMINI_API_KEY=AIza...
+`;
+  }
+  if (provider === 'anthropic') {
+    return `# Add your Anthropic API key below
+ANTHROPIC_API_KEY=sk-ant-...
 `;
   }
   return '';
@@ -115,17 +121,22 @@ export function geminiModels() {
   ];
 }
 
+export function anthropicModels() {
+  return ANTHROPIC_MODELS.map(({ id }) => id);
+}
+
 /**
  * Determines whether a given model name belongs to a known provider.
  *
- * @param {'openai'|'gemini'} provider - The LLM provider
+ * @param {'openai'|'gemini'|'anthropic'|'claude'} provider - The LLM provider
  * @param {string} model - The model name to check
  * @returns {boolean} True if the model is recognized for that provider
  */
 export function isKnownModel(provider, model) {
-  return provider === 'openai'
-    ? openAIModels().includes(model)
-    : geminiModels().includes(model);
+  if (provider === 'openai') return openAIModels().includes(model);
+  if (provider === 'gemini') return geminiModels().includes(model);
+  if (provider === 'anthropic' || provider === 'claude') return anthropicModels().includes(model);
+  return false;
 }
 
 /**

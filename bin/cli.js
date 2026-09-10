@@ -172,7 +172,7 @@ function parseProviderArgs(argsList) {
       provider = provider.trim();
     }
 
-    const supportedProviders = new Set(['openai', 'gemini']);
+    const supportedProviders = new Set(['openai', 'gemini', 'anthropic', 'claude']);
     const isValid = (v) => !!v && supportedProviders.has(String(v).toLowerCase());
     if (!isValid(provider)) {
       invalid = true;
@@ -728,7 +728,7 @@ Options:
   --init                    Scaffold project folders and a welcome mission
   --turns=<n>               Override max turns for this run (e.g., --turns=30)
   --debug[=<bool>]          Enable verbose debug logs (or set TESTRONAUT_DEBUG=1)
-  --provider=<id>           Override LLM provider for this run (e.g., --provider=openai)
+  --provider=<id>           Override LLM provider (openai, gemini, or anthropic)
   -o, --options key=value   Set run options, such as mfa=github-test-mfa
   --dev                     Use the staging API base URL
   --vercel-bypass=<secret>  Send Vercel protection bypass header for protected deployments

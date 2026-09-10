@@ -6,7 +6,7 @@
  *   writing a provider/model-aware config, and scaffolding a .env file.
  *
  * Responsibilities:
- *   1) Ask the user for an LLM provider (OpenAI or Gemini).
+ *   1) Ask the user for an LLM provider (OpenAI, Gemini, or Anthropic Claude).
  *   2) Ask for a provider-specific model (keeps prior choice when re-run).
  *   3) Write `testronaut-config.json` and an initial `.env` placeholder.
  *   4) Ensure folder structure and create a welcome mission.
@@ -33,9 +33,11 @@ import {
   defaultConfig,
   makeEnvTemplate,
   geminiModels,
+  anthropicModels,
   pickInitialIndex
 } from './initHelpers.js';
 import { DEFAULT_OPENAI_MODEL, OPENAI_MODELS } from '../llm/openAI/models.js';
+import { ANTHROPIC_MODELS, DEFAULT_ANTHROPIC_MODEL } from '../llm/anthropic/models.js';
 
 export async function initializeTestronautProject() {
   // ─────────────────────────────────────────────
@@ -69,10 +71,10 @@ export async function initializeTestronautProject() {
       choices: [
         { title: 'OpenAI (GPT family)', value: 'openai' },
         { title: 'Google Gemini', value: 'gemini' },
-        // Future: add Anthropic, Mistral, etc.
+        { title: 'Anthropic Claude', value: 'anthropic' },
       ],
       // If user re-runs init before writing config, preselect known value.
-      initial: ['openai', 'gemini'].indexOf(config.provider ?? 'openai')
+      initial: Math.max(0, ['openai', 'gemini', 'anthropic'].indexOf(config.provider ?? 'openai'))
     });
 
     // Persist provider explicitly to config.
@@ -128,6 +130,19 @@ export async function initializeTestronautProject() {
       });
 
       config.model = geminiModel;
+    } else if (llmProvider === 'anthropic') {
+      const models = anthropicModels();
+      const { anthropicModel } = await prompts({
+        type: 'select',
+        name: 'anthropicModel',
+        message: 'Select an Anthropic Claude model:',
+        choices: ANTHROPIC_MODELS.map(model => ({
+          title: `${model.label} (${model.description})`,
+          value: model.id,
+        })),
+        initial: pickInitialIndex(models, config.model, DEFAULT_ANTHROPIC_MODEL),
+      });
+      config.model = anthropicModel;
     }
 
     // ─────────────────────────────────────────────
@@ -182,6 +197,18 @@ export async function initializeTestronautProject() {
     GEMINI_API_KEY=AIza...
 
 📌 If you plan to use tools/function-calling or images, make sure your account has access to those features.
+
+✅ Ready to write missions in \`missions/\`. Try:
+
+    testronaut welcome.mission.js
+`);
+    } else if (config.provider === 'anthropic') {
+      console.log(`
+🔧 Setup Complete!
+
+👉 Ensure your .env file contains your Anthropic key:
+
+    ANTHROPIC_API_KEY=sk-ant-...
 
 ✅ Ready to write missions in \`missions/\`. Try:
 
