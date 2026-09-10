@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { openAIModels, geminiModels, isKnownModel, pickInitialIndex } from '../../../bin/initHelpers';
+import { openAIModels, geminiModels, anthropicModels, isKnownModel, pickInitialIndex } from '../../../bin/initHelpers';
 
 describe('model helpers', () => {
   it('lists known models', () => {
@@ -16,11 +16,13 @@ describe('model helpers', () => {
     ]));
     expect(openAIModels()).not.toContain('gpt-5.3');
     expect(geminiModels()).toContain('gemini-2.5-flash');
+    expect(anthropicModels()).toContain('claude-sonnet-5');
   });
 
   it('recognizes known models by provider', () => {
     expect(isKnownModel('openai', 'gpt-4.1-mini')).toBe(true);
     expect(isKnownModel('gemini', 'gpt-4.1-mini')).toBe(false);
+    expect(isKnownModel('anthropic', 'claude-sonnet-5')).toBe(true);
   });
 
   it('picks initial index from list or fallback', () => {

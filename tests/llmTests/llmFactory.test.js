@@ -6,6 +6,7 @@ const { shared } = vi.hoisted(() => ({
   shared: {
     openAICtor: vi.fn(),
     geminiCtor: vi.fn(),
+    anthropicCtor: vi.fn(),
   },
 }));
 
@@ -24,6 +25,12 @@ vi.mock('../../llm/gemini/geminiProvider.js', () => ({
     this.chat = vi.fn(async () => ({ message: { role: 'assistant', content: 'ok' }, usage: {} }));
   },
 }));
+vi.mock('../../llm/anthropic/anthropicProvider.js', () => ({
+  AnthropicProvider: function (opts) {
+    shared.anthropicCtor(opts);
+    this.chat = vi.fn(async () => ({ message: { role: 'assistant', content: 'ok' }, usage: {} }));
+  },
+}));
 
 // Import SUT after mocks
 import { getLLM } from '../../llm/llmFactory.js';
@@ -35,6 +42,7 @@ describe('getLLM', () => {
     process.env = { ...ORIGINAL_ENV };
     shared.openAICtor.mockClear();
     shared.geminiCtor.mockClear();
+    shared.anthropicCtor.mockClear();
   });
 
   afterEach(() => {
@@ -72,7 +80,15 @@ describe('getLLM', () => {
     expect(typeof llm.chat).toBe('function');
   });
 
+  it('creates Anthropic provider and accepts claude as an alias', () => {
+    process.env.ANTHROPIC_API_KEY = 'sk-ant-test';
+    getLLM('claude');
+    expect(shared.anthropicCtor).toHaveBeenCalledWith(
+      expect.objectContaining({ apiKey: 'sk-ant-test' })
+    );
+  });
+
   it('throws on unsupported provider', () => {
-    expect(() => getLLM('anthropic')).toThrow(/Unsupported LLM provider/i);
+    expect(() => getLLM('mistral')).toThrow(/Unsupported LLM provider/i);
   });
 });

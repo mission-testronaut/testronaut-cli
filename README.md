@@ -18,7 +18,7 @@ Join the Discord to connect with other Testronauts, get support, and help shape 
 
 - Write tests in plain English — no brittle selectors  
 - Runs real browser sessions via **Playwright**  
-- Works with **multiple LLM providers** (OpenAI, Google Gemini, and more coming)  
+- Works with **multiple LLM providers** (OpenAI, Google Gemini, and Anthropic Claude)
 - Modular tool and DOM-reasoning system  
 - Dynamic rate-limit and token-tracking logic  
 - Generates JSON + HTML reports automatically  
@@ -120,6 +120,9 @@ OPENAI_API_KEY=sk-...
 # Or for Gemini
 GEMINI_API_KEY=AIza...
 
+# Or for Anthropic Claude
+ANTHROPIC_API_KEY=sk-ant-...
+
 URL=https://example.com/login
 USERNAME=example@example.com
 PASSWORD=********
@@ -146,8 +149,9 @@ Current supported providers:
 |-----------|----------------|
 | **OpenAI** | gpt-5.6, gpt-5.6-terra, gpt-5.6-luna, gpt-5.5, and legacy GPT/o-series models |
 | **Google Gemini** | gemini-2.5-pro, gemini-2.5-flash, gemini-2.5-flash-8b |
+| **Anthropic Claude** | claude-sonnet-5, claude-opus-5, claude-haiku-4-5 |
 
-More providers coming soon (Anthropic, Mistral, etc.).
+The canonical Claude provider ID is `anthropic`; `claude` is also accepted as a CLI alias.
 
 ---
 

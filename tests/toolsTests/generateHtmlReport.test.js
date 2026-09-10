@@ -21,6 +21,7 @@ describe('generateHtmlReport', () => {
   it('writes an HTML report containing mission and retry metadata', () => {
     const report = {
       runId: 'run_test',
+      llm: { provider: 'anthropic', model: 'claude-sonnet-5' },
       cli: { version: '1.7.0' },
       missions: [
         {
@@ -66,6 +67,9 @@ describe('generateHtmlReport', () => {
     expect(html).toContain('No missions match these tags');
     expect(html).toContain('Keep missions that do not match visible');
     expect(html).not.toContain('<div class="pill">LLM:');
+    expect(html).not.toContain('<strong>LLM:</strong>');
+    expect(html).toContain('title="Anthropic"');
+    expect(html).toContain('<strong>claude-sonnet-5</strong>');
   });
 
   it('escapes unsafe text in output', () => {
@@ -98,5 +102,15 @@ describe('generateHtmlReport', () => {
     expect(html).toContain('Mission &lt;X&gt;');
     expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
     expect(html).toContain('&lt;b&gt;bold&lt;/b&gt;');
+  });
+
+  it('renders the OpenAI logo and model without a textual LLM label', () => {
+    const outPath = path.join(tmpDir, 'openai.html');
+    generateHtmlReport({ runId: 'openai_run', llm: { provider: 'openai', model: 'gpt-5.6' } }, outPath);
+    const html = fs.readFileSync(outPath, 'utf8');
+
+    expect(html).toContain('title="OpenAI"');
+    expect(html).toContain('<strong>gpt-5.6</strong>');
+    expect(html).not.toContain('<strong>LLM:</strong>');
   });
 });

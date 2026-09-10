@@ -63,6 +63,10 @@ const DEFAULT_LIMITS = [
   { test: /^gemini-2\.5-flash-8b(-|$)/i, tpm: 300000 },
   { test: /^gemini-2\.5-flash(-|$)/i,    tpm: 300000 },
 
+  // Anthropic limits vary by usage tier; this conservative fallback is only for local pacing.
+  { test: /^claude-(opus|sonnet)-/i,     tpm: 80000 },
+  { test: /^claude-haiku-/i,             tpm: 100000 },
+
   // Ultimate fallback for anything else
   { test: /.*/,                         tpm: 150000 },
 ];
@@ -76,7 +80,7 @@ const warnedModels = new Set();
 /* ---------------- Tokenizer helpers ----------------
  * We prefer tiktoken's per-model encoding when available.
  * For unknown models, we pick a close base:
- *  - o200k_base for modern, long-context families (OpenAI 4o/4.1/5, Gemini 2.5, O*)
+ *  - o200k_base for modern, long-context families (OpenAI, Gemini, Claude, O*)
  *  - cl100k_base as a broad fallback
  */
 /**
@@ -94,10 +98,12 @@ function getTokenizer(model) {
 
     // Treat Gemini 2.5 like modern long-context models
     const isGemini25 = /^gemini-2\.5/.test(m);
+    const isClaude = /^claude-/.test(m);
 
     // OpenAI modern families also map well to o200k_base
     const useO200k =
       isGemini25 ||
+      isClaude ||
       m.startsWith('gpt-5') ||
       m.startsWith('gpt-4o') ||
       m.startsWith('gpt-4.1') ||

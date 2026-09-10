@@ -138,6 +138,21 @@ describe('initializeTestronautProject', () => {
     expect(shared.calls).toBe(2);
   });
 
+  it('scaffolds a new Anthropic project', async () => {
+    const temp = makeTempProject();
+    process.chdir(temp);
+    shared.answers.push({ llmProvider: 'anthropic' });
+    shared.answers.push({ anthropicModel: 'claude-sonnet-5' });
+
+    await initializeTestronautProject();
+
+    const cfg = readJson(path.join(temp, 'testronaut-config.json'));
+    expect(cfg.provider).toBe('anthropic');
+    expect(cfg.model).toBe('claude-sonnet-5');
+    expect(fs.readFileSync(path.join(temp, '.env'), 'utf8')).toMatch(/ANTHROPIC_API_KEY=sk-ant-/);
+    expect(shared.calls).toBe(2);
+  });
+
   it('is idempotent: when initialized, it skips prompts and does not overwrite .env', async () => {
     const temp = makeTempProject();
     process.chdir(temp);

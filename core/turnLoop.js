@@ -24,7 +24,7 @@
  *
  * Notes:
  *   - Provider-agnostic: routes all LLM calls through the `llmFactory` adapter layer.
- *   - OpenAI and Gemini both normalize responses to an OpenAI-like message format.
+ *   - All providers normalize responses to an OpenAI-like message format.
  *   - Token control is model-sensitive but provider-neutral.
  */
 

@@ -26,12 +26,13 @@
 
 import { OpenAIProvider } from './openAI/openaiProvider.js';
 import { GeminiProvider } from './gemini/geminiProvider.js';
+import { AnthropicProvider } from './anthropic/anthropicProvider.js';
 
 /**
  * Return an adapter implementing:
  *   chat({ model, messages, tools }) -> Promise<{ message, usage }>
  *
- * @param {string} providerName - 'openai' | 'gemini'
+ * @param {string} providerName - 'openai' | 'gemini' | 'anthropic' | 'claude'
  * @param {object} [opts]       - Optional overrides (e.g., { apiKey, baseURL, ... })
  * @returns {{ chat: Function }} provider adapter
  */
@@ -43,6 +44,10 @@ export function getLLM(providerName, opts = {}) {
 
     case 'gemini':
       return new GeminiProvider({ apiKey: process.env.GEMINI_API_KEY, ...opts });
+
+    case 'anthropic':
+    case 'claude':
+      return new AnthropicProvider({ apiKey: process.env.ANTHROPIC_API_KEY, ...opts });
 
     default:
       throw new Error(`Unsupported LLM provider: ${providerName}`);

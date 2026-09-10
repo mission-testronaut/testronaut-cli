@@ -11,4 +11,8 @@ describe('makeEnvTemplate', () => {
     const s = makeEnvTemplate('gemini');
     expect(s).toMatch(/GEMINI_API_KEY=AIza\.\.\./);
   });
+
+  it('returns Anthropic template', () => {
+    expect(makeEnvTemplate('anthropic')).toMatch(/ANTHROPIC_API_KEY=sk-ant-/);
+  });
 });
