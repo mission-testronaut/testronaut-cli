@@ -45,7 +45,7 @@
     "qa"
   ],
   "devDependencies": {
-    "@types/node": "^25.9.3",
+    "@types/node": "^26.5.0",
     "periapsis": "^2.0.1",
     "vitest": "^4.1.11"
   }
