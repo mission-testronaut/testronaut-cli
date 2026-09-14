@@ -84,6 +84,12 @@ describe('initializeTestronautProject', () => {
     expect(cfg.resourceGuard?.enabled).toBe(true);
     expect(cfg.humanInput?.enabled).toBe(true);
     expect(cfg.humanInput?.timeoutSeconds).toBe(60);
+    expect(cfg.rateLimits).toMatchObject({
+      tier: 'unknown',
+      region: 'global',
+      safetyMargin: 0.9,
+      models: { 'gpt-4o': { fallbackTPM: 450000 } },
+    });
 
     // .env
     const envPath = path.join(temp, '.env');
@@ -125,6 +131,9 @@ describe('initializeTestronautProject', () => {
     expect(cfg.resourceGuard?.enabled).toBe(true);
     expect(cfg.humanInput?.enabled).toBe(true);
     expect(cfg.humanInput?.timeoutSeconds).toBe(60);
+    expect(cfg.rateLimits.models).toEqual({
+      'gemini-2.5-flash': { fallbackTPM: 300000 },
+    });
 
     const envTxt = fs.readFileSync(path.join(temp, '.env'), 'utf8');
     expect(envTxt).toMatch(/GEMINI_API_KEY=AIza/);
@@ -149,6 +158,9 @@ describe('initializeTestronautProject', () => {
     const cfg = readJson(path.join(temp, 'testronaut-config.json'));
     expect(cfg.provider).toBe('anthropic');
     expect(cfg.model).toBe('claude-sonnet-5');
+    expect(cfg.rateLimits.models).toEqual({
+      'claude-sonnet-5': { fallbackTPM: 80000 },
+    });
     expect(fs.readFileSync(path.join(temp, '.env'), 'utf8')).toMatch(/ANTHROPIC_API_KEY=sk-ant-/);
     expect(shared.calls).toBe(2);
   });

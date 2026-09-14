@@ -23,6 +23,7 @@
 import { encoding_for_model, get_encoding } from '@dqbd/tiktoken';
 import { wait } from './turnLoopUtils.js';
 import { getOpenAIModel } from '../llm/openAI/models.js';
+import { getFallbackTPM } from './rateLimitDefaults.js';
 
 /**
  * Dynamic token-per-minute limits by model family.
@@ -34,48 +35,36 @@ import { getOpenAIModel } from '../llm/openAI/models.js';
  * NOTE: These are conservative defaults meant for backoff heuristics, not hard truths.
  *       Providers may change limits; env/header learning will supersede these.
  */
-const DEFAULT_LIMITS = [
-  // ── OpenAI (newer first) ────────────────────────────────────────────────
-  { test: /^gpt-5\.6-luna(-|$)/i,        tpm: 500000 },
-  { test: /^gpt-5\.6(-|$)/i,             tpm: 500000 },
-  { test: /^gpt-5\.5(-|$)/i,             tpm: 500000 },
-  { test: /^gpt-5\.4-nano(-|$)/i,        tpm: 200000 },
-  { test: /^gpt-5\.4(-|$)/i,             tpm: 500000 },
-  { test: /^gpt-5\.2(-|$)/i,             tpm: 500000 },
-  { test: /^gpt-5.1(-|$)/i,             tpm: 120000 },
-  { test: /^gpt-5-mini(-|$)/i,          tpm: 240000 },
-  { test: /^gpt-5-nano(-|$)/i,          tpm: 600000 },
-  { test: /^gpt-5(-|$)/i,               tpm:  90000 },
-
-  { test: /^gpt-4o(-|$)/i,              tpm: 450000 },
-  { test: /^gpt-4\.1(-|$)/i,            tpm:1000000 },
-
-  { test: /^o3(-|$)/i,                  tpm: 300000 },
-  { test: /^o4-mini(-|$)/i,             tpm: 600000 },
-
-  // Older / fallback (OpenAI)
-  { test: /^gpt-4(-|$)/i,               tpm: 150000 },
-  { test: /^gpt-3\.5(-|$)/i,            tpm: 600000 },
-
-  // ── Gemini (approximate, conservative) ─────────────────────────────────
-  // These are heuristic defaults to guide local throttling only.
-  { test: /^gemini-2\.5-pro(-|$)/i,      tpm: 120000 },
-  { test: /^gemini-2\.5-flash-8b(-|$)/i, tpm: 300000 },
-  { test: /^gemini-2\.5-flash(-|$)/i,    tpm: 300000 },
-
-  // Anthropic limits vary by usage tier; this conservative fallback is only for local pacing.
-  { test: /^claude-(opus|sonnet)-/i,     tpm: 80000 },
-  { test: /^claude-haiku-/i,             tpm: 100000 },
-
-  // Ultimate fallback for anything else
-  { test: /.*/,                         tpm: 150000 },
-];
-
+/* Legacy model table moved to rateLimitDefaults.js so init and runtime share it. */
 // Live, mutable limits (can be updated by headers at runtime)
 const liveLimits = new Map(); // modelId -> { tpm, source: 'default'|'env'|'header' }
 
 // One-time warning tracking for tokenizer fallback
 const warnedModels = new Set();
+let runtimeContext = { provider: undefined, rateLimits: undefined };
+let overrideNoticeShown = false;
+
+function getEnvironmentTPMOverride() {
+  const raw = String(process.env.TESTRONAUT_TOKENS_PER_MIN ?? '').trim();
+  if (!raw || raw.toLowerCase() === 'auto') return null;
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+export function configureTokenControl({ provider, rateLimits } = {}) {
+  runtimeContext = { provider, rateLimits };
+  liveLimits.clear();
+  const envTPM = getEnvironmentTPMOverride();
+  if (envTPM && !overrideNoticeShown) {
+    console.warn(
+      `⚠️ TPM override active: TESTRONAUT_TOKENS_PER_MIN=${envTPM}. ` +
+      'This value overrides config and provider-advertised limits.\n' +
+      '   Clear it permanently with `unset TESTRONAUT_TOKENS_PER_MIN` and remove it from `.env` or your shell profile.\n' +
+      '   Bypass it for one run with `TESTRONAUT_TOKENS_PER_MIN=auto testronaut <mission>`.'
+    );
+    overrideNoticeShown = true;
+  }
+}
 
 /* ---------------- Tokenizer helpers ----------------
  * We prefer tiktoken's per-model encoding when available.
@@ -185,15 +174,33 @@ export async function warnIfContextNearLimit(model, payload, threshold = 0.9) {
  * @returns {{tpm:number, source:'default'|'env'}}
  */
 function resolveDefaultLimitForModel(model) {
-  const envTPM = process.env.TESTRONAUT_TOKENS_PER_MIN
-    ? Number(process.env.TESTRONAUT_TOKENS_PER_MIN)
-    : undefined;
-  if (envTPM && Number.isFinite(envTPM) && envTPM > 0) {
+  const envTPM = getEnvironmentTPMOverride();
+  if (envTPM) {
     return { tpm: envTPM, source: 'env' };
   }
 
-  const hit = DEFAULT_LIMITS.find(entry => entry.test.test(model || ''));
-  return { tpm: hit?.tpm ?? 150000, source: 'default' };
+  const modelConfig = runtimeContext.rateLimits?.models?.[model] || {};
+  const configuredTPM = Number(modelConfig.tpm);
+  if (Number.isFinite(configuredTPM) && configuredTPM > 0) {
+    return { tpm: configuredTPM, source: 'config' };
+  }
+  const fallbackTPM = Number(modelConfig.fallbackTPM);
+  return {
+    tpm: Number.isFinite(fallbackTPM) && fallbackTPM > 0
+      ? fallbackTPM
+      : getFallbackTPM(runtimeContext.provider, model),
+    source: Number.isFinite(fallbackTPM) && fallbackTPM > 0 ? 'config-fallback' : 'default',
+  };
+}
+
+function resolveExplicitLimitForModel(model) {
+  const envTPM = getEnvironmentTPMOverride();
+  if (envTPM) return { tpm: envTPM, source: 'env' };
+  const configuredTPM = Number(runtimeContext.rateLimits?.models?.[model]?.tpm);
+  if (Number.isFinite(configuredTPM) && configuredTPM > 0) {
+    return { tpm: configuredTPM, source: 'config' };
+  }
+  return null;
 }
 
 /**
@@ -205,6 +212,8 @@ function resolveDefaultLimitForModel(model) {
  */
 export function getCurrentTokenLimit(model) {
   const m = (model || '').trim() || 'unknown';
+  const explicit = resolveExplicitLimitForModel(m);
+  if (explicit) return explicit;
   const live = liveLimits.get(m);
   if (live?.tpm) return live;
 
@@ -225,7 +234,11 @@ export function updateLimitsFromHeaders(model, headers = {}) {
 
   // Normalize header keys to lowercase
   const lower = {};
-  for (const k of Object.keys(headers || {})) lower[k.toLowerCase()] = headers[k];
+  if (typeof headers?.forEach === 'function') {
+    headers.forEach((value, key) => { lower[String(key).toLowerCase()] = value; });
+  } else {
+    for (const k of Object.keys(headers || {})) lower[k.toLowerCase()] = headers[k];
+  }
 
   const tokenCap =
     Number(lower['x-ratelimit-limit-tokens']) ||
@@ -236,10 +249,36 @@ export function updateLimitsFromHeaders(model, headers = {}) {
   if (tokenCap && Number.isFinite(tokenCap) && tokenCap > 0) {
     const cur = getCurrentTokenLimit(model);
     if (cur.tpm !== tokenCap || cur.source !== 'header') {
-      liveLimits.set(model, { tpm: tokenCap, source: 'header' });
+      liveLimits.set(model, {
+        tpm: tokenCap,
+        remainingTokens: numericHeader(lower['x-ratelimit-remaining-tokens']),
+        resetTokens: lower['x-ratelimit-reset-tokens'],
+        rpm: numericHeader(lower['x-ratelimit-limit-requests']),
+        remainingRequests: numericHeader(lower['x-ratelimit-remaining-requests']),
+        resetRequests: lower['x-ratelimit-reset-requests'],
+        source: 'header',
+        observedAt: Date.now(),
+      });
       console.log(`📏 Updated TPM for ${model}: ${tokenCap} (from headers)`);
     }
   }
+}
+
+function numericHeader(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
+export function updateLimitsFromError(model, error = {}) {
+  const headers = error.headers || error.response?.headers || {};
+  updateLimitsFromHeaders(model, headers);
+  const retryAfter = typeof headers?.get === 'function'
+    ? headers.get('retry-after')
+    : headers?.['retry-after'];
+  const message = String(error.message || error.error?.message || '');
+  const retryMatch = message.match(/retry(?: in| after)?\s+([0-9.]+)s/i);
+  const seconds = Number(retryAfter ?? retryMatch?.[1]);
+  return { retryAfterMs: Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : undefined };
 }
 
 /* ---------------- Cooloff / backoff logic ---------------- */
@@ -252,14 +291,18 @@ export function updateLimitsFromHeaders(model, headers = {}) {
  * @param {string} model - model id for TPM lookup
  * @returns {Promise<{shouldBackoff:boolean,totalTokensUsed:number,turnTimestamps:Array}>}
  */
-export const tokenUseCoolOff = async (totalTokensUsed, turnTimestamps, model) => {
+export const tokenUseCoolOff = async (totalTokensUsed, turnTimestamps, model, projectedTokens = 0) => {
   const { tpm } = getCurrentTokenLimit(model);
-  if (totalTokensUsed > tpm) {
-    const msToWait = await getDynamicBackoffMs(turnTimestamps, tpm);
-    console.warn(`⚠️ Token throttle risk (${totalTokensUsed}/${tpm}) → Waiting ${Math.ceil((msToWait || 1000)/1000)}s...`);
+  const margin = Number(runtimeContext.rateLimits?.safetyMargin);
+  const effectiveLimit = tpm * (Number.isFinite(margin) && margin > 0 && margin <= 1 ? margin : 0.9);
+  const projectedTotal = totalTokensUsed + Math.max(0, Number(projectedTokens) || 0);
+  if (projectedTotal > effectiveLimit && turnTimestamps.length) {
+    const msToWait = await getDynamicBackoffMs(turnTimestamps, Math.max(0, effectiveLimit - projectedTokens));
+    console.warn(`⚠️ Token throttle risk (${Math.ceil(projectedTotal)}/${Math.floor(effectiveLimit)}) → Waiting ${Math.ceil((msToWait || 1000)/1000)}s...`);
     await wait(msToWait || 1000);
     console.log('✅ Backoff complete, resuming...');
-    return { shouldBackoff: true, totalTokensUsed: 0, turnTimestamps: [] };
+    const refreshed = pruneOldTokenUsage(turnTimestamps);
+    return { shouldBackoff: true, ...refreshed };
   }
   return { shouldBackoff: false, totalTokensUsed, turnTimestamps };
 };
@@ -298,14 +341,13 @@ export const pruneOldTokenUsage = (turnTimestamps, windowMs = 60000) => {
  */
 const getDynamicBackoffMs = async (turnTimestamps, tokenLimit) => {
   const now = Date.now();
-  let runningTotal = 0;
-
   const sorted = [...turnTimestamps].sort((a, b) => a[0] - b[0]);
+  let remainingTotal = sorted.reduce((sum, [, tokens]) => sum + tokens, 0);
   for (let i = 0; i < sorted.length; i++) {
-    runningTotal += sorted[i][1];
-    if (runningTotal > tokenLimit) {
-      const [timestampOfExcess] = sorted[i];
-      const msUntilSafe = 60000 - (now - timestampOfExcess);
+    remainingTotal -= sorted[i][1];
+    if (remainingTotal <= tokenLimit) {
+      const [timestampToExpire] = sorted[i];
+      const msUntilSafe = 60000 - (now - timestampToExpire);
       return Math.max(msUntilSafe, 1000); // at least 1s
     }
   }
@@ -320,4 +362,6 @@ const getDynamicBackoffMs = async (turnTimestamps, tokenLimit) => {
 export function __resetTokenControlForTests() {
   liveLimits.clear();
   warnedModels.clear();
+  runtimeContext = { provider: undefined, rateLimits: undefined };
+  overrideNoticeShown = false;
 }
