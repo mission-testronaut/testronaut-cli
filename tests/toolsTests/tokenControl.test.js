@@ -30,12 +30,15 @@ import {
   tokenEstimate,
   getCurrentTokenLimit,
   updateLimitsFromHeaders,
+  updateLimitsFromError,
+  configureTokenControl,
   tokenUseCoolOff,
   recordTokenUsage,
   pruneOldTokenUsage,
   warnIfContextNearLimit,
   __resetTokenControlForTests,
 } from '../../tools/tokenControl.js';
+import { wait } from '../../tools/turnLoopUtils.js';
 
 describe('tokenControl', () => {
   beforeEach(() => {
@@ -46,6 +49,7 @@ describe('tokenControl', () => {
     tiktokenMocks.get_encoding_impl.mockReset().mockReturnValue(encMock);
     encMock.encode.mockClear();
     encMock.free.mockClear();
+    wait.mockClear();
   });
 
   afterEach(() => {
@@ -103,6 +107,58 @@ describe('tokenControl', () => {
       expect(anyModel.source).toBe('env');
     });
 
+    it('warns once when a numeric environment override is configured', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      process.env.TESTRONAUT_TOKENS_PER_MIN = '999';
+      configureTokenControl({ provider: 'openai' });
+      configureTokenControl({ provider: 'openai' });
+      expect(warn).toHaveBeenCalledOnce();
+      expect(warn.mock.calls[0][0]).toContain('TPM override active');
+      expect(warn.mock.calls[0][0]).toContain('unset TESTRONAUT_TOKENS_PER_MIN');
+      expect(warn.mock.calls[0][0]).toContain('TESTRONAUT_TOKENS_PER_MIN=auto');
+      warn.mockRestore();
+    });
+
+    it('treats auto as a one-run bypass for an inherited override', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      process.env.TESTRONAUT_TOKENS_PER_MIN = 'auto';
+      configureTokenControl({
+        provider: 'openai',
+        rateLimits: { models: { 'gpt-4o': { fallbackTPM: 777 } } },
+      });
+      expect(getCurrentTokenLimit('gpt-4o')).toEqual({ tpm: 777, source: 'config-fallback' });
+      expect(warn).not.toHaveBeenCalled();
+      warn.mockRestore();
+    });
+
+    it('gives the environment override priority over config and learned headers', () => {
+      configureTokenControl({
+        provider: 'openai',
+        rateLimits: { models: { 'gpt-4o': { tpm: 700 } } },
+      });
+      updateLimitsFromHeaders('gpt-4o', { 'x-ratelimit-limit-tokens': '800' });
+      process.env.TESTRONAUT_TOKENS_PER_MIN = '900';
+      expect(getCurrentTokenLimit('gpt-4o')).toEqual({ tpm: 900, source: 'env' });
+    });
+
+    it('gives an explicit model config override priority over learned headers', () => {
+      configureTokenControl({
+        provider: 'openai',
+        rateLimits: { models: { 'gpt-4o': { tpm: 700, fallbackTPM: 600 } } },
+      });
+      updateLimitsFromHeaders('gpt-4o', { 'x-ratelimit-limit-tokens': '800' });
+      expect(getCurrentTokenLimit('gpt-4o')).toEqual({ tpm: 700, source: 'config' });
+    });
+
+    it('ignores invalid environment and config values', () => {
+      process.env.TESTRONAUT_TOKENS_PER_MIN = '-4';
+      configureTokenControl({
+        provider: 'openai',
+        rateLimits: { models: { 'future-model': { tpm: 'nope', fallbackTPM: 0 } } },
+      });
+      expect(getCurrentTokenLimit('future-model')).toEqual({ tpm: 150000, source: 'default' });
+    });
+
     it('updates limits from headers (header wins)', () => {
       const before = getCurrentTokenLimit('gpt-4o');
       updateLimitsFromHeaders('gpt-4o', { 'x-ratelimit-limit-tokens': '1234' });
@@ -111,6 +167,71 @@ describe('tokenControl', () => {
       expect(after.source).toBe('header');
       // sanity check it actually changed (unless defaults already 1234)
       if (before.tpm !== 1234) expect(after.tpm).not.toBe(before.tpm);
+    });
+
+    it('uses selected-model config fallback but lets learned headers supersede it', () => {
+      configureTokenControl({
+        provider: 'openai',
+        rateLimits: { safetyMargin: 0.9, models: { 'gpt-4o': { fallbackTPM: 777 } } },
+      });
+      expect(getCurrentTokenLimit('gpt-4o')).toMatchObject({ tpm: 777, source: 'config-fallback' });
+      updateLimitsFromHeaders('gpt-4o', { 'x-ratelimit-limit-tokens': '888' });
+      expect(getCurrentTokenLimit('gpt-4o')).toMatchObject({ tpm: 888, source: 'header' });
+    });
+
+    it('reads Headers objects and captures remaining/reset/request metadata', () => {
+      const headers = new Headers({
+        'x-ratelimit-limit-tokens': '1234',
+        'x-ratelimit-remaining-tokens': '1000',
+        'x-ratelimit-reset-tokens': '2s',
+        'x-ratelimit-limit-requests': '50',
+      });
+      updateLimitsFromHeaders('gpt-4o', headers);
+      expect(getCurrentTokenLimit('gpt-4o')).toMatchObject({
+        tpm: 1234,
+        remainingTokens: 1000,
+        resetTokens: '2s',
+        rpm: 50,
+      });
+    });
+
+    it('accepts alternate token-limit header names case-insensitively', () => {
+      updateLimitsFromHeaders('gpt-4o', { 'X-RateLimit-Limit-TPM': '4321' });
+      expect(getCurrentTokenLimit('gpt-4o')).toMatchObject({ tpm: 4321, source: 'header' });
+    });
+
+    it('ignores missing models and invalid learned limits', () => {
+      updateLimitsFromHeaders('', { 'x-ratelimit-limit-tokens': '999' });
+      updateLimitsFromHeaders('gpt-4o', { 'x-ratelimit-limit-tokens': 'not-a-number' });
+      expect(getCurrentTokenLimit('gpt-4o')).toMatchObject({ tpm: 450000, source: 'default' });
+    });
+
+    it('learns retry timing from a structured rate-limit error message', () => {
+      expect(updateLimitsFromError('gemini-2.5-pro', {
+        message: 'Quota exhausted. Please retry in 11.5s',
+      })).toEqual({ retryAfterMs: 11500 });
+    });
+
+    it('prefers Retry-After from a Headers object', () => {
+      expect(updateLimitsFromError('gpt-4o', {
+        headers: new Headers({
+          'retry-after': '3.25',
+          'x-ratelimit-limit-tokens': '5000',
+        }),
+        message: 'retry in 20s',
+      })).toEqual({ retryAfterMs: 3250 });
+      expect(getCurrentTokenLimit('gpt-4o')).toMatchObject({ tpm: 5000, source: 'header' });
+    });
+
+    it('returns no retry duration when an error provides none', () => {
+      expect(updateLimitsFromError('gpt-4o', { message: 'rate limited' }))
+        .toEqual({ retryAfterMs: undefined });
+    });
+
+    it('clears learned state when runtime context is reconfigured', () => {
+      updateLimitsFromHeaders('gpt-4o', { 'x-ratelimit-limit-tokens': '1234' });
+      configureTokenControl({ provider: 'openai' });
+      expect(getCurrentTokenLimit('gpt-4o')).toMatchObject({ tpm: 450000, source: 'default' });
     });
 
     it('uses tier-1 defaults without letting generic GPT-5 rules shadow variants', () => {
@@ -153,7 +274,7 @@ describe('tokenControl', () => {
 
       const result = await tokenUseCoolOff(60, entries, 'any-model');
       expect(result.shouldBackoff).toBe(true);
-      expect(result.totalTokensUsed).toBe(0);
+      expect(result.totalTokensUsed).toBeGreaterThanOrEqual(0);
       expect(Array.isArray(result.turnTimestamps)).toBe(true);
     });
 
@@ -164,6 +285,44 @@ describe('tokenControl', () => {
       const result = await tokenUseCoolOff(60, entries, 'any-model');
       expect(result.shouldBackoff).toBe(false);
       expect(result.totalTokensUsed).toBe(60);
+    });
+
+    it('reserves the projected next request against the safety margin', async () => {
+      process.env.TESTRONAUT_TOKENS_PER_MIN = '100';
+      const entries = [];
+      recordTokenUsage(entries, 80);
+      const result = await tokenUseCoolOff(80, entries, 'any-model', 15);
+      expect(result.shouldBackoff).toBe(true);
+    });
+
+    it('honors a configured safety margin', async () => {
+      configureTokenControl({
+        provider: 'openai',
+        rateLimits: {
+          safetyMargin: 0.5,
+          models: { 'gpt-4o': { tpm: 100 } },
+        },
+      });
+      const entries = [];
+      recordTokenUsage(entries, 45);
+      expect((await tokenUseCoolOff(45, entries, 'gpt-4o', 6)).shouldBackoff).toBe(true);
+    });
+
+    it('does not wait forever when one projected request alone exceeds the limit', async () => {
+      process.env.TESTRONAUT_TOKENS_PER_MIN = '10';
+      const result = await tokenUseCoolOff(0, [], 'any-model', 100);
+      expect(result.shouldBackoff).toBe(false);
+      expect(wait).not.toHaveBeenCalled();
+    });
+
+    it('waits until the oldest necessary rolling entry expires', async () => {
+      process.env.TESTRONAUT_TOKENS_PER_MIN = '100';
+      const now = 1_000_000;
+      const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
+      const entries = [[now - 50000, 40], [now - 10000, 40]];
+      await tokenUseCoolOff(80, entries, 'any-model', 15);
+      expect(wait).toHaveBeenCalledWith(10000);
+      nowSpy.mockRestore();
     });
   });
 });

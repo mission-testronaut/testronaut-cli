@@ -18,7 +18,7 @@ const { shared } = vi.hoisted(() => ({
 // Mock the OpenAI SDK surface we use
 vi.mock('openai', () => {
   class FakeChatCompletions {
-    async create(args) {
+    create(args) {
       shared.lastCreateArgs = args;
       return shared.responseFactory();
     }
@@ -119,6 +119,25 @@ describe('OpenAIProvider', () => {
     const prov = new OpenAIProvider({ apiKey: 'sk-abc' });
     const { headers } = await prov.chat({ model: 'gpt-4o', messages: [] });
     expect(headers).toEqual({ 'x-ratelimit-limit-tokens': '12345' });
+  });
+
+  it('uses the SDK raw response wrapper when withResponse is available', async () => {
+    const rawHeaders = new Headers({ 'x-ratelimit-limit-tokens': '54321' });
+    shared.responseFactory = () => ({
+      withResponse: async () => ({
+        data: {
+          choices: [{ message: { role: 'assistant', content: 'wrapped' } }],
+          usage: { total_tokens: 12 },
+        },
+        response: { headers: rawHeaders },
+      }),
+    });
+
+    const prov = new OpenAIProvider({ apiKey: 'sk-abc' });
+    const result = await prov.chat({ model: 'gpt-4o', messages: [] });
+    expect(result.message.content).toBe('wrapped');
+    expect(result.usage.total_tokens).toBe(12);
+    expect(result.headers).toBe(rawHeaders);
   });
 
   it('provides a default assistant message when choices are empty', async () => {

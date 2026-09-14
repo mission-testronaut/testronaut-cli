@@ -48,7 +48,16 @@ export class OpenAIProvider {
       request.reasoning_effort = chatToolReasoningEffort;
     }
 
-    const res = await this.client.chat.completions.create(request);
+    const pending = this.client.chat.completions.create(request);
+    let res;
+    let headers;
+    if (typeof pending?.withResponse === 'function') {
+      const wrapped = await pending.withResponse();
+      res = wrapped.data;
+      headers = wrapped.response?.headers;
+    } else {
+      res = await pending;
+    }
 
     // OpenAI already returns an OpenAI-like message and usage structure.
     const message = res.choices?.[0]?.message ?? { role: 'assistant', content: '' };
@@ -58,7 +67,7 @@ export class OpenAIProvider {
     };
 
     // Some SDK versions surface headers on `res.headers`, others on `res.response.headers`.
-    const headers = res.headers || res.response?.headers;
+    headers = headers || res.headers || res.response?.headers;
 
     return { message, usage, headers };
   }

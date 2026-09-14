@@ -42,6 +42,8 @@ import {
   recordTokenUsage, 
   pruneOldTokenUsage,
   updateLimitsFromHeaders,
+  updateLimitsFromError,
+  configureTokenControl,
   warnIfContextNearLimit
 } from '../tools/tokenControl.js';
 import { resolveProviderModel } from '../llm/modelResolver.js';
@@ -61,6 +63,13 @@ import {
 // ─────────────────────────────────────────────
 const { provider: PROVIDER_ID, model: MODEL_ID } = resolveProviderModel();
 console.log(`🧠 Using LLM → provider: ${PROVIDER_ID}, model: ${MODEL_ID}`);
+
+let rateLimitConfig;
+try {
+  const config = JSON.parse(fs.readFileSync('testronaut-config.json', 'utf8'));
+  rateLimitConfig = config.rateLimits;
+} catch { /* startup fallbacks remain active when config is absent or invalid */ }
+configureTokenControl({ provider: PROVIDER_ID, rateLimits: rateLimitConfig });
 
 const llm = getLLM(PROVIDER_ID);
 
@@ -353,21 +362,36 @@ export const turnLoop = async (
       // ─────────────────────────────────────────────
       // STEP 2: Request next reasoning turn from model
       // ─────────────────────────────────────────────
-      await warnIfContextNearLimit(MODEL_ID, { messages, tools: activeToolsSchema });
+      const contextCheck = await warnIfContextNearLimit(MODEL_ID, { messages, tools: activeToolsSchema });
+      const projectedTokens = contextCheck.estimatedTokens
+        ?? await tokenEstimate(MODEL_ID, { messages, tools: activeToolsSchema });
+      ({ totalTokensUsed, turnTimestamps, shouldBackoff } = await tokenUseCoolOff(
+        totalTokensUsed,
+        turnTimestamps,
+        MODEL_ID,
+        projectedTokens
+      ));
+      if (shouldBackoff) {
+        recordStep(step);
+        turn -= 1;
+        continue;
+      }
       const { message, usage, headers } = await llm.chat({
         model: MODEL_ID,
         messages,
         tools: activeToolsSchema,
       });
       response = { message, usage, headers };
+      updateLimitsFromHeaders(MODEL_ID, headers);
 
     } catch (err) {
       // ─────────────────────────────────────────────
       // STEP 3: Error and rate-limit handling
       // ─────────────────────────────────────────────
       if (err.status === 429) {
-        try { updateLimitsFromHeaders(MODEL_ID, err.headers || err.response?.headers || {}); } catch {}
-        const delay = Math.min(60000, 2 ** retryCount * 2000);
+        let learned = {};
+        try { learned = updateLimitsFromError(MODEL_ID, err); } catch {}
+        const delay = Math.min(60000, learned.retryAfterMs ?? 2 ** retryCount * 2000);
         console.warn(`⚠️ Rate limited. Retrying in ${delay / 1000}s... (retry ${retryCount + 1})`);
         step.events.push(`⏳ Rate limit: waiting ${Math.round(delay/1000)}s (retry ${retryCount + 1})`);
         recordStep(step);         // ✅ persist this step before sleeping

@@ -38,6 +38,7 @@ import {
 } from './initHelpers.js';
 import { DEFAULT_OPENAI_MODEL, OPENAI_MODELS } from '../llm/openAI/models.js';
 import { ANTHROPIC_MODELS, DEFAULT_ANTHROPIC_MODEL } from '../llm/anthropic/models.js';
+import { defaultRateLimitConfig } from '../tools/rateLimitDefaults.js';
 
 export async function initializeTestronautProject() {
   // ─────────────────────────────────────────────
@@ -159,6 +160,7 @@ export async function initializeTestronautProject() {
     config.dom = { ...defaults.dom, ...(config.dom || {}) };
     config.resourceGuard = { ...defaults.resourceGuard, ...(config.resourceGuard || {}) };
     config.humanInput = { ...defaults.humanInput, ...(config.humanInput || {}) };
+    config.rateLimits = config.rateLimits || defaultRateLimitConfig(config.provider, config.model);
 
     // ─────────────────────────────────────────────
     // STEP 4: Persist config and scaffold .env (first run only)
