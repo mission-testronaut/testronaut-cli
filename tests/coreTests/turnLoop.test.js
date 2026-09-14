@@ -67,6 +67,8 @@ vi.mock('../../tools/tokenControl.js', () => ({
     totalTokensUsed: turnTimestamps.reduce((a, [, t]) => a + t, 0),
   })),
   updateLimitsFromHeaders: vi.fn(() => {}),
+  updateLimitsFromError: vi.fn(() => ({})),
+  configureTokenControl: vi.fn(() => {}),
   warnIfContextNearLimit: vi.fn(async () => ({ warned: false })),
 }));
 

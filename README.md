@@ -143,6 +143,25 @@ testronaut --init
 TESTRONAUT_PROVIDER=gemini TESTRONAUT_MODEL=gemini-2.5-pro testronaut
 ```
 
+### Token-rate override
+
+`TESTRONAUT_TOKENS_PER_MIN` is an emergency/manual hard override. A positive
+numeric value takes priority over configured fallbacks and limits learned from
+provider response headers. Testronaut prints a warning whenever it is active.
+
+Clear it permanently from the current shell and remove the corresponding line
+from `.env` or your shell profile:
+
+```bash
+unset TESTRONAUT_TOKENS_PER_MIN
+```
+
+To bypass a numeric value inherited from `.env` for one run:
+
+```bash
+TESTRONAUT_TOKENS_PER_MIN=auto testronaut login.mission.js
+```
+
 Current supported providers:
 
 | Provider | Example Models |
