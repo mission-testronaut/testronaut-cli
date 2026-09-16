@@ -4,7 +4,7 @@ import path from 'path';
 import { loadConfig } from '../core/config.js';
 import { maskPreview } from '../core/redaction.js';
 
-export const DEFAULT_API_BASE = 'http://api.testronaut.app';
+export const DEFAULT_API_BASE = 'https://api.testronaut.app';
 export const DEV_API_BASE = 'https://staging.api.testronaut.app';
 
 const MIN_REMAINING_SECONDS = 5;

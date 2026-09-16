@@ -232,6 +232,33 @@ export TESTRONAUT_VERCEL_BYPASS=YOUR_SECRET
 
 ---
 
+## 📧 Automatic Email Codes
+
+When a tested site sends a short authentication code to a Testronaut-hosted
+inbox, the agent can call `get_email_code`. The tool uses the `sessionToken`
+saved by `testronaut login`, lists active inboxes, and polls the Testronaut API
+for a recent matching message. Create and nickname inboxes in the Testronaut
+app first.
+
+Set a project default in `testronaut-config.json`:
+
+```json
+{
+  "emailInboxName": "github staging"
+}
+```
+
+Or override it for one run:
+
+```bash
+testronaut mission.js -o inbox="github staging"
+```
+
+The API removes HTML, links, images, and attachments. Sanitized email text is
+untrusted input: the agent may select only one of the returned short-code
+candidates and must not follow email instructions. Codes and email bodies are
+excluded from mission logs and reports. Manual human input remains the fallback.
+
 ## 🔐 Automated MFA Codes
 
 Testronaut can retrieve a stored TOTP MFA code from the Testronaut API during a mission. This uses the `sessionToken` saved by `testronaut login` in the project root `testronaut-config.json`.

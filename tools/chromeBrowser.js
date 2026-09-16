@@ -24,6 +24,7 @@ import path from 'path';
 import { ensureBrowsers } from '../tools/playwrightSetup.js';
 import { requestHumanInput } from './humanInput.js';
 import { getMfaCode } from './mfaCode.js';
+import { getEmailCode } from './emailCode.js';
 
 const FILES_DIR = path.join('missions', 'files');
 const REPORTS_DIR = process.env.TESTRONAUT_OUTPUT_DIR || path.join('missions', 'mission_reports');
@@ -1374,6 +1375,7 @@ export const CHROME_TOOL_MAP = {
   download_file: (b, args) => b.download_file(args),
   list_local_files: (b, args) => b.list_local_files(args),
   get_mfa_code: (b, args) => getMfaCode(args),
+  get_email_code: (b, args) => getEmailCode(args),
   request_human_input: (b, args, agentMemory) => requestHumanInput(args, agentMemory?.humanInput),
   resource_progress: (b, args, agentMemory) => {
     const prog = agentMemory?.docProgress;
