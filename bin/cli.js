@@ -67,7 +67,7 @@ const CLI_VERSION = JSON.parse(
   fs.readFileSync(path.resolve(__dirname, '../package.json'), 'utf8')
 ).version;
 
-const DEFAULT_API_BASE = 'http://api.testronaut.app';
+const DEFAULT_API_BASE = 'https://api.testronaut.app';
 const DEV_API_BASE = 'https://staging.api.testronaut.app';
 
 let args = process.argv.slice(2);
@@ -324,6 +324,7 @@ function mergeDuplicateTurns(steps) {
 
 // Expose a small bundle for unit tests (helper-only; not the CLI flow)
 export const __test__ = {
+  DEFAULT_API_BASE,
   guessMimeType,
   safeJoin,
   findLatestReportPair,
