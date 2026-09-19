@@ -25,6 +25,7 @@ import { ensureBrowsers } from '../tools/playwrightSetup.js';
 import { requestHumanInput } from './humanInput.js';
 import { getMfaCode } from './mfaCode.js';
 import { getEmailCode } from './emailCode.js';
+import { getEmailLink, openEmailLink } from './emailLink.js';
 
 const FILES_DIR = path.join('missions', 'files');
 const REPORTS_DIR = process.env.TESTRONAUT_OUTPUT_DIR || path.join('missions', 'mission_reports');
@@ -633,6 +634,43 @@ export class ChromeBrowser {
       try { await this._waitLoaderGone({ selectors: loaderSelectors }); } catch {}
     }
     return `navigated to ${this.page.url()}`;
+  }
+
+  async navigateEmailLink({ url, allowedHosts = [] }) {
+    const destination = new URL(url);
+    if (destination.protocol !== 'https:' || destination.username || destination.password) {
+      throw new Error('Email link is not a safe HTTPS destination.');
+    }
+    const normalizedHosts = allowedHosts.map(value => String(value).trim().toLowerCase());
+    const isAllowed = host => normalizedHosts.some(allowed => host === allowed || host.endsWith(`.${allowed}`));
+    if (!isAllowed(destination.hostname.toLowerCase())) throw new Error('Email link host is not allowed.');
+
+    let blockedHost = '';
+    const routeHandler = async route => {
+      const request = route.request();
+      if (request.isNavigationRequest() && request.frame() === this.page.mainFrame()) {
+        const host = new URL(request.url()).hostname.toLowerCase();
+        if (!isAllowed(host)) {
+          blockedHost = host;
+          await route.abort('blockedbyclient');
+          return;
+        }
+      }
+      await route.continue();
+    };
+    await this.page.route('**/*', routeHandler);
+    try {
+      await this.page.goto(destination.href, { timeout: 30_000, waitUntil: 'domcontentloaded' });
+      await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+    } catch (error) {
+      if (blockedHost) throw new Error(`Email link redirect blocked: ${blockedHost} is not allowed.`);
+      throw new Error('Email link navigation failed.');
+    } finally {
+      await this.page.unroute('**/*', routeHandler).catch(() => {});
+    }
+    const finalHost = new URL(this.page.url()).hostname.toLowerCase();
+    if (!isAllowed(finalHost)) throw new Error(`Email link navigation ended on disallowed host ${finalHost}.`);
+    return { host: finalHost };
   }
 
 
@@ -1376,6 +1414,8 @@ export const CHROME_TOOL_MAP = {
   list_local_files: (b, args) => b.list_local_files(args),
   get_mfa_code: (b, args) => getMfaCode(args),
   get_email_code: (b, args) => getEmailCode(args),
+  get_email_link: (b, args) => getEmailLink(args),
+  open_email_link: (b, args) => openEmailLink(args, { browser: b }),
   request_human_input: (b, args, agentMemory) => requestHumanInput(args, agentMemory?.humanInput),
   resource_progress: (b, args, agentMemory) => {
     const prog = agentMemory?.docProgress;

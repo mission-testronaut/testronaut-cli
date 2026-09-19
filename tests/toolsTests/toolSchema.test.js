@@ -37,6 +37,14 @@ describe('tools/toolSchema', () => {
     expect(entry.function.description).toMatch(/email authentication code/i);
   });
 
+  it('includes opaque lookup and constrained open tools for email links', () => {
+    const lookup = toolsSchema.find(t => t.function?.name === 'get_email_link');
+    const open = toolsSchema.find(t => t.function?.name === 'open_email_link');
+    expect(lookup?.function?.description).toMatch(/opaque link IDs/i);
+    expect(open?.function?.parameters?.required).toContain('linkId');
+    expect(open?.function?.parameters?.properties).not.toHaveProperty('url');
+  });
+
   it('defines navigate and download_file with required fields', () => {
     const nav = toolsSchema.find(t => t.function?.name === 'navigate');
     const download = toolsSchema.find(t => t.function?.name === 'download_file');
