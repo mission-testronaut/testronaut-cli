@@ -22,3 +22,9 @@
 - [ ] Decide whether `-o/--options` should support more structured formats once more run options exist.
 - [ ] Revisit whether `request_human_input` should return the code to the model or fill fields through a dedicated browser action.
 - [ ] Document a troubleshooting matrix for MFA failures: premium required, feature disabled, invalid session, missing nickname, non-JSON/app-shell response, not found, rate limited, and network error.
+
+## Automatic Email Code Follow-Ups
+
+- [ ] Add per-run message leasing or recipient aliases to prevent concurrent missions sharing one inbox from selecting each other's codes.
+- [ ] Add a provider-independent inbound email adapter if a second provider is introduced.
+- [ ] Consider opaque secret handles so email codes do not need to enter model context.

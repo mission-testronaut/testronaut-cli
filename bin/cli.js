@@ -67,7 +67,7 @@ const CLI_VERSION = JSON.parse(
   fs.readFileSync(path.resolve(__dirname, '../package.json'), 'utf8')
 ).version;
 
-const DEFAULT_API_BASE = 'http://api.testronaut.app';
+const DEFAULT_API_BASE = 'https://api.testronaut.app';
 const DEV_API_BASE = 'https://staging.api.testronaut.app';
 
 let args = process.argv.slice(2);
@@ -324,6 +324,7 @@ function mergeDuplicateTurns(steps) {
 
 // Expose a small bundle for unit tests (helper-only; not the CLI flow)
 export const __test__ = {
+  DEFAULT_API_BASE,
   guessMimeType,
   safeJoin,
   findLatestReportPair,
@@ -524,6 +525,14 @@ const cliMfaName =
 if (cliMfaName) {
   process.env.TESTRONAUT_MFA_NAME = String(cliMfaName).trim();
   console.log(`🔐 MFA nickname override: ${process.env.TESTRONAUT_MFA_NAME}`);
+}
+const cliEmailInbox =
+  runOptionsResult.options.emailInbox ||
+  runOptionsResult.options.inbox ||
+  runOptionsResult.options['email-inbox'];
+if (cliEmailInbox) {
+  process.env.TESTRONAUT_EMAIL_INBOX = String(cliEmailInbox).trim();
+  console.log(`📧 Email inbox nickname override: ${process.env.TESTRONAUT_EMAIL_INBOX}`);
 }
 
 const tagArgs = parseTagArgs(args);
@@ -729,7 +738,7 @@ Options:
   --turns=<n>               Override max turns for this run (e.g., --turns=30)
   --debug[=<bool>]          Enable verbose debug logs (or set TESTRONAUT_DEBUG=1)
   --provider=<id>           Override LLM provider (openai, gemini, or anthropic)
-  -o, --options key=value   Set run options, such as mfa=github-test-mfa
+  -o, --options key=value   Set run options, such as mfa=github-test-mfa or inbox=github-staging
   --dev                     Use the staging API base URL
   --vercel-bypass=<secret>  Send Vercel protection bypass header for protected deployments
   --human-input[=<bool>]    Allow the agent to pause for short verification codes (default: true)

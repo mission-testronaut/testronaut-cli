@@ -582,6 +582,38 @@ export const turnLoop = async (
           }
         }
 
+        if (fnName === 'get_email_code') {
+          step.emailCode = step.emailCode || {};
+          step.emailCode.requested = true;
+          try {
+            const parsed = JSON.parse(result);
+            step.emailCode.nickname = parsed.nickname || args.nickname || null;
+            step.emailCode.status = parsed.ok ? 'provided' : parsed.code || 'unavailable';
+            step.emailCode.senderDomain = parsed.senderDomain || null;
+            step.emailCode.candidateCount = Array.isArray(parsed.codeCandidates) ? parsed.codeCandidates.length : 0;
+            step.emailCode.match = parsed.match || null;
+            agentMemory.lastEmailCodeLookup = parsed.ok
+              ? {
+                  ok: true,
+                  nickname: parsed.nickname || args.nickname || null,
+                  codeCandidates: parsed.codeCandidates || [],
+                  senderDomain: parsed.senderDomain || null,
+                }
+              : {
+                  ok: false,
+                  nickname: parsed.nickname || args.nickname || null,
+                  code: parsed.code,
+                  error: parsed.error,
+                  availableNicknames: parsed.availableNicknames || [],
+                };
+            step.events.push(parsed.ok
+              ? `📧 Email code candidates retrieved for "${step.emailCode.nickname || 'configured inbox'}" (${step.emailCode.candidateCount} candidate${step.emailCode.candidateCount === 1 ? '' : 's'}).`
+              : `📧 Email code unavailable: ${parsed.error || parsed.code || 'unknown error'}`);
+          } catch {
+            step.emailCode.status = errorMessage ? 'error' : 'unknown';
+          }
+        }
+
         // Capture and log any file upload/download events (for reports)
         try {
           const maybeJson = JSON.parse(result);
@@ -623,6 +655,16 @@ export const turnLoop = async (
             toolStatusLabel = '⚠️ Unavailable';
           }
         }
+        if (fnName === 'get_email_code' && !errorMessage) {
+          try {
+            const parsed = JSON.parse(result);
+            toolStatusLabel = parsed.ok
+              ? `✅ ${Array.isArray(parsed.codeCandidates) ? parsed.codeCandidates.length : 0} candidate(s) retrieved`
+              : `⚠️ Unavailable${parsed.code ? ` (${parsed.code})` : ''}`;
+          } catch {
+            toolStatusLabel = '⚠️ Unavailable';
+          }
+        }
 
         console.log(`[tool ] ← ${fnName} result:`, toolStatusLabel);
 
@@ -631,6 +673,8 @@ export const turnLoop = async (
           let sourceLine;
           if (agentMemory.lastMfaLookup?.ok && fillText === agentMemory.lastMfaLookup.value) {
             sourceLine = `🔐 MFA fill source: get_mfa_code nickname="${agentMemory.lastMfaLookup.nickname || 'configured MFA'}"`;
+          } else if (agentMemory.lastEmailCodeLookup?.ok && agentMemory.lastEmailCodeLookup.codeCandidates?.includes(fillText)) {
+            sourceLine = `📧 Verification fill source: get_email_code nickname="${agentMemory.lastEmailCodeLookup.nickname || 'configured inbox'}"`;
           } else if (agentMemory.lastVerificationInput?.value && fillText === agentMemory.lastVerificationInput.value) {
             sourceLine = `🔐 MFA fill source: request_human_input codeType="${agentMemory.lastVerificationInput.codeType}"`;
           } else if (agentMemory.lastMfaLookup && !agentMemory.lastMfaLookup.ok) {
@@ -671,6 +715,24 @@ export const turnLoop = async (
             });
           } catch {
             resultForLog = errorMessage || 'MFA code lookup completed.';
+          }
+        }
+        if (fnName === 'get_email_code') {
+          try {
+            const parsed = JSON.parse(result);
+            resultForLog = JSON.stringify({
+              ok: parsed.ok,
+              code: parsed.code,
+              error: parsed.error,
+              nickname: parsed.nickname,
+              senderDomain: parsed.senderDomain,
+              receivedAt: parsed.receivedAt,
+              candidateCount: Array.isArray(parsed.codeCandidates) ? parsed.codeCandidates.length : 0,
+              match: parsed.match,
+              availableNicknames: parsed.availableNicknames,
+            });
+          } catch {
+            resultForLog = errorMessage || 'Email code lookup completed.';
           }
         }
         const truncated = resultForLog.length > 1000 ? resultForLog.slice(0, 1000) + '…' : resultForLog;

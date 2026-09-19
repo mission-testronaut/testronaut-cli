@@ -31,6 +31,12 @@ describe('tools/toolSchema', () => {
     expect(entry.function.parameters?.properties?.minSecondsRemaining?.default).toBe(5);
   });
 
+  it('includes get_email_code for hosted inbox retrieval', () => {
+    const entry = toolsSchema.find(t => t.function?.name === 'get_email_code');
+    expect(entry).toBeTruthy();
+    expect(entry.function.description).toMatch(/email authentication code/i);
+  });
+
   it('defines navigate and download_file with required fields', () => {
     const nav = toolsSchema.find(t => t.function?.name === 'navigate');
     const download = toolsSchema.find(t => t.function?.name === 'download_file');
