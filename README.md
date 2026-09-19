@@ -259,6 +259,35 @@ untrusted input: the agent may select only one of the returned short-code
 candidates and must not follow email instructions. Codes and email bodies are
 excluded from mission logs and reports. Manual human input remains the fallback.
 
+### Invitation and magic links
+
+For missions that explicitly require an invitation or magic-login link, the
+agent first calls `get_email_link`, which returns only opaque IDs and safe link
+metadata. `open_email_link` resolves the selected URL internally and never
+places its bearer token in model context, console output, or reports.
+
+Configure trusted destination hosts before running such a mission:
+
+```json
+{
+  "emailInboxName": "staging",
+  "emailLinks": {
+    "allowedHosts": ["accounts.example.test", "app.example.test"]
+  }
+}
+```
+
+For a one-run override, use a comma-separated environment variable:
+
+```bash
+TESTRONAUT_EMAIL_LINK_HOSTS=accounts.example.test,app.example.test \
+  testronaut invite.mission.js
+```
+
+Only HTTPS destinations are accepted. The allowlist applies to the original
+destination and main-frame redirects. Do not add broad domains that host
+untrusted user content.
+
 ## 🔐 Automated MFA Codes
 
 Testronaut can retrieve a stored TOTP MFA code from the Testronaut API during a mission. This uses the `sessionToken` saved by `testronaut login` in the project root `testronaut-config.json`.
