@@ -30,7 +30,7 @@
     "cheerio": "^1.1.0",
     "dotenv": "^17.2.0",
     "fast-glob": "^3.3.3",
-    "inquirer": "^12.9.1",
+    "inquirer": "^14.2.2",
     "jiti": "^2.7.0",
     "node-fetch": "^3.3.2",
     "openai": "^6.39.0",
