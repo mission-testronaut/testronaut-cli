@@ -1,6 +1,6 @@
-# 🧑‍🚀 Testronaut — Agentic End-to-End Testing
+# 🧑‍🚀 Testronaut™ — Agentic End-to-End Testing
 
-**Testronaut** is an open-source **agentic end-to-end testing** framework powered by AI agents and **Playwright**.
+**Testronaut™** is an open-source **agentic end-to-end testing** framework powered by AI agents and **Playwright**.
 
 Define complete user journeys as plain-English *missions*. Testronaut reasons about the interface, chooses browser actions, adapts as the journey unfolds, and produces inspectable reports from real browser sessions.
 
