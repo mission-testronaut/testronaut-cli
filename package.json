@@ -16,9 +16,9 @@
     "test:watch": "vitest",
     "start": "node ./bin/cli.js"
   },
-  "author": "",
+  "author": "Shane Fast",
   "license": "MIT",
-  "description": "",
+  "description": "Agentic end-to-end testing with AI agents and Playwright. Define user journeys in plain English and run them in real browsers.",
   "repository": {
     "type": "git",
     "url": "https://github.com/mission-testronaut/testronaut-cli"
@@ -38,15 +38,22 @@
     "prompts": "^2.4.2"
   },
   "keywords": [
-    "cli",
-    "testing",
-    "automation",
-    "node",
-    "qa"
+    "agentic-testing",
+    "agentic-e2e",
+    "end-to-end-testing",
+    "e2e-testing",
+    "ai-testing",
+    "ai-agents",
+    "playwright",
+    "browser-automation",
+    "test-automation",
+    "qa",
+    "cli"
   ],
   "devDependencies": {
     "@types/node": "^25.9.3",
     "periapsis": "^2.0.1",
     "vitest": "^4.1.11"
-  }
+  },
+  "homepage": "https://testronaut.app"
 }
