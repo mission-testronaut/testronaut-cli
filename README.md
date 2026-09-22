@@ -1,7 +1,12 @@
-# 🧑‍🚀 Testronaut
+# 🧑‍🚀 Testronaut — Agentic End-to-End Testing
 
-**Testronaut** is an autonomous testing framework powered by **LLMs and Playwright**.  
-It lets you define *mission-based tests* in plain English, then runs them through a real browser to validate UI workflows — all while generating human-readable reports.
+**Testronaut** is an open-source **agentic end-to-end testing** framework powered by AI agents and **Playwright**.
+
+Define complete user journeys as plain-English *missions*. Testronaut reasons about the interface, chooses browser actions, adapts as the journey unfolds, and produces inspectable reports from real browser sessions.
+
+**Official Testronaut ecosystem:** [testronaut.app](https://testronaut.app) · [Documentation](https://docs.testronaut.app) · [Mission Control](https://mission.testronaut.app) · [npm](https://www.npmjs.com/package/testronaut)
+
+> This repository contains the official Testronaut CLI maintained as part of the Testronaut project.
 
 ---
 
@@ -14,9 +19,9 @@ Join the Discord to connect with other Testronauts, get support, and help shape 
 
 ---
 
-## 🚀 Features
+## 🚀 Agentic E2E Testing Features
 
-- Write tests in plain English — no brittle selectors  
+- Define end-to-end user journeys in plain English — no brittle selector scripts  
 - Runs real browser sessions via **Playwright**  
 - Works with **multiple LLM providers** (OpenAI, Google Gemini, and Anthropic Claude)
 - Modular tool and DOM-reasoning system  
