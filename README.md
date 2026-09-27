@@ -145,7 +145,7 @@ Choose your preferred LLM at init or via environment variables.
 testronaut --init
 
 # Or override anytime
-TESTRONAUT_PROVIDER=gemini TESTRONAUT_MODEL=gemini-2.5-pro testronaut
+TESTRONAUT_PROVIDER=gemini TESTRONAUT_MODEL=gemini-3.8-flash testronaut
 ```
 
 ### Token-rate override
@@ -172,7 +172,7 @@ Current supported providers:
 | Provider | Example Models |
 |-----------|----------------|
 | **OpenAI** | gpt-5.6, gpt-5.6-terra, gpt-5.6-luna, gpt-5.5, and legacy GPT/o-series models |
-| **Google Gemini** | gemini-2.5-pro, gemini-2.5-flash, gemini-2.5-flash-8b |
+| **Google Gemini** | gemini-3.8-flash, gemini-3.7-flash, gemini-3.6-flash, gemini-3.5-flash-lite, gemini-3.1-pro-preview, Gemini 2.5 legacy models |
 | **Anthropic Claude** | claude-sonnet-5, claude-opus-5, claude-haiku-4-5 |
 
 The canonical Claude provider ID is `anthropic`; `claude` is also accepted as a CLI alias.

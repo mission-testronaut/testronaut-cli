@@ -157,21 +157,6 @@ const toolsSchema = [
   {
     type: 'function',
     function: {
-      name: 'get_dom_chunk',
-      description: 'Return a specific chunk of the DOM by index',
-      parameters: {
-        type: 'object',
-        properties: {
-          chunkIndex: { type: 'number' },
-          totalChunks: { type: 'number' }
-        },
-        required: ['chunkIndex', 'totalChunks']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
       name: 'screenshot',
       description: 'Takes a screenshot of the current page',
       parameters: {

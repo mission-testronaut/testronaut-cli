@@ -15,13 +15,19 @@ describe('model helpers', () => {
       'gpt-5.6-luna',
     ]));
     expect(openAIModels()).not.toContain('gpt-5.3');
-    expect(geminiModels()).toContain('gemini-2.5-flash');
+    expect(geminiModels()).toEqual(expect.arrayContaining([
+      'gemini-3.8-flash',
+      'gemini-3.5-flash-lite',
+      'gemini-3.1-pro-preview',
+      'gemini-2.5-flash',
+    ]));
     expect(anthropicModels()).toContain('claude-sonnet-5');
   });
 
   it('recognizes known models by provider', () => {
     expect(isKnownModel('openai', 'gpt-4.1-mini')).toBe(true);
     expect(isKnownModel('gemini', 'gpt-4.1-mini')).toBe(false);
+    expect(isKnownModel('gemini', 'gemini-3.8-flash')).toBe(true);
     expect(isKnownModel('anthropic', 'claude-sonnet-5')).toBe(true);
   });
 
