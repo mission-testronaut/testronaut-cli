@@ -191,6 +191,31 @@ Run a specific mission:
 testronaut login.mission.js
 ```
 
+Reuse cookies, local storage, and IndexedDB authentication state across an ordered set of mission files:
+
+```bash
+testronaut --session=shared-auth checkout.mission.js account.mission.js
+```
+
+Each mission still receives a fresh browser context. The default
+`--session=isolated` mode does not carry authentication forward. Shared-auth
+suites can wrap a reusable login prerequisite in `launchProtocol()` so later
+mission files probe the restored authenticated page without an LLM call:
+
+```js
+import { launchProtocol, runMissions } from 'testronaut';
+
+const login = launchProtocol('Visit the app and log in.', {
+  id: 'authenticated:test-user',
+  probe: { url: process.env.URL, selector: '#dashboard' },
+});
+
+await runMissions({ preMission: login, mission: 'Test the dashboard.' }, 'dashboard');
+```
+
+Unwrapped `preMission` values remain fully compatible and always run normally.
+Place logout last in a shared-auth suite.
+
 Preview or inspect without launching a browser:
 ```bash
 testronaut list
@@ -371,7 +396,7 @@ Each includes:
 - **LLMs** for reasoning, DOM parsing, and tool use  
 - **Token throttling** + adaptive cooldowns  
 - **Extensible architecture** for custom tools and workflows  
-- **DOM trimming controls** to cap list sizes (env `TESTRONAUT_DOM_LIST_LIMIT` or config `dom.listItemLimit`; use `all` cautiously—it can spike token use)
+- **DOM trimming controls** to cap list/table sizes (`TESTRONAUT_DOM_LIST_LIMIT`) and automatic post-action snapshots (`TESTRONAUT_AUTO_DOM_LIMIT` or `dom.automaticLimit`)
 - **Resource guard** to ensure full list/table downloads (config `resourceGuard` or env `TESTRONAUT_RESOURCE_*`)
 
 ---

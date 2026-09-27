@@ -123,7 +123,7 @@ export const chunkBySection = async ($, focus) => {
     footer: $('footer').html() || '',
     aside: $('aside').html() || '',
     body: $('body').html() || ''
-  };
+};
 
   if (Array.isArray(focus) && focus.length > 0) {
     return Object.fromEntries(
@@ -142,6 +142,25 @@ export const chunkBySection = async ($, focus) => {
 
   // return focusedChunks;
 
+}
+
+/** Keep table headers and only the first N body rows in each table. */
+export function reduceTableRows($, maxAllowed = 3) {
+  let limit = maxAllowed === Infinity ? Infinity : Number(maxAllowed);
+  if (limit === Infinity) return;
+  limit = Number.isFinite(limit) ? Math.max(0, limit) : 3;
+
+  $('table').each((_, table) => {
+    const $table = $(table);
+    const rows = $table.find('tbody > tr');
+    const candidates = rows.length ? rows : $table.children('tr');
+    if (candidates.length <= limit) return;
+    candidates.slice(limit).remove();
+    const colspan = Math.max(1, $table.find('tr').first().children('th, td').length);
+    const marker = `<tr data-collapsed="true"><td colspan="${colspan}">[...truncated]</td></tr>`;
+    if (rows.length) $table.children('tbody').first().append(marker);
+    else $table.append(marker);
+  });
 }
 
 /**

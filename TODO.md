@@ -9,6 +9,17 @@
 - [ ] Treat `--json` output as a stable automation contract with documented schemas and tests for every supported command.
 - [ ] If authentication ever moves outside project config, continue reading existing `sessionToken` values and provide an opt-in migration path before deprecating legacy storage.
 
+## Session and Reporting Follow-Ups
+
+- [ ] Evaluate a true shared browser-context mode for suites that require session storage or in-memory application state; define page reset, crash recovery, and concurrency behavior first.
+- [ ] Add optional shared-auth checkpoints/reset controls for suites that intentionally change users or tenants.
+- [ ] Refresh short-lived Testronaut API session tokens during long runs once the API and credential-storage contract is defined.
+- [ ] Store new CLI authentication outside project config, prefer environment credentials in CI, and migrate legacy project `sessionToken` values without breaking existing projects.
+- [ ] Add structured post-run self-critique fields after the versioned report schema is available.
+- [ ] Separate mission totals from phase totals and add an explicit `phase` field without losing compatibility with `submissionType`.
+- [ ] Design an optional mission scope/side-effect policy that agents can enforce and reports can display.
+- [ ] Evaluate semantic DOM diffs/chunks after configurable limits, selector scoping, and table trimming have production data.
+
 ## Automated MFA Follow-Ups
 
 - [ ] Add an integration smoke test against a local or staging API fixture for `get_mfa_code`.

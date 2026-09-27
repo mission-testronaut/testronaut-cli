@@ -37,8 +37,20 @@ describe('CLI inspection commands', () => {
     const result = run(makeProject(), ['list', '--json']);
     expect(result.status).toBe(0);
     expect(JSON.parse(result.stdout).missions).toEqual([
-      { file: 'login.mission.js', tags: ['authentication', 'smoke'] },
+      { file: 'login.mission.js', tags: ['authentication', 'smoke'], selected: true },
     ]);
+  });
+
+  it('applies tag filters to list output', () => {
+    const result = run(makeProject(), ['list', '--tag=checkout', '--json']);
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout).missions[0].selected).toBe(false);
+  });
+
+  it('does not discard a following inline flag', () => {
+    const result = run(makeProject(), ['--model=gpt-5.6', '--turns=30', '--dry-run', '--json']);
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout).missions[0].file).toBe('missions/login.mission.js');
   });
 
   it('reports effective config without exposing the session token', () => {
@@ -73,5 +85,18 @@ describe('CLI inspection commands', () => {
 
     expect(result.status).toBe(0);
     expect(JSON.parse(result.stdout).missions[0].missionName).toBe('https://example.test');
+  });
+
+  it('records shared-auth session mode in the report', () => {
+    const cwd = makeProject();
+    fs.writeFileSync(path.join(cwd, 'missions', 'login.mission.js'), [
+      'export const tags = ["authentication"];',
+      'export async function executeMission() {',
+      '  return { missionName: "login", submissionType: "mission", status: "passed", steps: [] };',
+      '}',
+    ].join('\n'));
+    const result = run(cwd, ['--session=shared-auth', '--json', '--quiet']);
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout).session).toEqual({ mode: 'shared-auth' });
   });
 });

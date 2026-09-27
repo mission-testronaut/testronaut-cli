@@ -25,9 +25,10 @@
 import 'dotenv/config';
 import { ChromeBrowser } from '../tools/chromeBrowser.js';
 import { turnLoop } from './turnLoop.js';
-import { createEmptyGroundControl, summarizeGroundControlForPrompt } from '../tools/contextControl.js';
+import { applyGroundControlUpdate, createEmptyGroundControl, summarizeGroundControlForPrompt } from '../tools/contextControl.js';
 import fs from 'fs';
 import path from 'path';
+import { hasCompletedLaunchProtocol, markLaunchProtocolCompleted } from './launchProtocol.js';
 
 /**
  * Execute goals with a browser agent.
@@ -36,7 +37,7 @@ import path from 'path';
  * @param {string} missionName
  * @param {number} [maxTurns=20] - upper bound for turnLoop per goal
  * @param {number} [retryLimit]
- * @param {{ domListLimit?: number|typeof Infinity, debug?: boolean, resourceGuard?: { enabled:boolean, hrefIncludes:string[], dataTypes:string[] }, humanInput?: { enabled:boolean, timeoutSeconds:number } }} [opts]
+ * @param {{ domListLimit?: number|typeof Infinity, automaticDomLimit?: number, storageStatePath?: string, debug?: boolean, resourceGuard?: { enabled:boolean, hrefIncludes:string[], dataTypes:string[] }, humanInput?: { enabled:boolean, timeoutSeconds:number } }} [opts]
  * @returns {Promise<Array<{missionName:string, submissionType:string, submissionName:string|null, status:'passed'|'failed', steps:any[], startTime:number, endTime:number}>>}
  */
 export async function runAgent(goals, missionName, maxTurns = 20, retryLimit, opts = {}) {
@@ -44,6 +45,7 @@ export async function runAgent(goals, missionName, maxTurns = 20, retryLimit, op
     domListLimit: opts.domListLimit,
     debug: opts.debug,
     resourceGuard: opts.resourceGuard,
+    storageStatePath: opts.storageStatePath,
   });
   await browser.start();
   let result;
@@ -57,6 +59,7 @@ export async function runAgent(goals, missionName, maxTurns = 20, retryLimit, op
     const groundControl = createEmptyGroundControl();
 
     for (const goal of goals) {
+      const telemetryStart = groundControl.telemetry.length;
       const steps = [];
       const stepsArchive = [];
       // Unique-ish JSONL file for this mission’s steps
@@ -66,6 +69,69 @@ export async function runAgent(goals, missionName, maxTurns = 20, retryLimit, op
       );
       // Start clean
       fs.writeFileSync(stepFile, '');
+
+      let protocolResult = null;
+      const protocol = goal.launchProtocol;
+      const sharedAuth = process.env.TESTRONAUT_SESSION_MODE === 'shared-auth';
+      if (protocol && sharedAuth && hasCompletedLaunchProtocol(protocol.id)) {
+        let probeResult;
+        try {
+          probeResult = await browser.probe(protocol.probe);
+        } catch (error) {
+          probeResult = { passed: false, reason: error?.message || String(error) };
+        }
+
+        if (probeResult.passed) {
+          const currentUrl = probeResult.url || protocol.probe.url || null;
+          applyGroundControlUpdate(groundControl, {
+            app: {
+              baseUrl: protocol.probe.url || currentUrl,
+              currentUrl,
+              routeRole: 'authenticated',
+            },
+            session: { loggedIn: true },
+            navigation: { currentLabel: `Launch protocol ${protocol.id} verified` },
+            constraints: { stayWithinBaseUrl: true },
+          });
+          const now = Date.now();
+          const step = {
+            turn: 0,
+            events: [`📡 Launch protocol probe passed: ${protocol.id}`],
+            result: '✅ Mission Success',
+            summary: `Reused launch protocol ${protocol.id}`,
+            missionName,
+            tokensUsed: 0,
+            inputTokens: 0,
+            outputTokens: 0,
+          };
+          fs.appendFileSync(stepFile, JSON.stringify(step) + '\n');
+          missionResults.push({
+            missionName,
+            submissionType: goal.submissionType || goal.label,
+            submissionName: goal.submissionName || null,
+            status: 'passed',
+            steps: [step],
+            stepFile,
+            startTime: now,
+            endTime: now,
+            telemetry: [],
+            launchProtocol: { id: protocol.id, status: 'reused', probe: 'passed' },
+          });
+          continue;
+        }
+        protocolResult = {
+          id: protocol.id,
+          status: 'executed',
+          probe: 'failed',
+          reason: probeResult.reason,
+        };
+      } else if (protocol) {
+        protocolResult = {
+          id: protocol.id,
+          status: 'executed',
+          probe: sharedAuth ? 'not-needed' : 'disabled',
+        };
+      }
 
       // Ensure user message is a string (functions/objects → toString fallback)
       const userContent =
@@ -197,6 +263,7 @@ Email invitation and magic links:
           groundControl,
           resourceGuard: opts.resourceGuard,
           humanInput: opts.humanInput,
+          automaticDomLimit: opts.automaticDomLimit,
           onStep: (s) => {
             // Append each step as a JSON line
             try {
@@ -232,7 +299,13 @@ Email invitation and magic links:
         stepFile, // full history is in this JSONL (one step per line)
         startTime: Date.now() - 1, // TODO: wire actual timings if needed
         endTime: Date.now(),
+        telemetry: JSON.parse(JSON.stringify(groundControl.telemetry.slice(telemetryStart))),
+        ...(protocolResult ? { launchProtocol: protocolResult } : {}),
       });
+
+      if (protocol && result?.success) {
+        markLaunchProtocolCompleted(protocol.id);
+      }
 
       if (!result?.success) {
         console.log('🛑 Agent stopped due to failed goal.\n');

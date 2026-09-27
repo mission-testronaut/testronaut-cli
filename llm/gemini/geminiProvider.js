@@ -219,6 +219,8 @@ export class GeminiProvider {
     const usageMeta = res?.response?.usageMetadata;
     const usage = {
       total_tokens: usageMeta?.totalTokenCount,
+      input_tokens: usageMeta?.promptTokenCount,
+      output_tokens: usageMeta?.candidatesTokenCount,
       providerRaw: usageMeta,
     };
 

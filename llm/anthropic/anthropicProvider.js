@@ -112,6 +112,8 @@ export class AnthropicProvider {
 
     const usage = {
       total_tokens: (response.usage?.input_tokens ?? 0) + (response.usage?.output_tokens ?? 0),
+      input_tokens: response.usage?.input_tokens,
+      output_tokens: response.usage?.output_tokens,
       providerRaw: response.usage,
     };
     return { message: fromAnthropicMessage(response), usage };

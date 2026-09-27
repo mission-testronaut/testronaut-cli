@@ -5,6 +5,11 @@ describe('tools/toolSchema', () => {
   it('does not advertise the unimplemented get_dom_chunk tool', () => {
     expect(toolsSchema.map(tool => tool.function.name)).not.toContain('get_dom_chunk');
   });
+
+  it('allows get_dom calls to be scoped by selector', () => {
+    const entry = toolsSchema.find(tool => tool.function.name === 'get_dom');
+    expect(entry.function.parameters.properties.selector.type).toBe('string');
+  });
   it('includes resource_progress tool with empty params', () => {
     const entry = toolsSchema.find(t => t.function?.name === 'resource_progress');
     expect(entry?.type).toBe('function');
