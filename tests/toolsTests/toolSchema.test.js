@@ -2,6 +2,9 @@ import { describe, it, expect } from 'vitest';
 import toolsSchema from '../../tools/toolSchema.js';
 
 describe('tools/toolSchema', () => {
+  it('does not advertise the unimplemented get_dom_chunk tool', () => {
+    expect(toolsSchema.map(tool => tool.function.name)).not.toContain('get_dom_chunk');
+  });
   it('includes resource_progress tool with empty params', () => {
     const entry = toolsSchema.find(t => t.function?.name === 'resource_progress');
     expect(entry?.type).toBe('function');

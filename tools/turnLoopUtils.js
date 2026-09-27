@@ -3,14 +3,15 @@ import { redactPasswordInText } from '../core/redaction.js';
 export const finalResponseHandler = (msg) => {
   const content = String(msg.content ?? '');
   const safeContent = redactPasswordInText(content);
-  const final = content.trim().toLowerCase();
-  if (final?.startsWith('success')) {
+  const final = content.trim().replace(/^[#*_`\s]+/, '');
+  const verdict = final.match(/^(?:(?:result|final)\s*:\s*)?(success|failure)\b/i)?.[1]?.toLowerCase();
+  if (verdict === 'success') {
     console.log('\n┏━ FINAL AGENT RESPONSE ━━━━━━━━━━━━━━━━━━━');
     console.log(safeContent);
     console.log('┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     return { finalMessage: safeContent, success: true};
   }
-  if (final?.startsWith('failure')) {
+  if (verdict === 'failure') {
     console.log('\n┏━ FINAL AGENT RESPONSE ━━━━━━━━━━━━━━━━━━━');
     console.log(safeContent);
     console.log('┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');

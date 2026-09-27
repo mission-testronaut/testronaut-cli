@@ -122,12 +122,17 @@ export async function initializeTestronautProject() {
         name: 'geminiModel',
         message: 'Select a Google Gemini model:',
         choices: [
-          { title: 'Gemini 2.5 Pro (general, high quality)', value: 'gemini-2.5-pro' },
-          { title: 'Gemini 2.5 Flash (fast, cost-efficient)', value: 'gemini-2.5-flash' },
-          { title: 'Gemini 2.5 Flash-8B (lightweight)', value: 'gemini-2.5-flash-8b' },
+          { title: 'Gemini 3.8 Flash (latest stable, recommended)', value: 'gemini-3.8-flash' },
+          { title: 'Gemini 3.7 Flash (previous stable)', value: 'gemini-3.7-flash' },
+          { title: 'Gemini 3.6 Flash (stable, token-efficient)', value: 'gemini-3.6-flash' },
+          { title: 'Gemini 3.5 Flash-Lite (fastest, cost-efficient)', value: 'gemini-3.5-flash-lite' },
+          { title: 'Gemini 3.1 Pro Preview (complex reasoning)', value: 'gemini-3.1-pro-preview' },
+          { title: 'Gemini 2.5 Pro (legacy)', value: 'gemini-2.5-pro' },
+          { title: 'Gemini 2.5 Flash (legacy)', value: 'gemini-2.5-flash' },
+          { title: 'Gemini 2.5 Flash-Lite (legacy)', value: 'gemini-2.5-flash-lite' },
         ],
-        // Keep prior selection if present; default to fast/cost-effective Flash.
-        initial: pickInitialIndex(models, config.model, 'gemini-2.5-flash')
+        // Keep prior selection if present; otherwise use the latest stable model.
+        initial: pickInitialIndex(models, config.model, 'gemini-3.8-flash')
       });
 
       config.model = geminiModel;

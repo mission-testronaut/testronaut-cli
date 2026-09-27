@@ -115,9 +115,14 @@ export function openAIModels() {
  */
 export function geminiModels() {
   return [
-    'gemini-2.5-pro',        // best reasoning, tool use
-    'gemini-2.5-flash',      // fast, cost-effective
-    'gemini-2.5-flash-lite', // lightweight / high throughput
+    'gemini-3.8-flash',       // latest stable agentic model
+    'gemini-3.7-flash',       // previous stable agentic model
+    'gemini-3.6-flash',       // stable, token-efficient
+    'gemini-3.5-flash-lite',  // lightweight / high throughput
+    'gemini-3.1-pro-preview', // highest-quality preview
+    'gemini-2.5-pro',         // legacy reasoning model
+    'gemini-2.5-flash',       // legacy fast model
+    'gemini-2.5-flash-lite',  // legacy lightweight model
   ];
 }
 

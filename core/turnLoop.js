@@ -194,10 +194,11 @@ const pushDOMAssistant = async (browser, messages, agentMemory, { skipIfLastTool
   // Avoid redundant DOM pushes immediately following tools that already include DOM context.
   if (skipIfLastTool && skipIfLastTool.includes(messages.at(-1)?.name)) {
     console.log(`[skip] Skipping DOM push after redundant tool: ${messages.at(-1)?.name}`);
-    return;
+    return { injected: false, domLength: 0 };
   }
 
   const domCallId = `get_dom_${Date.now()}`;
+  const automaticDomLimit = 15000;
 
   // Inject a synthetic assistant tool call
   messages.push({
@@ -208,13 +209,17 @@ const pushDOMAssistant = async (browser, messages, agentMemory, { skipIfLastTool
         type: 'function',
         function: {
           name: 'get_dom',
-          arguments: JSON.stringify({ limit: 100000, exclude: true }),
+          arguments: JSON.stringify({ limit: automaticDomLimit, exclude: true }),
         },
       },
     ],
   });
 
-  const domHtml = await CHROME_TOOL_MAP.get_dom(browser, { limit: 100000, exclude: true }, agentMemory);
+  const domHtml = await CHROME_TOOL_MAP.get_dom(
+    browser,
+    { limit: automaticDomLimit, exclude: true },
+    agentMemory
+  );
   await tokenEstimate(MODEL_ID, domHtml);
 
   // Push the corresponding tool response back into the conversation
@@ -225,6 +230,11 @@ const pushDOMAssistant = async (browser, messages, agentMemory, { skipIfLastTool
     type: 'function',
     content: typeof domHtml === 'string' ? domHtml : JSON.stringify(domHtml),
   });
+
+  return {
+    injected: true,
+    domLength: typeof domHtml === 'string' ? domHtml.length : JSON.stringify(domHtml).length,
+  };
 };
 
 /**
@@ -449,6 +459,7 @@ export const turnLoop = async (
       console.log('Processing tool calls...');
       const toolResponses = [];
       let hadToolIssues = false;
+      let domRefreshSource = null;
 
       for (const call of msg.tool_calls) {
         const fnName = call.function.name;
@@ -796,26 +807,29 @@ export const turnLoop = async (
           content: contentForModel,
         });
 
-        // After interactive DOM actions, refresh model context
-        if (['click_text', 'click', 'expand_menu'].includes(fnName)) {
-          console.log(`[auto] → Injecting DOM after ${fnName}...`);
-          step.events.push(`[auto] → Injecting DOM after ${fnName}...`);
-          const domHtml = await CHROME_TOOL_MAP.get_dom(browser, {
-            limit: 100000,
-            exclude: true,
-            focus: [],
-          }, agentMemory);
-          await tokenEstimate(MODEL_ID, domHtml);
-          await pushDOMAssistant(browser, messages, agentMemory, {
-            skipIfLastTool: ['get_dom', 'check_text'],
-          });
-          console.log(`[auto] → DOM size after ${fnName}: ${domHtml.length} chars`);
-          step.events.push(`[auto] → DOM size after ${fnName}: ${domHtml.length} chars`);
+        // Defer automatic DOM injection until the originating assistant call
+        // and all of its function responses are in history. Gemini requires a
+        // model functionCall to immediately follow user content or a
+        // functionResponse; inserting it before `msg` would create adjacent,
+        // reversed model function-call turns.
+        if (!errorMessage && ['click_text', 'click', 'expand_menu'].includes(fnName)) {
+          domRefreshSource = fnName;
         }
       }
 
       // Merge new assistant + tool responses back into conversation
       messages.push(msg, ...toolResponses);
+      if (domRefreshSource && !hadToolIssues) {
+        console.log(`[auto] → Injecting DOM after ${domRefreshSource}...`);
+        step.events.push(`[auto] → Injecting DOM after ${domRefreshSource}...`);
+        const domRefresh = await pushDOMAssistant(browser, messages, agentMemory, {
+          skipIfLastTool: ['get_dom', 'check_text'],
+        });
+        if (domRefresh?.injected) {
+          console.log(`[auto] → DOM size after ${domRefreshSource}: ${domRefresh.domLength} chars`);
+          step.events.push(`[auto] → DOM size after ${domRefreshSource}: ${domRefresh.domLength} chars`);
+        }
+      }
       if (hadToolIssues && turnRetries < retryLimitClamped) {
         step.result = '⏳ Retrying turn';
         const retryNumber = attempt - 1;
