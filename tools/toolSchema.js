@@ -83,6 +83,10 @@ const toolsSchema = [
             default: true,
             description: 'Whether to exclude noisy tags like script/style/etc.',
           },
+          selector: {
+            type: 'string',
+            description: 'Optional CSS selector that scopes the returned DOM to matching elements.',
+          },
         },
       },
     },

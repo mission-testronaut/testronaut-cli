@@ -190,7 +190,7 @@ function formatBytes(n) {
  * @param {object} agentMemory - Memory object storing recent agent state.
  * @param {{skipIfLastTool?: string[]}} opts - Optional tool skip conditions.
  */
-const pushDOMAssistant = async (browser, messages, agentMemory, { skipIfLastTool } = {}) => {
+const pushDOMAssistant = async (browser, messages, agentMemory, { skipIfLastTool, limit = 15000 } = {}) => {
   // Avoid redundant DOM pushes immediately following tools that already include DOM context.
   if (skipIfLastTool && skipIfLastTool.includes(messages.at(-1)?.name)) {
     console.log(`[skip] Skipping DOM push after redundant tool: ${messages.at(-1)?.name}`);
@@ -198,7 +198,7 @@ const pushDOMAssistant = async (browser, messages, agentMemory, { skipIfLastTool
   }
 
   const domCallId = `get_dom_${Date.now()}`;
-  const automaticDomLimit = 15000;
+  const automaticDomLimit = limit;
 
   // Inject a synthetic assistant tool call
   messages.push({
@@ -437,6 +437,8 @@ export const turnLoop = async (
       const tokensUsed = usage.total_tokens || 0;
       console.log(`📊 Token Usage This Turn → Total: ${tokensUsed}`);
       step.tokensUsed = tokensUsed;
+      step.inputTokens = usage.input_tokens ?? usage.prompt_tokens ?? usage.providerRaw?.input_tokens ?? usage.providerRaw?.prompt_tokens;
+      step.outputTokens = usage.output_tokens ?? usage.completion_tokens ?? usage.providerRaw?.output_tokens ?? usage.providerRaw?.completion_tokens;
       recordTokenUsage(turnTimestamps, tokensUsed);
       ({ turnTimestamps, totalTokensUsed } = pruneOldTokenUsage(turnTimestamps));
       console.log(`📈 Running Total Tokens Used (Rolling 60s): ${totalTokensUsed}`);
@@ -466,7 +468,7 @@ export const turnLoop = async (
         const args = JSON.parse(call.function.arguments || '{}');
         const safeArgs = redactArgs(fnName, args);
         console.log(`[model] → ${fnName}`, safeArgs);
-        step.events.push(`[model] → ${fnName} ${safeArgs}`);
+        step.events.push(`[model] → ${fnName} ${JSON.stringify(safeArgs)}`);
 
         let result;
         let errorMessage = null;
@@ -824,6 +826,7 @@ export const turnLoop = async (
         step.events.push(`[auto] → Injecting DOM after ${domRefreshSource}...`);
         const domRefresh = await pushDOMAssistant(browser, messages, agentMemory, {
           skipIfLastTool: ['get_dom', 'check_text'],
+          limit: ctx.automaticDomLimit,
         });
         if (domRefresh?.injected) {
           console.log(`[auto] → DOM size after ${domRefreshSource}: ${domRefresh.domLength} chars`);
@@ -884,6 +887,7 @@ export const turnLoop = async (
     // ─────────────────────────────────────────────
     await pushDOMAssistant(browser, messages, agentMemory, {
       skipIfLastTool: ['get_dom', 'check_text'],
+      limit: ctx.automaticDomLimit,
     });
     console.log(`[auto] → Injected DOM for next reasoning step`);
     step.events.push(`[auto] → Injected DOM for next reasoning step`);

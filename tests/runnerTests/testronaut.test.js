@@ -11,15 +11,16 @@ vi.mock('../../core/config.js', () => ({
   enforceTurnBudget: vi.fn(),
   getRetryLimit: vi.fn(),
   getDomListLimit: vi.fn(),
+  getAutomaticDomLimit: vi.fn(),
   getResourceGuardConfig: vi.fn(),
   getHumanInputConfig: vi.fn(),
 }));
 
 import { runAgent } from '../../core/agent.js';
-import { loadConfig, enforceTurnBudget, getRetryLimit, getDomListLimit, getResourceGuardConfig, getHumanInputConfig } from '../../core/config.js';
+import { loadConfig, enforceTurnBudget, getRetryLimit, getDomListLimit, getAutomaticDomLimit, getResourceGuardConfig, getHumanInputConfig } from '../../core/config.js';
 
 // Adjust the import path if your file lives elsewhere
-import { runMissions, __test__ as testronautInternals } from '../../runner/testronaut.js';
+import { runMissions, launchProtocol, __test__ as testronautInternals } from '../../runner/testronaut.js';
 
 describe('cli/testronaut.runMissions (with enforceTurnBudget)', () => {
   const OLD_ENV = { ...process.env };
@@ -29,6 +30,7 @@ describe('cli/testronaut.runMissions (with enforceTurnBudget)', () => {
     // Default retry limit unless overridden in a test
     getRetryLimit.mockReturnValue({ value: 2, source: 'default', clamped: false });
     getDomListLimit.mockReturnValue({ value: 3, mode: 'number', source: 'default', clamped: false });
+    getAutomaticDomLimit.mockReturnValue({ value: 15000, source: 'default', clamped: false });
     getResourceGuardConfig.mockReturnValue({ enabled: true, hrefIncludes: ['/document/'], dataTypes: ['document'] });
     getHumanInputConfig.mockReturnValue({ enabled: true, timeoutSeconds: 60, source: { enabled: 'default', timeout: 'default' }, clamped: false });
   });
@@ -58,11 +60,36 @@ describe('cli/testronaut.runMissions (with enforceTurnBudget)', () => {
       expect.stringContaining('Clamping to 200')
     );
     expect(runAgent).toHaveBeenCalledWith(
-      expect.any(Array), 'Budgeted Run', 200, 2, { domListLimit: 3, debug: false, resourceGuard: { enabled: true, hrefIncludes: ['/document/'], dataTypes: ['document'] }, humanInput: { enabled: true, timeoutSeconds: 60, source: { enabled: 'default', timeout: 'default' }, clamped: false } }
+      expect.any(Array), 'Budgeted Run', 200, 2, { domListLimit: 3, automaticDomLimit: 15000, storageStatePath: undefined, debug: false, resourceGuard: { enabled: true, hrefIncludes: ['/document/'], dataTypes: ['document'] }, humanInput: { enabled: true, timeoutSeconds: 60, source: { enabled: 'default', timeout: 'default' }, clamped: false } }
     );
 
     warn.mockRestore();
     log.mockRestore();
+  });
+
+  it('unwraps launch protocols while preserving preMission authoring', async () => {
+    loadConfig.mockResolvedValue({ maxTurns: 20 });
+    enforceTurnBudget.mockReturnValue({
+      effectiveMax: 20,
+      limits: { softMaxTurns: 50, hardMaxTurns: 200, hardMinTurns: 5 },
+      notes: [],
+    });
+    runAgent.mockResolvedValue([{ steps: [{ result: 'SUCCESS' }], status: 'passed' }]);
+    const protocol = launchProtocol('Log in', {
+      id: 'authenticated:user',
+      probe: { url: 'https://example.test', selector: '#dashboard' },
+    });
+
+    await runMissions({ preMission: protocol, mission: 'Test dashboard' }, 'Protocol mission');
+    const goals = runAgent.mock.calls[0][0];
+    expect(goals[0]).toMatchObject({
+      goal: 'Log in',
+      submissionType: 'premission',
+      launchProtocol: {
+        id: 'authenticated:user',
+        probe: { url: 'https://example.test', selector: '#dashboard' },
+      },
+    });
   });
 
   it('does not warn when no notes are returned', async () => {
@@ -85,7 +112,7 @@ describe('cli/testronaut.runMissions (with enforceTurnBudget)', () => {
     await runMissions({ mission: 'No warnings' }, 'Clean');
 
     expect(warn).not.toHaveBeenCalled();
-    expect(runAgent).toHaveBeenCalledWith(expect.any(Array), 'Clean', 20, 3, { domListLimit: 3, debug: false, resourceGuard: { enabled: true, hrefIncludes: ['/document/'], dataTypes: ['document'] }, humanInput: { enabled: true, timeoutSeconds: 60, source: { enabled: 'default', timeout: 'default' }, clamped: false } });
+    expect(runAgent).toHaveBeenCalledWith(expect.any(Array), 'Clean', 20, 3, { domListLimit: 3, automaticDomLimit: 15000, storageStatePath: undefined, debug: false, resourceGuard: { enabled: true, hrefIncludes: ['/document/'], dataTypes: ['document'] }, humanInput: { enabled: true, timeoutSeconds: 60, source: { enabled: 'default', timeout: 'default' }, clamped: false } });
 
     warn.mockRestore();
     log.mockRestore();
@@ -213,7 +240,7 @@ describe('cli/testronaut.runMissions (with enforceTurnBudget)', () => {
     expect(goals[1].submissionName).toMatch(/^My Mission/);
 
     // Effective max turns and retry limit passed through
-    expect(runAgent).toHaveBeenCalledWith(expect.any(Array), 'My Mission', 15, 2, { domListLimit: 3, debug: false, resourceGuard: { enabled: true, hrefIncludes: ['/document/'], dataTypes: ['document'] }, humanInput: { enabled: true, timeoutSeconds: 60, source: { enabled: 'default', timeout: 'default' }, clamped: false } });
+    expect(runAgent).toHaveBeenCalledWith(expect.any(Array), 'My Mission', 15, 2, { domListLimit: 3, automaticDomLimit: 15000, storageStatePath: undefined, debug: false, resourceGuard: { enabled: true, hrefIncludes: ['/document/'], dataTypes: ['document'] }, humanInput: { enabled: true, timeoutSeconds: 60, source: { enabled: 'default', timeout: 'default' }, clamped: false } });
 
     log.mockRestore();
   });
@@ -252,7 +279,7 @@ describe('cli/testronaut.runMissions (with enforceTurnBudget)', () => {
 
     await runMissions({ mission: 'Debug' }, 'Debug Mission');
 
-    expect(runAgent).toHaveBeenCalledWith(expect.any(Array), 'Debug Mission', 20, 2, { domListLimit: 3, debug: true, resourceGuard: { enabled: true, hrefIncludes: ['/document/'], dataTypes: ['document'] }, humanInput: { enabled: true, timeoutSeconds: 60, source: { enabled: 'default', timeout: 'default' }, clamped: false } });
+    expect(runAgent).toHaveBeenCalledWith(expect.any(Array), 'Debug Mission', 20, 2, { domListLimit: 3, automaticDomLimit: 15000, storageStatePath: undefined, debug: true, resourceGuard: { enabled: true, hrefIncludes: ['/document/'], dataTypes: ['document'] }, humanInput: { enabled: true, timeoutSeconds: 60, source: { enabled: 'default', timeout: 'default' }, clamped: false } });
 
     log.mockRestore();
   });

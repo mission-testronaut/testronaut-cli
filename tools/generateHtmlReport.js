@@ -102,7 +102,7 @@ export function generateHtmlReport(report, outputPath) {
             ${humanInput}
             ${planSpan}
             <span class="step-result ${ok ? 'ok' : 'bad'}" ${resultTooltip ? `title="${esc(resultTooltip)}"` : ''}>${esc(resultRaw)}</span>
-            <span class="tokens">tokens: ${esc(step.tokensUsed ?? '—')} / total: ${esc(step.totalTokensUsed ?? '—')}</span>
+            <span class="tokens">tokens: ${esc(step.tokensUsed ?? '—')} (in: ${esc(step.inputTokens ?? '—')}, out: ${esc(step.outputTokens ?? '—')}) / rolling: ${esc(step.totalTokensUsed ?? '—')}</span>
           </summary>
           <pre class="events">${esc(events.join('\n')) || '(no events)'}</pre>
           ${imgTag}

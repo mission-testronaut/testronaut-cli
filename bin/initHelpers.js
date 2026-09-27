@@ -60,6 +60,7 @@ export function defaultConfig(rootBasename) {
     addTags: [],
     dom: {
       listItemLimit: 3,
+      automaticLimit: 15000,
     },
     resourceGuard: {
       enabled: true,

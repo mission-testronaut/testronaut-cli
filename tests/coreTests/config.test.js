@@ -13,6 +13,7 @@ import {
   resolveTurnLimits,
   enforceTurnBudget,
   getDomListLimit,
+  getAutomaticDomLimit,
   getResourceGuardConfig,
   getHumanInputConfig,
 } from '../../core/config.js';
@@ -21,6 +22,15 @@ describe('core/config', () => {
   beforeEach(() => {
     vi.resetAllMocks();
     delete process.env.STRICT_LIMITS;
+    delete process.env.TESTRONAUT_AUTO_DOM_LIMIT;
+  });
+
+  describe('getAutomaticDomLimit', () => {
+    it('uses config and clamps unsafe values', () => {
+      expect(getAutomaticDomLimit({ dom: { automaticLimit: 9000 } })).toMatchObject({ value: 9000, source: 'config' });
+      process.env.TESTRONAUT_AUTO_DOM_LIMIT = '250000';
+      expect(getAutomaticDomLimit({})).toMatchObject({ value: 100000, source: 'env', clamped: true });
+    });
   });
 
   describe('loadConfig', () => {
