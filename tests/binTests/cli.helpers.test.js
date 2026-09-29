@@ -271,11 +271,11 @@ describe('cli helpers', () => {
     });
 
     it('returns "testronaut" when argv[1] basename is testronaut (global install)', () => {
-      expect(detectCliName(undefined, '/usr/local/bin/testronaut')).toBe('testronaut');
+      expect(detectCliName(null, '/usr/local/bin/testronaut')).toBe('testronaut');
     });
 
     it('returns "npx testronaut" when argv[1] is cli.js (direct node invocation)', () => {
-      expect(detectCliName(undefined, '/home/user/testronaut-cli/bin/cli.js')).toBe('npx testronaut');
+      expect(detectCliName(null, '/home/user/testronaut-cli/bin/cli.js')).toBe('npx testronaut');
     });
 
     it('npm_command=exec takes precedence over a global-bin argv[1]', () => {
@@ -283,11 +283,11 @@ describe('cli helpers', () => {
     });
 
     it('returns "npx testronaut" when argv[1] is undefined', () => {
-      expect(detectCliName(undefined, undefined)).toBe('npx testronaut');
+      expect(detectCliName(null, null)).toBe('npx testronaut');
     });
 
     it('returns "npx testronaut" when argv[1] is empty string', () => {
-      expect(detectCliName(undefined, '')).toBe('npx testronaut');
+      expect(detectCliName(null, '')).toBe('npx testronaut');
     });
   });
 });
