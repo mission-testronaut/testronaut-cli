@@ -205,6 +205,27 @@ describe('turnLoop', () => {
     expect(step1.result).toBe('✅ Passed');
     expect(shared.chromeToolSpies.click_text).toHaveBeenCalledTimes(1);
     expect(shared.chromeToolSpies.get_dom).toHaveBeenCalled();
+    expect(shared.chromeToolSpies.get_dom).toHaveBeenCalledWith(
+      browser,
+      expect.objectContaining({ limit: 15000, exclude: true }),
+      expect.any(Object)
+    );
+
+    const secondRequestMessages = shared.chatMock.mock.calls[1][0].messages;
+    const clickCallIndex = secondRequestMessages.findIndex(message =>
+      message.role === 'assistant' && message.tool_calls?.[0]?.function?.name === 'click_text'
+    );
+    expect(secondRequestMessages.slice(clickCallIndex, clickCallIndex + 4).map(message => ({
+      role: message.role,
+      tool: message.tool_calls?.[0]?.function?.name ?? message.name,
+    }))).toEqual([
+      { role: 'assistant', tool: 'click_text' },
+      { role: 'tool', tool: 'click_text' },
+      { role: 'assistant', tool: 'get_dom' },
+      { role: 'tool', tool: 'get_dom' },
+    ]);
+    expect(JSON.parse(secondRequestMessages[clickCallIndex + 2].tool_calls[0].function.arguments))
+      .toEqual({ limit: 15000, exclude: true });
 
     const step2 = res.steps[1];
     expect(step2.result).toMatch(/Success/);

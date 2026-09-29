@@ -62,12 +62,14 @@ import { matchesTagFilter, normalizeTagMatch, normalizeTags } from '../core/tags
 process.env.PLAYWRIGHT_BROWSERS_PATH = process.env.PLAYWRIGHT_BROWSERS_PATH || '0';
 
 const TMP_DIR = path.resolve('./missions/tmp');
+const runId = `run_${Date.now()}`;
+const startTime = new Date();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLI_VERSION = JSON.parse(
   fs.readFileSync(path.resolve(__dirname, '../package.json'), 'utf8')
 ).version;
 
-const DEFAULT_API_BASE = 'http://api.testronaut.app';
+const DEFAULT_API_BASE = 'https://api.testronaut.app';
 const DEV_API_BASE = 'https://staging.api.testronaut.app';
 
 let args = process.argv.slice(2);
@@ -88,6 +90,28 @@ args = args.filter(arg => arg !== '--no-screenshots');
 const uploadScreenshots = !args.includes('--no-upload-screenshots');
 args = args.filter(arg => arg !== '--no-upload-screenshots');
 process.env.TESTRONAUT_SCREENSHOTS = screenshotsEnabled ? '1' : '0';
+
+let sessionMode = 'isolated';
+const sessionFlagIndex = args.findIndex(a => a === '--session' || a.startsWith('--session='));
+if (sessionFlagIndex >= 0) {
+  const raw = args[sessionFlagIndex];
+  const inline = raw.includes('=');
+  const value = inline ? raw.slice(raw.indexOf('=') + 1) : args[sessionFlagIndex + 1];
+  if (!['isolated', 'shared-auth'].includes(value)) {
+    console.error('❌ --session must be "isolated" or "shared-auth".');
+    process.exit(1);
+  }
+  sessionMode = value;
+  args.splice(sessionFlagIndex, inline ? 1 : 2);
+}
+if (sessionMode === 'shared-auth') {
+  const storageStatePath = path.join(TMP_DIR, `${runId}-storage-state.json`);
+  process.env.TESTRONAUT_STORAGE_STATE_PATH = storageStatePath;
+  process.once('exit', () => {
+    try { fs.unlinkSync(storageStatePath); } catch {}
+  });
+}
+process.env.TESTRONAUT_SESSION_MODE = sessionMode;
 
 // Detect how the CLI was invoked so help text matches the actual command
 function detectCliName(npmCommand = process.env.npm_command, argv1 = process.argv[1]) {
@@ -324,6 +348,7 @@ function mergeDuplicateTurns(steps) {
 
 // Expose a small bundle for unit tests (helper-only; not the CLI flow)
 export const __test__ = {
+  DEFAULT_API_BASE,
   guessMimeType,
   safeJoin,
   findLatestReportPair,
@@ -485,7 +510,8 @@ __test__.parseTagArgs = parseTagArgs;
 let modelOverride;
 const modelFlagIndex = args.findIndex(a => a === '--model' || a.startsWith('--model='));
 if (modelFlagIndex >= 0) {
-  if (args[modelFlagIndex].includes('=')) {
+  const inline = args[modelFlagIndex].includes('=');
+  if (inline) {
     modelOverride = args[modelFlagIndex].split('=')[1];
   } else if (args[modelFlagIndex + 1]) {
     modelOverride = args[modelFlagIndex + 1];
@@ -497,7 +523,7 @@ if (modelFlagIndex >= 0) {
   }
 
   // Remove flag & value from args so they don't look like mission filenames
-  args.splice(modelFlagIndex, modelOverride ? 2 : 1);
+  args.splice(modelFlagIndex, inline ? 1 : (modelOverride ? 2 : 1));
 }
 
 // Look for --provider=<id> or --provider <id>
@@ -524,6 +550,14 @@ const cliMfaName =
 if (cliMfaName) {
   process.env.TESTRONAUT_MFA_NAME = String(cliMfaName).trim();
   console.log(`🔐 MFA nickname override: ${process.env.TESTRONAUT_MFA_NAME}`);
+}
+const cliEmailInbox =
+  runOptionsResult.options.emailInbox ||
+  runOptionsResult.options.inbox ||
+  runOptionsResult.options['email-inbox'];
+if (cliEmailInbox) {
+  process.env.TESTRONAUT_EMAIL_INBOX = String(cliEmailInbox).trim();
+  console.log(`📧 Email inbox nickname override: ${process.env.TESTRONAUT_EMAIL_INBOX}`);
 }
 
 const tagArgs = parseTagArgs(args);
@@ -592,7 +626,8 @@ if (debugFlagIndex >= 0) {
 let turnsOverride;
 const turnsFlagIndex = args.findIndex(a => a === '--turns' || a.startsWith('--turns='));
 if (turnsFlagIndex >= 0) {
-  if (args[turnsFlagIndex].includes('=')) {
+  const inline = args[turnsFlagIndex].includes('=');
+  if (inline) {
     turnsOverride = args[turnsFlagIndex].split('=')[1];
   } else if (args[turnsFlagIndex + 1]) {
     turnsOverride = args[turnsFlagIndex + 1];
@@ -609,7 +644,7 @@ if (turnsFlagIndex >= 0) {
   }
 
   // Remove flag & value so they aren’t treated as filenames
-  args.splice(turnsFlagIndex, turnsOverride ? 2 : 1);
+  args.splice(turnsFlagIndex, inline ? 1 : (turnsOverride ? 2 : 1));
 }
 
 // Look for --retry_limit / --retry-limit
@@ -622,7 +657,8 @@ const retryFlagIndex = args.findIndex(a =>
 );
 if (retryFlagIndex >= 0) {
   const rawArg = args[retryFlagIndex];
-  if (rawArg.includes('=')) {
+  const inline = rawArg.includes('=');
+  if (inline) {
     retryOverride = rawArg.split('=')[1];
   } else if (args[retryFlagIndex + 1]) {
     retryOverride = args[retryFlagIndex + 1];
@@ -640,7 +676,7 @@ if (retryFlagIndex >= 0) {
   }
 
   // Remove flag & value so they aren’t treated as filenames
-  args.splice(retryFlagIndex, retryOverride ? 2 : 1);
+  args.splice(retryFlagIndex, inline ? 1 : (retryOverride ? 2 : 1));
 }
 
 // Look for --human-input / --no-human-input / --disable-human-input
@@ -688,7 +724,8 @@ const humanInputTimeoutFlagIndex = args.findIndex(a =>
 );
 if (humanInputTimeoutFlagIndex >= 0) {
   const rawArg = args[humanInputTimeoutFlagIndex];
-  if (rawArg.includes('=')) {
+  const inline = rawArg.includes('=');
+  if (inline) {
     humanInputTimeoutOverride = rawArg.split('=')[1];
   } else if (args[humanInputTimeoutFlagIndex + 1]) {
     humanInputTimeoutOverride = args[humanInputTimeoutFlagIndex + 1];
@@ -704,12 +741,10 @@ if (humanInputTimeoutFlagIndex >= 0) {
     }
   }
 
-  args.splice(humanInputTimeoutFlagIndex, humanInputTimeoutOverride ? 2 : 1);
+  args.splice(humanInputTimeoutFlagIndex, inline ? 1 : (humanInputTimeoutOverride ? 2 : 1));
 }
 
 const allResults = [];
-const runId = `run_${Date.now()}`;
-const startTime = new Date();
 
 const HELP_TEXT = `
 🧑‍🚀 testronaut - Autonomous Agent Mission Runner
@@ -729,7 +764,9 @@ Options:
   --turns=<n>               Override max turns for this run (e.g., --turns=30)
   --debug[=<bool>]          Enable verbose debug logs (or set TESTRONAUT_DEBUG=1)
   --provider=<id>           Override LLM provider (openai, gemini, or anthropic)
-  -o, --options key=value   Set run options, such as mfa=github-test-mfa
+  --model=<id>              Override the provider model for this run
+  --session=<mode>          Browser auth reuse: isolated (default) or shared-auth
+  -o, --options key=value   Set run options, such as mfa=github-test-mfa or inbox=github-staging
   --dev                     Use the staging API base URL
   --vercel-bypass=<secret>  Send Vercel protection bypass header for protected deployments
   --human-input[=<bool>]    Allow the agent to pause for short verification codes (default: true)
@@ -840,13 +877,16 @@ if (args.length === 1 && args[0] === 'list') {
     return;
   }
   const listedMissions = [];
+  const listTags = cliTags ?? normalizeTags(tagConfig?.tags, { allowUntagged: true });
+  const listTagMatch = normalizeTagMatch(cliTagMatch ?? tagConfig?.tagMatch);
   if (!jsonOutput) console.log(`Missions in ${path.relative(process.cwd(), missionsRoot) || '.'}:`);
   for (const file of discoveredMissions) {
     try {
       const mission = await loadMissionModule(path.resolve(missionsRoot, file));
       const tags = normalizeTags(mission.tags);
-      listedMissions.push({ file, tags });
-      if (!jsonOutput) console.log(`  ${file}${tags.length ? `  [${tags.join(', ')}]` : ''}`);
+      const selected = matchesTagFilter(tags, listTags, listTagMatch);
+      listedMissions.push({ file, tags, selected });
+      if (!jsonOutput) console.log(`  ${selected ? '✓' : '·'} ${file}${tags.length ? `  [${tags.join(', ')}]` : ''}`);
     } catch (error) {
       console.log(`  ${file}  [could not load: ${error.message}]`);
       process.exitCode = 1;
@@ -898,7 +938,7 @@ if (dryRun) {
       invalid = true;
     }
   }
-  writeOutput({ dryRun: true, outputDir, provider: resolveProviderModel({ cwd: process.cwd() }), screenshots: screenshotsEnabled, missions });
+  writeOutput({ dryRun: true, outputDir, provider: resolveProviderModel({ cwd: process.cwd() }), session: { mode: sessionMode }, screenshots: screenshotsEnabled, missions });
   if (invalid) process.exitCode = 1;
   return;
 }
@@ -999,6 +1039,7 @@ const report = {
     provider: llmProvider,
     model: llmModel,
   },
+  session: { mode: sessionMode },
   summary: {
     totalMissions: flatMissions.length,
     passed: flatMissions.filter(m => m.status === 'passed').length,

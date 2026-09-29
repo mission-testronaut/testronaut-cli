@@ -146,7 +146,7 @@ function isSensitiveCall(fnName, args = {}) {
 export function redactArgs(fnName, args = {}, { showLength = true } = {}) {
   const out = clone(args);
 
-  if (fnName === 'request_human_input') {
+  if (fnName === 'request_human_input' || fnName === 'get_email_code') {
     for (const key of ['value', 'code', 'input', 'answer', 'redactedValue']) {
       if (key in out) out[key] = maskPreview(out[key], showLength);
     }

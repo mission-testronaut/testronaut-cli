@@ -109,6 +109,38 @@ describe('pruneConversationContext', () => {
     expect(nonSystem.map(m => m.content)).toEqual(['u-2', 'a-2']);
   });
 
+  it('keeps the latest real user instruction as an anchor for long tool histories', () => {
+    const messages = [
+      { role: 'system', content: 'system' },
+      { role: 'user', content: 'Complete the mission' },
+    ];
+
+    for (let i = 0; i < 25; i += 1) {
+      messages.push({
+        role: 'assistant',
+        tool_calls: [{
+          id: `call-${i}`,
+          type: 'function',
+          function: { name: 'get_dom', arguments: '{}' },
+        }],
+      });
+      messages.push({
+        role: 'tool',
+        tool_call_id: `call-${i}`,
+        name: 'get_dom',
+        content: `<main>${i}</main>`,
+      });
+    }
+
+    const pruned = pruneConversationContext(messages, { maxNonSystemMessages: 10 });
+
+    expect(pruned[0]).toEqual({ role: 'system', content: 'system' });
+    expect(pruned[1]).toEqual({ role: 'user', content: 'Complete the mission' });
+    expect(pruned.slice(2)).toHaveLength(10);
+    expect(pruned[2].role).toBe('assistant');
+    expect(pruned[3].role).toBe('tool');
+  });
+
   it('drops tool messages whose parent assistant tool_calls were pruned', () => {
     const messages = [
       // Old assistant + tool (should be pruned)

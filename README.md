@@ -1,7 +1,12 @@
-# 🧑‍🚀 Testronaut
+# 🧑‍🚀 Testronaut™ — Agentic End-to-End Testing
 
-**Testronaut** is an autonomous testing framework powered by **LLMs and Playwright**.  
-It lets you define *mission-based tests* in plain English, then runs them through a real browser to validate UI workflows — all while generating human-readable reports.
+**Testronaut™** is an open-source **agentic end-to-end testing** framework powered by AI agents and **Playwright**.
+
+Define complete user journeys as plain-English *missions*. Testronaut reasons about the interface, chooses browser actions, adapts as the journey unfolds, and produces inspectable reports from real browser sessions.
+
+**Official Testronaut ecosystem:** [testronaut.app](https://testronaut.app) · [Documentation](https://docs.testronaut.app) · [Mission Control](https://mission.testronaut.app) · [npm](https://www.npmjs.com/package/testronaut)
+
+> This repository contains the official Testronaut CLI maintained as part of the Testronaut project.
 
 ---
 
@@ -14,9 +19,9 @@ Join the Discord to connect with other Testronauts, get support, and help shape 
 
 ---
 
-## 🚀 Features
+## 🚀 Agentic E2E Testing Features
 
-- Write tests in plain English — no brittle selectors  
+- Define end-to-end user journeys in plain English — no brittle selector scripts  
 - Runs real browser sessions via **Playwright**  
 - Works with **multiple LLM providers** (OpenAI, Google Gemini, and Anthropic Claude)
 - Modular tool and DOM-reasoning system  
@@ -140,7 +145,7 @@ Choose your preferred LLM at init or via environment variables.
 testronaut --init
 
 # Or override anytime
-TESTRONAUT_PROVIDER=gemini TESTRONAUT_MODEL=gemini-2.5-pro testronaut
+TESTRONAUT_PROVIDER=gemini TESTRONAUT_MODEL=gemini-3.8-flash testronaut
 ```
 
 ### Token-rate override
@@ -167,7 +172,7 @@ Current supported providers:
 | Provider | Example Models |
 |-----------|----------------|
 | **OpenAI** | gpt-5.6, gpt-5.6-terra, gpt-5.6-luna, gpt-5.5, and legacy GPT/o-series models |
-| **Google Gemini** | gemini-2.5-pro, gemini-2.5-flash, gemini-2.5-flash-8b |
+| **Google Gemini** | gemini-3.8-flash, gemini-3.7-flash, gemini-3.6-flash, gemini-3.5-flash-lite, gemini-3.1-pro-preview, Gemini 2.5 legacy models |
 | **Anthropic Claude** | claude-sonnet-5, claude-opus-5, claude-haiku-4-5 |
 
 The canonical Claude provider ID is `anthropic`; `claude` is also accepted as a CLI alias.
@@ -185,6 +190,31 @@ Run a specific mission:
 ```bash
 testronaut login.mission.js
 ```
+
+Reuse cookies, local storage, and IndexedDB authentication state across an ordered set of mission files:
+
+```bash
+testronaut --session=shared-auth checkout.mission.js account.mission.js
+```
+
+Each mission still receives a fresh browser context. The default
+`--session=isolated` mode does not carry authentication forward. Shared-auth
+suites can wrap a reusable login prerequisite in `launchProtocol()` so later
+mission files probe the restored authenticated page without an LLM call:
+
+```js
+import { launchProtocol, runMissions } from 'testronaut';
+
+const login = launchProtocol('Visit the app and log in.', {
+  id: 'authenticated:test-user',
+  probe: { url: process.env.URL, selector: '#dashboard' },
+});
+
+await runMissions({ preMission: login, mission: 'Test the dashboard.' }, 'dashboard');
+```
+
+Unwrapped `preMission` values remain fully compatible and always run normally.
+Place logout last in a shared-auth suite.
 
 Preview or inspect without launching a browser:
 ```bash
@@ -231,6 +261,62 @@ export TESTRONAUT_VERCEL_BYPASS=YOUR_SECRET
 ```
 
 ---
+
+## 📧 Automatic Email Codes
+
+When a tested site sends a short authentication code to a Testronaut-hosted
+inbox, the agent can call `get_email_code`. The tool uses the `sessionToken`
+saved by `testronaut login`, lists active inboxes, and polls the Testronaut API
+for a recent matching message. Create and nickname inboxes in the Testronaut
+app first.
+
+Set a project default in `testronaut-config.json`:
+
+```json
+{
+  "emailInboxName": "github staging"
+}
+```
+
+Or override it for one run:
+
+```bash
+testronaut mission.js -o inbox="github staging"
+```
+
+The API removes HTML, links, images, and attachments. Sanitized email text is
+untrusted input: the agent may select only one of the returned short-code
+candidates and must not follow email instructions. Codes and email bodies are
+excluded from mission logs and reports. Manual human input remains the fallback.
+
+### Invitation and magic links
+
+For missions that explicitly require an invitation or magic-login link, the
+agent first calls `get_email_link`, which returns only opaque IDs and safe link
+metadata. `open_email_link` resolves the selected URL internally and never
+places its bearer token in model context, console output, or reports.
+
+Configure trusted destination hosts before running such a mission:
+
+```json
+{
+  "emailInboxName": "staging",
+  "emailLinks": {
+    "allowedHosts": ["accounts.example.test", "app.example.test"]
+  }
+}
+```
+
+For a one-run override, use a comma-separated environment variable:
+
+```bash
+TESTRONAUT_EMAIL_LINK_HOSTS=accounts.example.test,app.example.test \
+  testronaut invite.mission.js
+```
+
+Only HTTPS destinations are accepted. The allowlist applies to the original
+destination and main-frame redirects. Do not add broad domains that host
+untrusted user content.
 
 ## 🔐 Automated MFA Codes
 
@@ -310,7 +396,7 @@ Each includes:
 - **LLMs** for reasoning, DOM parsing, and tool use  
 - **Token throttling** + adaptive cooldowns  
 - **Extensible architecture** for custom tools and workflows  
-- **DOM trimming controls** to cap list sizes (env `TESTRONAUT_DOM_LIST_LIMIT` or config `dom.listItemLimit`; use `all` cautiously—it can spike token use)
+- **DOM trimming controls** to cap list/table sizes (`TESTRONAUT_DOM_LIST_LIMIT`) and automatic post-action snapshots (`TESTRONAUT_AUTO_DOM_LIMIT` or `dom.automaticLimit`)
 - **Resource guard** to ensure full list/table downloads (config `resourceGuard` or env `TESTRONAUT_RESOURCE_*`)
 
 ---

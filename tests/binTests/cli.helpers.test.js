@@ -18,6 +18,10 @@ afterEach(() => {
 });
 
 describe('cli helpers', () => {
+  it('uses the canonical HTTPS production API base', () => {
+    expect(__test__.DEFAULT_API_BASE).toBe('https://api.testronaut.app');
+  });
+
   it('guessMimeType returns expected types', () => {
     const { guessMimeType } = __test__;
     expect(guessMimeType('file.html')).toContain('text/html');

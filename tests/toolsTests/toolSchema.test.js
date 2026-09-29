@@ -2,6 +2,14 @@ import { describe, it, expect } from 'vitest';
 import toolsSchema from '../../tools/toolSchema.js';
 
 describe('tools/toolSchema', () => {
+  it('does not advertise the unimplemented get_dom_chunk tool', () => {
+    expect(toolsSchema.map(tool => tool.function.name)).not.toContain('get_dom_chunk');
+  });
+
+  it('allows get_dom calls to be scoped by selector', () => {
+    const entry = toolsSchema.find(tool => tool.function.name === 'get_dom');
+    expect(entry.function.parameters.properties.selector.type).toBe('string');
+  });
   it('includes resource_progress tool with empty params', () => {
     const entry = toolsSchema.find(t => t.function?.name === 'resource_progress');
     expect(entry?.type).toBe('function');
@@ -29,6 +37,20 @@ describe('tools/toolSchema', () => {
     expect(entry.function.description).toMatch(/TOTP MFA code/i);
     expect(entry.function.parameters?.properties).toHaveProperty('nickname');
     expect(entry.function.parameters?.properties?.minSecondsRemaining?.default).toBe(5);
+  });
+
+  it('includes get_email_code for hosted inbox retrieval', () => {
+    const entry = toolsSchema.find(t => t.function?.name === 'get_email_code');
+    expect(entry).toBeTruthy();
+    expect(entry.function.description).toMatch(/email authentication code/i);
+  });
+
+  it('includes opaque lookup and constrained open tools for email links', () => {
+    const lookup = toolsSchema.find(t => t.function?.name === 'get_email_link');
+    const open = toolsSchema.find(t => t.function?.name === 'open_email_link');
+    expect(lookup?.function?.description).toMatch(/opaque link IDs/i);
+    expect(open?.function?.parameters?.required).toContain('linkId');
+    expect(open?.function?.parameters?.properties).not.toHaveProperty('url');
   });
 
   it('defines navigate and download_file with required fields', () => {

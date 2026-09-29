@@ -190,14 +190,15 @@ function formatBytes(n) {
  * @param {object} agentMemory - Memory object storing recent agent state.
  * @param {{skipIfLastTool?: string[]}} opts - Optional tool skip conditions.
  */
-const pushDOMAssistant = async (browser, messages, agentMemory, { skipIfLastTool } = {}) => {
+const pushDOMAssistant = async (browser, messages, agentMemory, { skipIfLastTool, limit = 15000 } = {}) => {
   // Avoid redundant DOM pushes immediately following tools that already include DOM context.
   if (skipIfLastTool && skipIfLastTool.includes(messages.at(-1)?.name)) {
     console.log(`[skip] Skipping DOM push after redundant tool: ${messages.at(-1)?.name}`);
-    return;
+    return { injected: false, domLength: 0 };
   }
 
   const domCallId = `get_dom_${Date.now()}`;
+  const automaticDomLimit = limit;
 
   // Inject a synthetic assistant tool call
   messages.push({
@@ -208,13 +209,17 @@ const pushDOMAssistant = async (browser, messages, agentMemory, { skipIfLastTool
         type: 'function',
         function: {
           name: 'get_dom',
-          arguments: JSON.stringify({ limit: 100000, exclude: true }),
+          arguments: JSON.stringify({ limit: automaticDomLimit, exclude: true }),
         },
       },
     ],
   });
 
-  const domHtml = await CHROME_TOOL_MAP.get_dom(browser, { limit: 100000, exclude: true }, agentMemory);
+  const domHtml = await CHROME_TOOL_MAP.get_dom(
+    browser,
+    { limit: automaticDomLimit, exclude: true },
+    agentMemory
+  );
   await tokenEstimate(MODEL_ID, domHtml);
 
   // Push the corresponding tool response back into the conversation
@@ -225,6 +230,11 @@ const pushDOMAssistant = async (browser, messages, agentMemory, { skipIfLastTool
     type: 'function',
     content: typeof domHtml === 'string' ? domHtml : JSON.stringify(domHtml),
   });
+
+  return {
+    injected: true,
+    domLength: typeof domHtml === 'string' ? domHtml.length : JSON.stringify(domHtml).length,
+  };
 };
 
 /**
@@ -427,6 +437,8 @@ export const turnLoop = async (
       const tokensUsed = usage.total_tokens || 0;
       console.log(`📊 Token Usage This Turn → Total: ${tokensUsed}`);
       step.tokensUsed = tokensUsed;
+      step.inputTokens = usage.input_tokens ?? usage.prompt_tokens ?? usage.providerRaw?.input_tokens ?? usage.providerRaw?.prompt_tokens;
+      step.outputTokens = usage.output_tokens ?? usage.completion_tokens ?? usage.providerRaw?.output_tokens ?? usage.providerRaw?.completion_tokens;
       recordTokenUsage(turnTimestamps, tokensUsed);
       ({ turnTimestamps, totalTokensUsed } = pruneOldTokenUsage(turnTimestamps));
       console.log(`📈 Running Total Tokens Used (Rolling 60s): ${totalTokensUsed}`);
@@ -449,13 +461,14 @@ export const turnLoop = async (
       console.log('Processing tool calls...');
       const toolResponses = [];
       let hadToolIssues = false;
+      let domRefreshSource = null;
 
       for (const call of msg.tool_calls) {
         const fnName = call.function.name;
         const args = JSON.parse(call.function.arguments || '{}');
         const safeArgs = redactArgs(fnName, args);
         console.log(`[model] → ${fnName}`, safeArgs);
-        step.events.push(`[model] → ${fnName} ${safeArgs}`);
+        step.events.push(`[model] → ${fnName} ${JSON.stringify(safeArgs)}`);
 
         let result;
         let errorMessage = null;
@@ -582,6 +595,38 @@ export const turnLoop = async (
           }
         }
 
+        if (fnName === 'get_email_code') {
+          step.emailCode = step.emailCode || {};
+          step.emailCode.requested = true;
+          try {
+            const parsed = JSON.parse(result);
+            step.emailCode.nickname = parsed.nickname || args.nickname || null;
+            step.emailCode.status = parsed.ok ? 'provided' : parsed.code || 'unavailable';
+            step.emailCode.senderDomain = parsed.senderDomain || null;
+            step.emailCode.candidateCount = Array.isArray(parsed.codeCandidates) ? parsed.codeCandidates.length : 0;
+            step.emailCode.match = parsed.match || null;
+            agentMemory.lastEmailCodeLookup = parsed.ok
+              ? {
+                  ok: true,
+                  nickname: parsed.nickname || args.nickname || null,
+                  codeCandidates: parsed.codeCandidates || [],
+                  senderDomain: parsed.senderDomain || null,
+                }
+              : {
+                  ok: false,
+                  nickname: parsed.nickname || args.nickname || null,
+                  code: parsed.code,
+                  error: parsed.error,
+                  availableNicknames: parsed.availableNicknames || [],
+                };
+            step.events.push(parsed.ok
+              ? `📧 Email code candidates retrieved for "${step.emailCode.nickname || 'configured inbox'}" (${step.emailCode.candidateCount} candidate${step.emailCode.candidateCount === 1 ? '' : 's'}).`
+              : `📧 Email code unavailable: ${parsed.error || parsed.code || 'unknown error'}`);
+          } catch {
+            step.emailCode.status = errorMessage ? 'error' : 'unknown';
+          }
+        }
+
         // Capture and log any file upload/download events (for reports)
         try {
           const maybeJson = JSON.parse(result);
@@ -623,6 +668,16 @@ export const turnLoop = async (
             toolStatusLabel = '⚠️ Unavailable';
           }
         }
+        if (fnName === 'get_email_code' && !errorMessage) {
+          try {
+            const parsed = JSON.parse(result);
+            toolStatusLabel = parsed.ok
+              ? `✅ ${Array.isArray(parsed.codeCandidates) ? parsed.codeCandidates.length : 0} candidate(s) retrieved`
+              : `⚠️ Unavailable${parsed.code ? ` (${parsed.code})` : ''}`;
+          } catch {
+            toolStatusLabel = '⚠️ Unavailable';
+          }
+        }
 
         console.log(`[tool ] ← ${fnName} result:`, toolStatusLabel);
 
@@ -631,6 +686,8 @@ export const turnLoop = async (
           let sourceLine;
           if (agentMemory.lastMfaLookup?.ok && fillText === agentMemory.lastMfaLookup.value) {
             sourceLine = `🔐 MFA fill source: get_mfa_code nickname="${agentMemory.lastMfaLookup.nickname || 'configured MFA'}"`;
+          } else if (agentMemory.lastEmailCodeLookup?.ok && agentMemory.lastEmailCodeLookup.codeCandidates?.includes(fillText)) {
+            sourceLine = `📧 Verification fill source: get_email_code nickname="${agentMemory.lastEmailCodeLookup.nickname || 'configured inbox'}"`;
           } else if (agentMemory.lastVerificationInput?.value && fillText === agentMemory.lastVerificationInput.value) {
             sourceLine = `🔐 MFA fill source: request_human_input codeType="${agentMemory.lastVerificationInput.codeType}"`;
           } else if (agentMemory.lastMfaLookup && !agentMemory.lastMfaLookup.ok) {
@@ -671,6 +728,24 @@ export const turnLoop = async (
             });
           } catch {
             resultForLog = errorMessage || 'MFA code lookup completed.';
+          }
+        }
+        if (fnName === 'get_email_code') {
+          try {
+            const parsed = JSON.parse(result);
+            resultForLog = JSON.stringify({
+              ok: parsed.ok,
+              code: parsed.code,
+              error: parsed.error,
+              nickname: parsed.nickname,
+              senderDomain: parsed.senderDomain,
+              receivedAt: parsed.receivedAt,
+              candidateCount: Array.isArray(parsed.codeCandidates) ? parsed.codeCandidates.length : 0,
+              match: parsed.match,
+              availableNicknames: parsed.availableNicknames,
+            });
+          } catch {
+            resultForLog = errorMessage || 'Email code lookup completed.';
           }
         }
         const truncated = resultForLog.length > 1000 ? resultForLog.slice(0, 1000) + '…' : resultForLog;
@@ -734,26 +809,30 @@ export const turnLoop = async (
           content: contentForModel,
         });
 
-        // After interactive DOM actions, refresh model context
-        if (['click_text', 'click', 'expand_menu'].includes(fnName)) {
-          console.log(`[auto] → Injecting DOM after ${fnName}...`);
-          step.events.push(`[auto] → Injecting DOM after ${fnName}...`);
-          const domHtml = await CHROME_TOOL_MAP.get_dom(browser, {
-            limit: 100000,
-            exclude: true,
-            focus: [],
-          }, agentMemory);
-          await tokenEstimate(MODEL_ID, domHtml);
-          await pushDOMAssistant(browser, messages, agentMemory, {
-            skipIfLastTool: ['get_dom', 'check_text'],
-          });
-          console.log(`[auto] → DOM size after ${fnName}: ${domHtml.length} chars`);
-          step.events.push(`[auto] → DOM size after ${fnName}: ${domHtml.length} chars`);
+        // Defer automatic DOM injection until the originating assistant call
+        // and all of its function responses are in history. Gemini requires a
+        // model functionCall to immediately follow user content or a
+        // functionResponse; inserting it before `msg` would create adjacent,
+        // reversed model function-call turns.
+        if (!errorMessage && ['click_text', 'click', 'expand_menu'].includes(fnName)) {
+          domRefreshSource = fnName;
         }
       }
 
       // Merge new assistant + tool responses back into conversation
       messages.push(msg, ...toolResponses);
+      if (domRefreshSource && !hadToolIssues) {
+        console.log(`[auto] → Injecting DOM after ${domRefreshSource}...`);
+        step.events.push(`[auto] → Injecting DOM after ${domRefreshSource}...`);
+        const domRefresh = await pushDOMAssistant(browser, messages, agentMemory, {
+          skipIfLastTool: ['get_dom', 'check_text'],
+          limit: ctx.automaticDomLimit,
+        });
+        if (domRefresh?.injected) {
+          console.log(`[auto] → DOM size after ${domRefreshSource}: ${domRefresh.domLength} chars`);
+          step.events.push(`[auto] → DOM size after ${domRefreshSource}: ${domRefresh.domLength} chars`);
+        }
+      }
       if (hadToolIssues && turnRetries < retryLimitClamped) {
         step.result = '⏳ Retrying turn';
         const retryNumber = attempt - 1;
@@ -808,6 +887,7 @@ export const turnLoop = async (
     // ─────────────────────────────────────────────
     await pushDOMAssistant(browser, messages, agentMemory, {
       skipIfLastTool: ['get_dom', 'check_text'],
+      limit: ctx.automaticDomLimit,
     });
     console.log(`[auto] → Injected DOM for next reasoning step`);
     step.events.push(`[auto] → Injected DOM for next reasoning step`);

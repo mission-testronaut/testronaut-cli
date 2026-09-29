@@ -6,6 +6,7 @@ vi.mock('../../tools/chromeBrowser.js', () => {
   function ChromeBrowser() {}
   ChromeBrowser.prototype.start = async function () {};
   ChromeBrowser.prototype.close = async function () {};
+  ChromeBrowser.prototype.probe = async function () { return { passed: true }; };
   return { ChromeBrowser };
 });
 
@@ -17,6 +18,7 @@ vi.mock('../../core/turnLoop.js', () => ({
 import { ChromeBrowser } from '../../tools/chromeBrowser.js';
 import { turnLoop } from '../../core/turnLoop.js';
 import { runAgent } from '../../core/agent.js';
+import { resetLaunchProtocols } from '../../core/launchProtocol.js';
 
 let startSpy, closeSpy;
 
@@ -26,6 +28,8 @@ describe('core/agent.runAgent', () => {
     startSpy = vi.spyOn(ChromeBrowser.prototype, 'start').mockResolvedValue();
     closeSpy = vi.spyOn(ChromeBrowser.prototype, 'close').mockResolvedValue();
     vi.clearAllMocks();
+    resetLaunchProtocols();
+    delete process.env.TESTRONAUT_SESSION_MODE;
   });
 
   afterEach(() => {
@@ -102,6 +106,63 @@ describe('core/agent.runAgent', () => {
     const res2 = await runAgent([{ goal: 'Check clone' }], 'Clone Test 2', 3);
     expect(res1[0].steps[0].result).toBe('TAMPERED');
     expect(res2[0].steps[0].result).toBe('SUCCESS: step2');
+  });
+
+  it('attaches telemetry recorded during each goal to that result', async () => {
+    turnLoop.mockImplementationOnce(async (browser, messages, maxTurns, ct, rc, cs, ctx) => {
+      ctx.groundControl.telemetry.push({ kind: 'note', text: 'durable observation' });
+      return { success: true };
+    });
+    const [result] = await runAgent([{ goal: 'Observe' }], 'Telemetry', 3);
+    expect(result.telemetry).toEqual([{ kind: 'note', text: 'durable observation' }]);
+  });
+
+  it('reuses a completed launch protocol after a passing shared-auth probe', async () => {
+    process.env.TESTRONAUT_SESSION_MODE = 'shared-auth';
+    const probeSpy = vi.spyOn(ChromeBrowser.prototype, 'probe').mockResolvedValue({
+      passed: true,
+      url: 'https://example.test/dashboard',
+    });
+    const goal = {
+      goal: 'Log in',
+      submissionType: 'premission',
+      launchProtocol: { id: 'authenticated:user', probe: { selector: '#dashboard' } },
+    };
+    turnLoop.mockResolvedValueOnce({ success: true });
+    await runAgent([goal], 'First', 3);
+    turnLoop.mockResolvedValueOnce({ success: true });
+    const [reused] = await runAgent([
+      goal,
+      { goal: 'Use the current dashboard', submissionType: 'mission' },
+    ], 'Second', 3);
+
+    expect(turnLoop).toHaveBeenCalledTimes(2);
+    expect(probeSpy).toHaveBeenCalledWith({ selector: '#dashboard' });
+    expect(reused.launchProtocol).toEqual({ id: 'authenticated:user', status: 'reused', probe: 'passed' });
+    expect(reused.steps[0].tokensUsed).toBe(0);
+    const mainMessages = turnLoop.mock.calls[1][1];
+    expect(mainMessages[0].content).toContain('https://example.test/dashboard');
+    expect(mainMessages[0].content).toContain('"loggedIn": true');
+    probeSpy.mockRestore();
+  });
+
+  it('falls back to the original preMission when a reuse probe fails', async () => {
+    process.env.TESTRONAUT_SESSION_MODE = 'shared-auth';
+    const goal = {
+      goal: 'Log in',
+      submissionType: 'premission',
+      launchProtocol: { id: 'authenticated:user', probe: { selector: '#dashboard' } },
+    };
+    turnLoop.mockResolvedValue({ success: true });
+    await runAgent([goal], 'First', 3);
+    const probeSpy = vi.spyOn(ChromeBrowser.prototype, 'probe').mockResolvedValueOnce({ passed: false, reason: 'signed out' });
+    const [executed] = await runAgent([goal], 'Second', 3);
+
+    expect(turnLoop).toHaveBeenCalledTimes(2);
+    expect(executed.launchProtocol).toEqual({
+      id: 'authenticated:user', status: 'executed', probe: 'failed', reason: 'signed out',
+    });
+    probeSpy.mockRestore();
   });
 
   it('includes missionName and submission metadata in results', async () => {

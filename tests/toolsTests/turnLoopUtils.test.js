@@ -2,6 +2,22 @@ import { describe, it, expect, vi } from 'vitest';
 import { finalResponseHandler } from '../../tools/turnLoopUtils.js';
 
 describe('tools/turnLoopUtils', () => {
+  it.each([
+    ['SUCCESS: completed', true],
+    ['FAILURE: blocked', false],
+    ['RESULT: SUCCESS - all checkpoints passed', true],
+    ['RESULT: FAILURE - checkpoint failed', false],
+    ['FINAL: success', true],
+    ['**RESULT: SUCCESS**', true],
+  ])('recognizes supported verdict form %s', (content, success) => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      expect(finalResponseHandler({ content })).toMatchObject({ success });
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
   it('redacts verification codes before printing and returning final responses', () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
