@@ -57,6 +57,7 @@ import { discoverMissionFiles } from '../core/missionDiscovery.js';
 import { loadMissionModule } from '../core/missionLoader.js';
 import { loadConfig } from '../core/config.js';
 import { matchesTagFilter, normalizeTagMatch, normalizeTags } from '../core/tags.js';
+import { createTerminalUi } from './terminalUi.js';
 
 // Keep PW browsers inside the project to avoid global cache skew
 process.env.PLAYWRIGHT_BROWSERS_PATH = process.env.PLAYWRIGHT_BROWSERS_PATH || '0';
@@ -78,6 +79,7 @@ const jsonOutput = args.includes('--json');
 const quietOutput = args.includes('--quiet') || jsonOutput;
 args = args.filter(arg => arg !== '--json' && arg !== '--quiet');
 const writeOutput = value => process.stdout.write(`${typeof value === 'string' ? value : JSON.stringify(value, null, 2)}\n`);
+const terminalUi = createTerminalUi({ quiet: quietOutput });
 if (quietOutput) {
   console.log = () => {};
   console.warn = () => {};
@@ -879,14 +881,14 @@ if (args.length === 1 && args[0] === 'list') {
   const listedMissions = [];
   const listTags = cliTags ?? normalizeTags(tagConfig?.tags, { allowUntagged: true });
   const listTagMatch = normalizeTagMatch(cliTagMatch ?? tagConfig?.tagMatch);
-  if (!jsonOutput) console.log(`Missions in ${path.relative(process.cwd(), missionsRoot) || '.'}:`);
+  if (!jsonOutput) terminalUi.phase('preflight', `Missions in ${path.relative(process.cwd(), missionsRoot) || '.'}`);
   for (const file of discoveredMissions) {
     try {
       const mission = await loadMissionModule(path.resolve(missionsRoot, file));
       const tags = normalizeTags(mission.tags);
       const selected = matchesTagFilter(tags, listTags, listTagMatch);
       listedMissions.push({ file, tags, selected });
-      if (!jsonOutput) console.log(`  ${selected ? '✓' : '·'} ${file}${tags.length ? `  [${tags.join(', ')}]` : ''}`);
+      if (!jsonOutput) terminalUi.mission(selected, file, tags);
     } catch (error) {
       console.log(`  ${file}  [could not load: ${error.message}]`);
       process.exitCode = 1;
@@ -943,6 +945,17 @@ if (dryRun) {
   return;
 }
 
+if (!jsonOutput) {
+  const previewModel = resolveProviderModel({ cwd: process.cwd() });
+  terminalUi.banner({
+    version: CLI_VERSION,
+    provider: previewModel.provider,
+    model: previewModel.model,
+    session: sessionMode,
+  });
+  terminalUi.phase('preflight', `${explicitFiles ? args.length : discoveredMissions.length} mission file(s) queued`);
+}
+
 const runFile = async (filePath) => {
   const modulePath = resolveMissionPath(filePath, { cwd: process.cwd(), missionsRoot });
   try {
@@ -960,6 +973,7 @@ const runFile = async (filePath) => {
     }
 
     if (typeof missionsModule.executeMission === 'function') {
+      if (!jsonOutput) terminalUi.phase('launch', path.relative(process.cwd(), modulePath) || filePath);
       const result = await missionsModule.executeMission();
       if (result == null) {
         console.error(`❌ Mission did not return a result: ${filePath}`);
@@ -1053,8 +1067,10 @@ report.tags = normalizeTags(flatMissions.flatMap(m =>
 
 fs.mkdirSync(outputDir, { recursive: true });
 fs.writeFileSync(path.join(outputDir, `${runId}.json`), JSON.stringify(report, null, 2));
-generateHtmlReport(report, path.join(outputDir, `${runId}.html`));
+const htmlReportPath = path.join(outputDir, `${runId}.html`);
+generateHtmlReport(report, htmlReportPath);
 if (jsonOutput) writeOutput(report);
+else terminalUi.summary({ ...report.summary, reportPath: path.relative(process.cwd(), htmlReportPath) });
 
   try {
     if (!process.env.TN_KEEP_TMP && fs.existsSync(TMP_DIR)) {
