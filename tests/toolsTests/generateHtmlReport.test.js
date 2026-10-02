@@ -55,6 +55,9 @@ describe('generateHtmlReport', () => {
     const html = fs.readFileSync(outPath, 'utf8');
 
     expect(html).toContain('Testronaut Report');
+    expect(html).toContain('Mission Control · Flight Report');
+    expect(html).toContain('--orange:#ff8a43');
+    expect(html).toContain('--cyan:#79d7df');
     expect(html).toContain('Mission A');
     expect(html).toContain('Turn 1 (re-attempt 1/5)');
     expect(html).toContain('⚠️ Turn Issues');
