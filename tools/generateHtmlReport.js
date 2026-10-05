@@ -196,55 +196,71 @@ export function generateHtmlReport(report, outputPath) {
   <title>Testronaut Report – ${esc(runId)}</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    /* ===== Brand + surface tokens (match splash/app) ===== */
+    /* ===== Testronaut launch-control tokens ===== */
     :root{
-      --bg-top:#0b1022;
-      --bg-mid:#0f172a;
-      --bg-btm:#0b1022;
+      --bg-top:#050b18;
+      --bg-mid:#081426;
+      --bg-btm:#030712;
+      --panel:rgba(8,24,45,.78);
+      --panel-strong:rgba(7,19,36,.94);
+      --orange:#ff8a43;
+      --amber:#ffc15b;
+      --cyan:#79d7df;
 
-      --hairline:rgba(255,255,255,.12);
-      --hairline-strong:rgba(255,255,255,.18);
+      --hairline:rgba(121,215,223,.20);
+      --hairline-strong:rgba(121,215,223,.34);
 
       --text:rgba(255,255,255,.92);
       --text-muted:rgba(255,255,255,.65);
 
-      --ok:#22c55e;     /* green-500 */
-      --bad:#ef4444;    /* red-500 */
+      --ok:#39d9aa;
+      --bad:#ff6678;
 
       --chip-ok-bg:rgba(34,197,94,.14);
       --chip-bad-bg:rgba(239,68,68,.16);
-      --chip-border:rgba(255,255,255,.22);
+      --chip-border:rgba(121,215,223,.30);
       --chip-ok-border:rgba(34,197,94,.40);
       --chip-bad-border:rgba(239,68,68,.45);
     }
 
     /* ===== Base ===== */
-    html,body{height:100%;}
+    html,body{min-height:100%;}
     body{
       margin:0; padding:24px;
       font-family: ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Helvetica,Arial;
-      background: linear-gradient(180deg,var(--bg-top) 0%,var(--bg-mid) 60%,var(--bg-btm) 100%);
+      background:
+        radial-gradient(circle at 84% 8%,rgba(255,138,67,.16),transparent 25rem),
+        radial-gradient(circle at 10% 32%,rgba(121,215,223,.10),transparent 28rem),
+        linear-gradient(180deg,var(--bg-top) 0%,var(--bg-mid) 60%,var(--bg-btm) 100%);
+      background-attachment:fixed;
       color: var(--text);
       -webkit-font-smoothing: antialiased;
       -moz-osx-font-smoothing: grayscale;
     }
+    body::before{
+      content:"";position:fixed;inset:0;pointer-events:none;opacity:.22;
+      background-image:linear-gradient(rgba(121,215,223,.08) 1px,transparent 1px),linear-gradient(90deg,rgba(121,215,223,.08) 1px,transparent 1px);
+      background-size:42px 42px;mask-image:linear-gradient(to bottom,black,transparent 82%);
+    }
 
     /* ===== Utilities ===== */
     .gradient-text{
-      background: linear-gradient(90deg,#60a5fa,#a78bfa,#34d399);
+      background: linear-gradient(90deg,#fff7e7,var(--amber),var(--orange));
       -webkit-background-clip:text; background-clip:text; color:transparent;
     }
     .glass{
-      background: rgba(255,255,255,.05);
+      background: var(--panel);
       border: 1px solid var(--hairline);
       border-radius:16px;
       backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-      box-shadow: 0 10px 30px rgba(59,130,246,.20);
+      box-shadow: 0 18px 45px rgba(0,0,0,.28), inset 0 1px rgba(255,255,255,.035);
     }
 
     /* ===== Header ===== */
-    .header{ max-width:960px; margin:0 auto 16px; padding:16px 18px; }
-    h1{ margin:0 0 6px; font-size:22px; font-weight:800; color:#fff; }
+    .header{ max-width:960px; margin:0 auto 16px; padding:22px 24px; position:relative; overflow:hidden; }
+    .header::after{content:"";position:absolute;right:0;top:0;width:92px;height:4px;background:linear-gradient(90deg,var(--orange),var(--amber));}
+    .eyebrow{margin-bottom:7px;color:var(--cyan);font-size:11px;font-weight:800;letter-spacing:.18em;text-transform:uppercase;}
+    h1{ margin:0 0 12px; font-size:27px; font-weight:850; color:#fff; letter-spacing:-.02em; }
     .run-meta{ color:var(--text-muted); display:grid; gap:4px; }
     .provider-meta{ display:inline-flex; align-items:center; gap:7px; }
     .provider-logo{ width:20px; height:20px; color:var(--text); flex:none; }
@@ -258,6 +274,7 @@ export function generateHtmlReport(report, outputPath) {
       padding:6px 12px; border-radius:999px; font-size:12px; color:var(--text);
       letter-spacing:.2px;
     }
+    .pill:first-child{border-color:rgba(255,138,67,.5);box-shadow:inset 3px 0 var(--orange);}
     .pill.ok{ background: var(--chip-ok-bg); color: var(--ok); border-color: var(--chip-ok-border); font-weight:700; }
     .pill.bad{ background: var(--chip-bad-bg); color: var(--bad); border-color: var(--chip-bad-border); font-weight:700; }
     .tag-filter{max-width:928px;margin:0 auto 20px;padding:18px 16px;background:rgba(2,6,23,.30);}
@@ -267,7 +284,7 @@ export function generateHtmlReport(report, outputPath) {
     .match-count{margin-left:auto;color:var(--text-muted);font-size:12px;}
     .tag-buttons,.mission-tags{display:flex;gap:6px;flex-wrap:wrap;align-items:center;}
     .tag-button,.tag-small{border:1px solid var(--chip-border);background:rgba(255,255,255,.06);color:var(--text);border-radius:999px;padding:5px 10px;font-size:11px;font-weight:700;}
-    .tag-button{cursor:pointer;transition:transform .15s ease,background .15s ease}.tag-button:hover{transform:translateY(-1px);background:rgba(255,255,255,.11)}.tag-button.active{box-shadow:0 0 0 2px rgba(96,165,250,.38);}
+    .tag-button{cursor:pointer;transition:transform .15s ease,background .15s ease}.tag-button:hover{transform:translateY(-1px);background:rgba(121,215,223,.12)}.tag-button.active{box-shadow:0 0 0 2px rgba(255,138,67,.48);}
     .filter-controls{display:flex;gap:16px;align-items:center;margin-top:14px;font-size:12px;color:var(--text-muted);flex-wrap:wrap;}
     .filter-controls select{color:var(--text);background:#111a31;border:1px solid var(--chip-border);border-radius:8px;padding:6px 24px 6px 8px;}
     .show-control{cursor:help;display:flex;align-items:center;gap:5px;}
@@ -277,12 +294,12 @@ export function generateHtmlReport(report, outputPath) {
     @media(max-width:640px){.match-count{width:100%;margin-left:0}.tag-filter{padding:14px 12px}.meta{display:none}}
 
     /* ===== Disclosure blocks ===== */
-    details{ background: rgba(255,255,255,.05); border:1px solid var(--hairline); border-radius:16px; margin:10px 0; overflow:hidden; }
+    details{ background: var(--panel); border:1px solid var(--hairline); border-radius:16px; margin:10px 0; overflow:hidden; }
     summary{
       cursor:pointer; padding:14px 16px; display:flex; align-items:center; gap:12px;
       color:#fff; background: rgba(255,255,255,.04);
     }
-    .mission-group > summary{ font-weight:800; font-size:15px; letter-spacing:.2px; }
+    .mission-group > summary{ font-weight:800; font-size:15px; letter-spacing:.2px; border-left:3px solid var(--orange); }
     .mission-group > summary:hover{ background: rgba(255,255,255,.08); }
 
     .group-body{ padding:12px; display:grid; gap:10px; }
@@ -336,7 +353,7 @@ export function generateHtmlReport(report, outputPath) {
     .tokens{ color: var(--text-muted); font-size:12px; margin-left:auto; font-variant-numeric: tabular-nums; }
 
     .events{
-      background: rgba(2,6,23,.9); /* near #020617 */
+      background: var(--panel-strong);
       color: rgba(255,255,255,.92);
       padding:12px; border-radius:12px; margin:12px 0 0;
       font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New";
@@ -357,6 +374,7 @@ export function generateHtmlReport(report, outputPath) {
 </head>
 <body>
   <div class="header glass">
+    <div class="eyebrow">Mission Control · Flight Report</div>
     <h1>🧑‍🚀 <span class="gradient-text">Testronaut Report</span></h1>
     <div class="run-meta">
       <div class="provider-meta"><span class="provider-logo" title="${esc(provider.name)}" aria-label="${esc(provider.name)}">${provider.logo}</span><strong>${esc(llm.model ?? '—')}</strong></div>
