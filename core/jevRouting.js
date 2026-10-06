@@ -8,9 +8,14 @@ function probability(value, fallback) {
 export function resolveJevRoutingConfig(env = process.env, { provider, primaryModel } = {}) {
   const rawMode = String(env.TESTRONAUT_JEV_ROUTING || 'off').trim().toLowerCase();
   const mode = ['shadow', 'live'].includes(rawMode) ? rawMode : 'off';
-  const defaultFastModel = String(provider).toLowerCase() === 'openai' && primaryModel !== 'gpt-5.6-luna'
-    ? 'gpt-5.6-luna'
-    : '';
+  const providerKey = String(provider).toLowerCase();
+  const familyDefault = {
+    openai: 'gpt-5.6-luna',
+    gemini: 'gemini-3.5-flash-lite',
+    anthropic: 'claude-haiku-4-5',
+    claude: 'claude-haiku-4-5',
+  }[providerKey] || '';
+  const defaultFastModel = primaryModel === familyDefault ? '' : familyDefault;
   return {
     mode,
     fastModel: String(env.TESTRONAUT_JEV_FAST_MODEL || defaultFastModel).trim(),
@@ -19,6 +24,17 @@ export function resolveJevRoutingConfig(env = process.env, { provider, primaryMo
       DEFAULT_CONFIDENCE_THRESHOLD,
     ),
   };
+}
+
+function belongsToProvider(model, provider) {
+  const value = String(model || '').toLowerCase();
+  switch (String(provider || '').toLowerCase()) {
+    case 'openai': return /^(gpt-|o\d)/.test(value);
+    case 'gemini': return value.startsWith('gemini-');
+    case 'anthropic':
+    case 'claude': return value.startsWith('claude-');
+    default: return true;
+  }
 }
 
 export function chooseJevTurnModel(strategy, config, { provider, primaryModel } = {}) {
@@ -31,6 +47,7 @@ export function chooseJevTurnModel(strategy, config, { provider, primaryModel } 
     config.mode === 'off' ? 'routing_off' :
     recommendation !== 'fast_model' ? 'not_fast_model' :
     !config.fastModel ? 'fast_model_unconfigured' :
+    !belongsToProvider(config.fastModel, provider) ? 'fast_model_provider_mismatch' :
     config.fastModel === primaryModel ? 'fast_model_matches_primary' :
     !Number.isFinite(confidence) || confidence < config.confidenceThreshold ? 'low_confidence' :
     ['authenticate', 'failed', 'complete'].includes(stage) ? `stage_${stage}` :
@@ -54,4 +71,4 @@ export function chooseJevTurnModel(strategy, config, { provider, primaryModel } 
   };
 }
 
-export const __jevRoutingInternals = { DEFAULT_CONFIDENCE_THRESHOLD, probability };
+export const __jevRoutingInternals = { DEFAULT_CONFIDENCE_THRESHOLD, probability, belongsToProvider };

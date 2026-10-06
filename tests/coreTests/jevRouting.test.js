@@ -14,6 +14,13 @@ describe('Jev dynamic routing', () => {
     })).toMatchObject({ mode: 'off', fastModel: 'gpt-5.6-luna', confidenceThreshold: 0.8 });
   });
 
+  it.each([
+    ['gemini', 'gemini-3.8-flash', 'gemini-3.5-flash-lite'],
+    ['anthropic', 'claude-sonnet-5', 'claude-haiku-4-5'],
+  ])('keeps the default fast model within the %s family', (provider, primaryModel, fastModel) => {
+    expect(resolveJevRoutingConfig({}, { provider, primaryModel })).toMatchObject({ fastModel });
+  });
+
   it('records an eligible route without applying it in shadow mode', () => {
     const result = chooseJevTurnModel(safeFastRoute, {
       mode: 'shadow', fastModel: 'gpt-5.6-luna', confidenceThreshold: 0.8,
@@ -36,5 +43,15 @@ describe('Jev dynamic routing', () => {
     expect(chooseJevTurnModel(strategy, {
       mode: 'live', fastModel: 'gpt-5.6-luna', confidenceThreshold: 0.8,
     }, { provider: 'openai', primaryModel: 'gpt-5.6-terra' })).toMatchObject({ applied: false, reason });
+  });
+
+  it('rejects a configured model from another provider family', () => {
+    expect(chooseJevTurnModel(safeFastRoute, {
+      mode: 'live', fastModel: 'gpt-5.6-luna', confidenceThreshold: 0.8,
+    }, { provider: 'gemini', primaryModel: 'gemini-3.8-flash' })).toMatchObject({
+      applied: false,
+      reason: 'fast_model_provider_mismatch',
+      selectedModel: 'gemini-3.8-flash',
+    });
   });
 });

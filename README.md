@@ -479,13 +479,15 @@ After reviewing the recommendations, enable one-turn live routing:
 TESTRONAUT_JEV_ROUTING=live TESTRONAUT_JEV_FAST_MODEL=gpt-5.6-luna testronaut
 ```
 
-OpenAI runs default the fast model to `gpt-5.6-luna`; other providers require
-`TESTRONAUT_JEV_FAST_MODEL`. The default confidence threshold is 80% and can be
-changed with `TESTRONAUT_JEV_ROUTING_THRESHOLD`. Authentication, completion,
-failed, uncertain recovery, and low-confidence turns stay on the primary model.
-If the routed request fails, Testronaut retries the turn on the primary model.
-Reports record the actual model and tokens for every turn and split aggregate
-tokens by model.
+The family-local defaults are `gpt-5.6-luna` for OpenAI,
+`gemini-3.5-flash-lite` for Gemini, and `claude-haiku-4-5` for Anthropic. An
+explicit `TESTRONAUT_JEV_FAST_MODEL` must still belong to the active provider
+family. The default confidence threshold is 80% and can be changed with
+`TESTRONAUT_JEV_ROUTING_THRESHOLD`. Authentication, completion, failed,
+uncertain recovery, and low-confidence turns stay on the primary model. If the
+routed request fails, Testronaut retries the turn on the primary model. Reports
+record the actual model and tokens for every turn and split aggregate tokens by
+model.
 
 Evaluate risk-based suite selection separately as a dry run:
 
