@@ -1192,6 +1192,13 @@ const report = {
   },
   missions: flatMissions
 };
+if (process.env.TESTRONAUT_EXPERIMENT_ID) {
+  report.experiment = {
+    id: process.env.TESTRONAUT_EXPERIMENT_ID,
+    condition: process.env.TESTRONAUT_EXPERIMENT_CONDITION || null,
+    block: Number(process.env.TESTRONAUT_EXPERIMENT_BLOCK) || null,
+  };
+}
 if (jevShadowUsage.evaluations) {
   const gateMode = /^(1|true|yes|on)$/i.test(String(process.env.TESTRONAUT_JEV_GATE || ''));
   report.jevShadow = {

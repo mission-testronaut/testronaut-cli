@@ -12,6 +12,7 @@
   },
   "type": "module",
   "scripts": {
+    "benchmark:optimization": "node ./experiments/optimizationBenchmark.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "start": "node ./bin/cli.js"
