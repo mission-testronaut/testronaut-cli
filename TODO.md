@@ -20,6 +20,10 @@
 - [ ] Design an optional mission scope/side-effect policy that agents can enforce and reports can display.
 - [ ] Evaluate semantic DOM diffs/chunks after configurable limits, selector scoping, and table trimming have production data.
 
+## Optimization and Rate-Limit Follow-Ups
+
+- [ ] Add an opt-in CLI/config policy that reroutes an imminent throttled LLM request to a compatible model as an alternative to the default backoff behavior. Keep backoff as the default; use observed TPM/RPM headroom and projected request tokens; constrain failover to explicitly configured provider/model families; preserve tool/history compatibility; prevent routing loops; fall back safely when the alternate model is unavailable; and record the original model, routed model, trigger, token usage, latency, and outcome in reports.
+
 ## Automated MFA Follow-Ups
 
 - [ ] Add an integration smoke test against a local or staging API fixture for `get_mfa_code`.
