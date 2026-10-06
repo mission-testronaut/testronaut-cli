@@ -78,7 +78,7 @@ export function generateHtmlReport(report, outputPath) {
     ? report.jevShadow
     : summarizeJevUsage(missions.flatMap(m => Array.isArray(m.steps) ? m.steps : []));
   const reportModelUsage = summarizeModelTokens(missions.flatMap(m => Array.isArray(m.steps) ? m.steps : []));
-  const jevLogo = '<svg viewBox="0 0 24 24" role="img" aria-hidden="true"><rect width="24" height="24" rx="6" fill="#ff8a43"/><path d="M7 5h10v9.2c0 3.2-2 5.1-5.2 5.1-2.6 0-4.4-1.3-5.1-3.7l3-1c.3 1.1 1 1.7 2.1 1.7 1.3 0 2-.8 2-2.3V8H7V5z" fill="#081426"/></svg>';
+  const jevLogo = '<svg viewBox="0 0 24 24" role="img" aria-hidden="true"><rect width="24" height="24" rx="4" fill="#e547b5"/><g fill="none" stroke="#181a1b" stroke-width="2.25" stroke-linecap="square" stroke-linejoin="round"><path d="M12 2.5 6.1 6v10.1l3.2 1.9 2.7-1.6V9.6l3-1.8V4.3z"/><path d="m9.3 9.6 2.7 1.6 3-1.8 3 1.8v7L12 21.5l-3-1.8V13z"/><path d="m12 11.2 3 1.8 3-1.8M15 13v5.2l-6 3.3M9.3 9.6 12 8l3 1.8"/></g></svg>';
 
   const submissionBlock = (m) => {
     const mDurationSec =
