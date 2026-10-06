@@ -136,6 +136,7 @@ describe('generateHtmlReport', () => {
     const outPath = path.join(tmpDir, 'jev.html');
     generateHtmlReport({
       runId: 'jev_run',
+      llm: { provider: 'openai', model: 'gpt-5.6-terra' },
       summary: { totalMissions: 1, passed: 1, failed: 0 },
       jevShadow: {
         evaluations: 1,
@@ -150,11 +151,15 @@ describe('generateHtmlReport', () => {
     }, outPath);
 
     const html = fs.readFileSync(outPath, 'utf8');
-    expect(html).toContain('Jev input: 1,000');
-    expect(html).toContain('Jev output: 25');
-    expect(html).toContain('Jev estimated spend: $0.000042');
-    expect(html).toContain('Jev: 1 eval • 1,000 in / 25 out • est. $0.000042 • 1 gates');
+    expect(html).toContain('<strong>gpt-5.6-terra</strong>');
+    expect(html).toContain('title="Jev"');
+    expect(html).toContain('<strong>Jev</strong>');
+    expect(html).toContain('Model tokens: 500 (450 in / 50 out)');
+    expect(html).toContain('Jev tokens: 1,000 in / 25 out');
     expect(html).toContain('Jev: 1,000 in / 25 out');
+    expect(html).not.toContain('estimated spend');
+    expect(html).not.toContain('est. $');
+    expect(html).not.toContain('strategy eval');
   });
 
   it('makes skipped Jev evaluations visible', () => {
