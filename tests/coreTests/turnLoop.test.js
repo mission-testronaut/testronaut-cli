@@ -134,6 +134,9 @@ describe('turnLoop', () => {
     delete process.env.TESTRONAUT_JEV_SHADOW;
     delete process.env.TESTRONAUT_JEV_GATE;
     delete process.env.TESTRONAUT_JEV_STRATEGIES;
+    delete process.env.TESTRONAUT_JEV_ROUTING;
+    delete process.env.TESTRONAUT_JEV_FAST_MODEL;
+    delete process.env.TESTRONAUT_JEV_ROUTING_THRESHOLD;
     delete process.env.TESTRONAUT_JEV_API_KEY;
     browser = {};
     // reset spies and chat mock
@@ -225,6 +228,90 @@ describe('turnLoop', () => {
       delete process.env.TESTRONAUT_JEV_SHADOW;
       delete process.env.TESTRONAUT_JEV_STRATEGIES;
       delete process.env.TESTRONAUT_JEV_API_KEY;
+    }
+  });
+
+  it('routes the turn after a safe Jev fast-model recommendation', async () => {
+    process.env.TESTRONAUT_JEV_ROUTING = 'live';
+    process.env.TESTRONAUT_JEV_FAST_MODEL = 'stub-fast';
+    process.env.TESTRONAUT_JEV_API_KEY = 'test-key';
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        model: 'jev-test',
+        answers: {
+          modelRoute: { type: 'choice', choice: 'fast_model', confidence: 0.95 },
+          missionStage: { type: 'choice', choice: 'interact', confidence: 0.9 },
+          recoveryRoute: { type: 'choice', choice: 'continue', confidence: 0.9 },
+        },
+        usage: { input_tokens: 50, output_tokens: 2 },
+      }),
+    }));
+    shared.chatMock
+      .mockResolvedValueOnce({
+        message: {
+          role: 'assistant', content: '',
+          tool_calls: [{ id: 'route_1', type: 'function', function: { name: 'click_text', arguments: '{"text":"Continue"}' } }],
+        },
+        usage: { total_tokens: 10 }, headers: {},
+      })
+      .mockResolvedValueOnce({
+        message: { role: 'assistant', content: 'FINAL: success' },
+        usage: { total_tokens: 5 }, headers: {},
+      });
+
+    try {
+      const result = await turnLoop(browser, baseMessages(), 2, 0, 0, {}, { steps: [], missionName: 'demo' });
+      expect(result.success).toBe(true);
+      expect(shared.chatMock.mock.calls.map(([request]) => request.model)).toEqual(['stub-model', 'stub-fast']);
+      expect(result.steps[1]).toMatchObject({
+        model: 'stub-fast',
+        modelRouting: { recommendation: 'fast_model', applied: true, reason: 'jev_fast_model' },
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('falls back to the primary model when a routed request fails', async () => {
+    process.env.TESTRONAUT_JEV_ROUTING = 'live';
+    process.env.TESTRONAUT_JEV_FAST_MODEL = 'stub-fast';
+    process.env.TESTRONAUT_JEV_API_KEY = 'test-key';
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        model: 'jev-test',
+        answers: {
+          modelRoute: { type: 'choice', choice: 'fast_model', confidence: 0.95 },
+          missionStage: { type: 'choice', choice: 'interact', confidence: 0.9 },
+          recoveryRoute: { type: 'choice', choice: 'continue', confidence: 0.9 },
+        },
+        usage: { input_tokens: 50, output_tokens: 2 },
+      }),
+    }));
+    shared.chatMock
+      .mockResolvedValueOnce({
+        message: {
+          role: 'assistant', content: '',
+          tool_calls: [{ id: 'route_1', type: 'function', function: { name: 'click_text', arguments: '{"text":"Continue"}' } }],
+        },
+        usage: { total_tokens: 10 }, headers: {},
+      })
+      .mockRejectedValueOnce(new Error('fast model unavailable'))
+      .mockResolvedValueOnce({
+        message: { role: 'assistant', content: 'FINAL: success' },
+        usage: { total_tokens: 5 }, headers: {},
+      });
+
+    try {
+      const result = await turnLoop(browser, baseMessages(), 2, 0, 0, {}, { steps: [], missionName: 'demo' });
+      expect(shared.chatMock.mock.calls.map(([request]) => request.model)).toEqual(['stub-model', 'stub-fast', 'stub-model']);
+      expect(result.steps[1].modelRouting).toMatchObject({ fallback: true, selectedModel: 'stub-model' });
+      expect(result.steps[1].events).toContain('↩️ Jev route fallback to stub-model');
+    } finally {
+      globalThis.fetch = originalFetch;
     }
   });
 

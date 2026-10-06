@@ -52,6 +52,7 @@ import { summarizeTurnIntentFromMessage } from './turnIntent.js';
 import { maskPreview, redactArgs, redactPasswordInText } from './redaction.js';
 import { buildJevShadowState, buildJevStrategyQuestions, evaluateJevCompletionCandidate, evaluateJevShadow, extractJevStrategyResults, resolveJevShadowConfig, sanitizeJevShadowEvents } from './jevShadow.js';
 import { buildBrowserEvidence, collectBrowserControlState, mergeBrowserControlState } from './browserEvidence.js';
+import { chooseJevTurnModel, resolveJevRoutingConfig } from './jevRouting.js';
 import { 
   sanitizeHeavyToolHistory, 
   pruneConversationContext,
@@ -291,6 +292,10 @@ export const turnLoop = async (
   };
   const stepsArchive = ctx.stepsArchive || steps;
   const jevShadowConfig = resolveJevShadowConfig();
+  const jevRoutingConfig = resolveJevRoutingConfig(process.env, {
+    provider: PROVIDER_ID,
+    primaryModel: MODEL_ID,
+  });
   const retryLimitClamped = Math.min(10, Math.max(1, Number.isFinite(retryLimitRaw) ? retryLimitRaw : DEFAULT_TURN_RETRY_LIMIT)); // retries allowed (excludes initial)
   const maxAttempts = retryLimitClamped + 1; // includes initial attempt
   ctx.groundControl = groundControl;
@@ -303,9 +308,11 @@ export const turnLoop = async (
   ensureDocProgress(agentMemory, resourceGuardCfg);
   let turnRetries = 0;
   let stepSeq = ctx._stepSeq || 0;
+  let nextJevStrategy = null;
 
   const recordJevShadow = async (step, msg, phase, proposedTools = []) => {
     if (!jevShadowConfig.enabled) return;
+    nextJevStrategy = null;
     // Keep status lines and purpose-built telemetry, but exclude raw tool payload
     // lines (which may contain DOM, page text, or other third-party data).
     const safeEvents = sanitizeJevShadowEvents(step.events, redactPasswordInText);
@@ -338,6 +345,7 @@ export const turnLoop = async (
         step.jevShadow.answers,
         strategyCatalog,
       );
+      nextJevStrategy = step.jevShadow.strategies;
     }
     step.jevShadow.completionGate = evaluateJevCompletionCandidate(step.jevShadow, {
       threshold: jevShadowConfig.gateThreshold,
@@ -424,6 +432,13 @@ export const turnLoop = async (
       result: '🟡 In Progress',
       missionName,
     };
+    const modelRouting = chooseJevTurnModel(nextJevStrategy, jevRoutingConfig, {
+      provider: PROVIDER_ID,
+      primaryModel: MODEL_ID,
+    });
+    step.modelRouting = modelRouting;
+    step.provider = PROVIDER_ID;
+    step.model = modelRouting.selectedModel;
     if (attempt > 1) {
       const retryNumber = attempt - 1;
       step.events.push(`🔁 Re-attempt ${retryNumber}/${retryLimitClamped} for turn`);
@@ -486,13 +501,14 @@ export const turnLoop = async (
       // ─────────────────────────────────────────────
       // STEP 2: Request next reasoning turn from model
       // ─────────────────────────────────────────────
-      const contextCheck = await warnIfContextNearLimit(MODEL_ID, { messages, tools: activeToolsSchema });
+      const turnModel = modelRouting.selectedModel;
+      const contextCheck = await warnIfContextNearLimit(turnModel, { messages, tools: activeToolsSchema });
       const projectedTokens = contextCheck.estimatedTokens
-        ?? await tokenEstimate(MODEL_ID, { messages, tools: activeToolsSchema });
+        ?? await tokenEstimate(turnModel, { messages, tools: activeToolsSchema });
       ({ totalTokensUsed, turnTimestamps, shouldBackoff } = await tokenUseCoolOff(
         totalTokensUsed,
         turnTimestamps,
-        MODEL_ID,
+        turnModel,
         projectedTokens
       ));
       if (shouldBackoff) {
@@ -500,13 +516,21 @@ export const turnLoop = async (
         turn -= 1;
         continue;
       }
-      const { message, usage, headers } = await llm.chat({
-        model: MODEL_ID,
-        messages,
-        tools: activeToolsSchema,
-      });
+      let modelResponse;
+      try {
+        modelResponse = await llm.chat({ model: turnModel, messages, tools: activeToolsSchema });
+      } catch (routingError) {
+        if (!modelRouting.applied) throw routingError;
+        modelRouting.fallback = true;
+        modelRouting.fallbackReason = routingError?.message || String(routingError);
+        modelRouting.selectedModel = MODEL_ID;
+        step.model = MODEL_ID;
+        step.events.push(`↩️ Jev route fallback to ${MODEL_ID}`);
+        modelResponse = await llm.chat({ model: MODEL_ID, messages, tools: activeToolsSchema });
+      }
+      const { message, usage, headers } = modelResponse;
       response = { message, usage, headers };
-      updateLimitsFromHeaders(MODEL_ID, headers);
+      updateLimitsFromHeaders(modelRouting.selectedModel, headers);
 
     } catch (err) {
       // ─────────────────────────────────────────────

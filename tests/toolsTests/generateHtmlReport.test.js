@@ -162,6 +162,27 @@ describe('generateHtmlReport', () => {
     expect(html).not.toContain('strategy eval');
   });
 
+  it('breaks dynamically routed token usage down by model', () => {
+    const outPath = path.join(tmpDir, 'routed.html');
+    generateHtmlReport({
+      runId: 'routed_run',
+      llm: { provider: 'openai', model: 'gpt-5.6-terra' },
+      missions: [{
+        missionName: 'Routed Mission', status: 'passed', steps: [
+          { turn: 0, model: 'gpt-5.6-terra', tokensUsed: 100, inputTokens: 90, outputTokens: 10, result: '✅ Passed' },
+          { turn: 1, model: 'gpt-5.6-luna', tokensUsed: 40, inputTokens: 35, outputTokens: 5, result: '✅ Passed', modelRouting: { applied: true } },
+        ],
+      }],
+    }, outPath);
+
+    const html = fs.readFileSync(outPath, 'utf8');
+    expect(html).toContain('<strong>gpt-5.6-terra + gpt-5.6-luna</strong>');
+    expect(html).toContain('gpt-5.6-terra tokens: 100 (90 in / 10 out)');
+    expect(html).toContain('gpt-5.6-luna tokens: 40 (35 in / 5 out)');
+    expect(html).toContain('By model: gpt-5.6-terra 100 / gpt-5.6-luna 40');
+    expect(html).toContain('routed by Jev');
+  });
+
   it('makes skipped Jev evaluations visible', () => {
     const outPath = path.join(tmpDir, 'jev-skipped.html');
     generateHtmlReport({

@@ -429,11 +429,11 @@ Use a different experimental threshold with, for example:
 TESTRONAUT_JEV_GATE=1 TESTRONAUT_JEV_GATE_THRESHOLD=0.85 testronaut login.mission.js
 ```
 
-JSON and HTML reports show Jev evaluations, input/output tokens, latency,
-completion candidates, triggered gates, and estimated input cost for the full
-run and each mission submission. The estimate defaults to Jev's current
-`$0.042` per million input tokens. Override the reporting rate without changing
-API behavior:
+JSON reports retain the full Jev evaluation telemetry. HTML reports show the
+models used and input/output token totals at run, mission, and turn levels
+without displaying internal strategy counts or estimated cost. The JSON cost
+estimate defaults to Jev's current `$0.042` per million input tokens. Override
+the reporting rate without changing API behavior:
 
 ```bash
 TESTRONAUT_JEV_INPUT_USD_PER_MILLION=0.042 testronaut
@@ -460,9 +460,32 @@ The same Jev request then records:
 - continue, retry, reobserve, escalate, or stop recovery policy;
 - mission stage and prerequisite readiness.
 
-Strategy results and aggregates appear in JSON and HTML reports. They remain
-advisory and cannot execute actions, change models, filter DOM, retry, or stop a
-mission.
+Strategy results and aggregates appear in JSON reports. They remain advisory
+unless a separate experiment such as dynamic routing is explicitly enabled.
+
+### Experimental dynamic model routing
+
+Dynamic routing uses a high-confidence Jev `fast_model` recommendation from the
+completed turn to choose the model for the next turn. Start in shadow mode to
+record eligibility without changing models:
+
+```bash
+TESTRONAUT_JEV_ROUTING=shadow TESTRONAUT_JEV_FAST_MODEL=gpt-5.6-luna testronaut
+```
+
+After reviewing the recommendations, enable one-turn live routing:
+
+```bash
+TESTRONAUT_JEV_ROUTING=live TESTRONAUT_JEV_FAST_MODEL=gpt-5.6-luna testronaut
+```
+
+OpenAI runs default the fast model to `gpt-5.6-luna`; other providers require
+`TESTRONAUT_JEV_FAST_MODEL`. The default confidence threshold is 80% and can be
+changed with `TESTRONAUT_JEV_ROUTING_THRESHOLD`. Authentication, completion,
+failed, uncertain recovery, and low-confidence turns stay on the primary model.
+If the routed request fails, Testronaut retries the turn on the primary model.
+Reports record the actual model and tokens for every turn and split aggregate
+tokens by model.
 
 Evaluate risk-based suite selection separately as a dry run:
 

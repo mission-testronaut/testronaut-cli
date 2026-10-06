@@ -116,7 +116,8 @@ function compactText(value, maxLength = 2000) {
 
 export function resolveJevShadowConfig(env = process.env) {
   const gateEnabled = truthy(env.TESTRONAUT_JEV_GATE);
-  const strategiesEnabled = truthy(env.TESTRONAUT_JEV_STRATEGIES);
+  const routingEnabled = /^(shadow|live)$/i.test(String(env.TESTRONAUT_JEV_ROUTING || '').trim());
+  const strategiesEnabled = truthy(env.TESTRONAUT_JEV_STRATEGIES) || routingEnabled;
   return {
     enabled: truthy(env.TESTRONAUT_JEV_SHADOW) || gateEnabled || strategiesEnabled,
     gateEnabled,

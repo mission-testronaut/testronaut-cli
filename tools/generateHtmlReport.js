@@ -65,19 +65,29 @@ export function generateHtmlReport(report, outputPath) {
   const summarizeModelTokens = (steps) => steps.reduce((usage, step) => {
     const input = Number(step.inputTokens || 0);
     const output = Number(step.outputTokens || 0);
+    const model = String(step.model || llm.model || 'Model');
     usage.input += input;
     usage.output += output;
     usage.total += Number(step.tokensUsed ?? (input + output));
+    usage.byModel[model] ||= { input: 0, output: 0, total: 0, turns: 0 };
+    usage.byModel[model].input += input;
+    usage.byModel[model].output += output;
+    usage.byModel[model].total += Number(step.tokensUsed ?? (input + output));
+    usage.byModel[model].turns += 1;
     return usage;
-  }, { input: 0, output: 0, total: 0 });
+  }, { input: 0, output: 0, total: 0, byModel: {} });
   const tokenMeta = (modelUsage, jevUsage) => [
     `Model tokens: ${formatTokens(modelUsage.total)} (${formatTokens(modelUsage.input)} in / ${formatTokens(modelUsage.output)} out)`,
+    Object.keys(modelUsage.byModel).length > 1
+      ? `By model: ${Object.entries(modelUsage.byModel).map(([model, usage]) => `${model} ${formatTokens(usage.total)}`).join(' / ')}`
+      : '',
     jevUsage?.completed ? `Jev tokens: ${formatTokens(jevUsage.inputTokens)} in / ${formatTokens(jevUsage.outputTokens)} out` : '',
   ].filter(Boolean).join(' • ');
   const reportJevUsage = report.jevShadow?.evaluations
     ? report.jevShadow
     : summarizeJevUsage(missions.flatMap(m => Array.isArray(m.steps) ? m.steps : []));
   const reportModelUsage = summarizeModelTokens(missions.flatMap(m => Array.isArray(m.steps) ? m.steps : []));
+  const reportModels = Object.keys(reportModelUsage.byModel);
   const jevLogo = '<svg viewBox="0 0 24 24" role="img" aria-hidden="true"><rect width="24" height="24" rx="4" fill="#e547b5"/><g fill="none" stroke="#181a1b" stroke-width="2.25" stroke-linecap="square" stroke-linejoin="round"><path d="M12 2.5 6.1 6v10.1l3.2 1.9 2.7-1.6V9.6l3-1.8V4.3z"/><path d="m9.3 9.6 2.7 1.6 3-1.8 3 1.8v7L12 21.5l-3-1.8V13z"/><path d="m12 11.2 3 1.8 3-1.8M15 13v5.2l-6 3.3M9.3 9.6 12 8l3 1.8"/></g></svg>';
 
   const submissionBlock = (m) => {
@@ -114,6 +124,11 @@ export function generateHtmlReport(report, outputPath) {
         : step.jevShadow
           ? ` • Jev: ${esc(step.jevShadow.status)}${step.jevShadow.reason ? ` (${esc(step.jevShadow.reason)})` : ''}`
           : '';
+      const routeLabel = step.modelRouting?.fallback
+        ? ' • Jev route fallback'
+        : step.modelRouting?.applied
+          ? ' • routed by Jev'
+          : '';
 
       const plan = (typeof step.summary === 'string' && step.summary.trim())
         ? step.summary.trim()
@@ -129,7 +144,7 @@ export function generateHtmlReport(report, outputPath) {
             ${humanInput}
             ${planSpan}
             <span class="step-result ${ok ? 'ok' : 'bad'}" ${resultTooltip ? `title="${esc(resultTooltip)}"` : ''}>${esc(resultRaw)}</span>
-            <span class="tokens">Model tokens: ${esc(step.tokensUsed ?? '—')} (${esc(step.inputTokens ?? '—')} in / ${esc(step.outputTokens ?? '—')} out)${stepJev}</span>
+            <span class="tokens">${esc(step.model || llm.model || 'Model')} tokens: ${esc(step.tokensUsed ?? '—')} (${esc(step.inputTokens ?? '—')} in / ${esc(step.outputTokens ?? '—')} out)${routeLabel}${stepJev}</span>
           </summary>
           <pre class="events">${esc(events.join('\n')) || '(no events)'}</pre>
           ${imgTag}
@@ -407,7 +422,7 @@ export function generateHtmlReport(report, outputPath) {
     <div class="eyebrow">Mission Control · Flight Report</div>
     <h1>🧑‍🚀 <span class="gradient-text">Testronaut Report</span></h1>
     <div class="run-meta">
-      <div class="provider-meta"><span class="provider-logo" title="${esc(provider.name)}" aria-label="${esc(provider.name)}">${provider.logo}</span><strong>${esc(llm.model ?? '—')}</strong>${reportJevUsage.evaluations ? ` <span aria-hidden="true">+</span> <span class="provider-logo" title="Jev" aria-label="Jev">${jevLogo}</span><strong>Jev</strong>` : ''}</div>
+      <div class="provider-meta"><span class="provider-logo" title="${esc(provider.name)}" aria-label="${esc(provider.name)}">${provider.logo}</span><strong>${esc((reportModels.length ? reportModels : [llm.model ?? '—']).join(' + '))}</strong>${reportJevUsage.evaluations ? ` <span aria-hidden="true">+</span> <span class="provider-logo" title="Jev" aria-label="Jev">${jevLogo}</span><strong>Jev</strong>` : ''}</div>
       <div><strong>Run ID:</strong> ${esc(runId ?? '—')}</div>
       <div><strong>Start:</strong> ${esc(startTime ?? '—')}</div>
       <div><strong>End:</strong> ${esc(endTime ?? '—')}</div>
@@ -420,7 +435,9 @@ export function generateHtmlReport(report, outputPath) {
     <div class="pill">Missions: ${esc(summary.totalMissions ?? totals.total)}</div>
     <div class="pill ok">Passed: ${esc(summary.passed ?? totals.passed)}</div>
     <div class="pill bad">Failed: ${esc(summary.failed ?? totals.failed)}</div>
-    <div class="pill">Model tokens: ${esc(formatTokens(reportModelUsage.total))} (${esc(formatTokens(reportModelUsage.input))} in / ${esc(formatTokens(reportModelUsage.output))} out)</div>
+    ${Object.entries(reportModelUsage.byModel).length > 1
+      ? Object.entries(reportModelUsage.byModel).map(([model, usage]) => `<div class="pill">${esc(model)} tokens: ${esc(formatTokens(usage.total))} (${esc(formatTokens(usage.input))} in / ${esc(formatTokens(usage.output))} out)</div>`).join('')
+      : `<div class="pill">Model tokens: ${esc(formatTokens(reportModelUsage.total))} (${esc(formatTokens(reportModelUsage.input))} in / ${esc(formatTokens(reportModelUsage.output))} out)</div>`}
     ${reportJevUsage.completed ? `<div class="pill">Jev tokens: ${esc(formatTokens(reportJevUsage.inputTokens))} in / ${esc(formatTokens(reportJevUsage.outputTokens))} out</div>` : ''}
     ${reportJevUsage.skipped ? `<div class="pill warn">Jev skipped: ${esc(formatTokens(reportJevUsage.skipped))}</div>` : ''}
     ${reportJevUsage.errors ? `<div class="pill warn">Jev errors: ${esc(formatTokens(reportJevUsage.errors))}</div>` : ''}
