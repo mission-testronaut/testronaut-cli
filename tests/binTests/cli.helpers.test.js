@@ -128,6 +128,15 @@ describe('cli helpers', () => {
     expect(res.invalid).toBe(false);
   });
 
+  it('parses optimization objective and execution mode flags', () => {
+    expect(__test__.parseOptimizationArgs([
+      '--optimize=balanced', '--optimization-mode', 'live', 'login.mission.js',
+    ])).toMatchObject({
+      objective: 'balanced', mode: 'live', args: ['login.mission.js'], invalid: false,
+    });
+    expect(__test__.parseOptimizationArgs(['--optimize=unknown'])).toMatchObject({ invalid: true });
+  });
+
   it('parses vercel bypass value from next arg', () => {
     const { parseVercelBypassArgs } = __test__;
     const res = parseVercelBypassArgs(['--vercel_bypass', 'abc', 'login']);

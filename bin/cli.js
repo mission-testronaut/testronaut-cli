@@ -61,6 +61,7 @@ import { createTerminalUi } from './terminalUi.js';
 import { summarizeJevUsage } from '../core/jevUsage.js';
 import { evaluateJevShadow, resolveJevShadowConfig } from '../core/jevShadow.js';
 import { buildJevSuiteSelectionRequest, interpretJevSuiteSelection } from '../core/jevSuiteSelection.js';
+import { applyOptimizationPolicy, OPTIMIZATION_MODES, OPTIMIZATION_OBJECTIVES, resolveOptimizationPolicy } from '../core/optimization.js';
 
 // Keep PW browsers inside the project to avoid global cache skew
 process.env.PLAYWRIGHT_BROWSERS_PATH = process.env.PLAYWRIGHT_BROWSERS_PATH || '0';
@@ -363,6 +364,7 @@ export const __test__ = {
   createVercelBypassHeader,
   parseProviderArgs,
   parseRunOptionsArgs,
+  parseOptimizationArgs,
   detectCliName,
   isDirectInvocation,
   resolveMissionPath,
@@ -392,6 +394,7 @@ function resolveReportFile(requested, reportDir, cwd = process.cwd()) {
 
 function buildEffectiveConfig(config = {}, cwd = process.cwd()) {
   const resolved = resolveProviderModel({ cwd });
+  const optimization = resolveOptimizationPolicy({ config });
   const source = key => process.env[key] ? 'environment' : undefined;
   return {
     configFile: path.resolve(cwd, 'testronaut-config.json'),
@@ -404,6 +407,7 @@ function buildEffectiveConfig(config = {}, cwd = process.cwd()) {
     addTags: normalizeTags([...(config.addTags || []), ...cliAddTags]),
     screenshots: screenshotsEnabled,
     authenticated: Boolean(config.sessionToken),
+    optimization,
   };
 }
 
@@ -511,6 +515,34 @@ function parseTagArgs(argsList) {
 }
 __test__.parseTagArgs = parseTagArgs;
 
+function parseOptimizationArgs(argsList) {
+  const nextArgs = [...argsList];
+  const values = {};
+  let invalid = false;
+  const definitions = [
+    { names: ['--optimize'], key: 'objective' },
+    { names: ['--optimization-mode'], key: 'mode' },
+  ];
+  for (const definition of definitions) {
+    const index = nextArgs.findIndex(arg => definition.names.some(name => arg === name || arg.startsWith(`${name}=`)));
+    if (index < 0) continue;
+    const raw = nextArgs[index];
+    const inline = raw.includes('=');
+    const value = inline ? raw.slice(raw.indexOf('=') + 1) : nextArgs[index + 1];
+    if (!value || (!inline && value.startsWith('-'))) invalid = true;
+    else values[definition.key] = value.trim().toLowerCase();
+    nextArgs.splice(index, inline ? 1 : (value && !value.startsWith('-') ? 2 : 1));
+  }
+  const probe = resolveOptimizationPolicy({
+    env: {
+      ...(values.objective ? { TESTRONAUT_OPTIMIZE: values.objective } : {}),
+      ...(values.mode ? { TESTRONAUT_OPTIMIZATION_MODE: values.mode } : {}),
+    },
+  });
+  if (!probe.valid) invalid = true;
+  return { args: nextArgs, ...values, invalid };
+}
+
 // Look for --model=<id> or --model <id>
 let modelOverride;
 const modelFlagIndex = args.findIndex(a => a === '--model' || a.startsWith('--model='));
@@ -537,6 +569,15 @@ if (providerResult.invalid) {
   console.warn('⚠️ Invalid --provider value. Provide a non-empty provider id.');
 }
 args = providerResult.args;
+
+const optimizationArgs = parseOptimizationArgs(args);
+args = optimizationArgs.args;
+if (optimizationArgs.invalid) {
+  console.error(`❌ --optimize must be one of ${OPTIMIZATION_OBJECTIVES.join(', ')} and --optimization-mode must be one of ${OPTIMIZATION_MODES.join(', ')}.`);
+  process.exit(1);
+}
+if (optimizationArgs.objective) process.env.TESTRONAUT_OPTIMIZE = optimizationArgs.objective;
+if (optimizationArgs.mode) process.env.TESTRONAUT_OPTIMIZATION_MODE = optimizationArgs.mode;
 const providerOverride = providerResult.provider;
 if (providerOverride) {
   process.env.TESTRONAUT_PROVIDER = providerOverride.trim();
@@ -771,6 +812,8 @@ Options:
   --debug[=<bool>]          Enable verbose debug logs (or set TESTRONAUT_DEBUG=1)
   --provider=<id>           Override LLM provider (openai, gemini, or anthropic)
   --model=<id>              Override the provider model for this run
+  --optimize=<objective>    Optimization objective: off, cost, tokens, balanced, or speed
+  --optimization-mode=<m>   Optimization control: off, shadow, or live
   --session=<mode>          Browser auth reuse: isolated (default) or shared-auth
   -o, --options key=value   Set run options, such as mfa=github-test-mfa or inbox=github-staging
   --dev                     Use the staging API base URL
@@ -871,6 +914,14 @@ if (args.includes('serve') || args.includes('view')) {
 
 const { root: missionsRoot, files: discoveredMissions } = await discoverMissionFiles({ cwd: process.cwd() });
 const tagConfig = await loadConfig(process.cwd());
+const optimizationPolicy = resolveOptimizationPolicy({ config: tagConfig });
+if (!optimizationPolicy.valid) {
+  console.error('❌ Invalid optimization objective or mode in testronaut-config.json.');
+  process.exit(1);
+}
+applyOptimizationPolicy(optimizationPolicy, process.env, {
+  force: Boolean(optimizationArgs.objective || optimizationArgs.mode),
+});
 const outputDir = resolveReportDir(tagConfig);
 process.env.TESTRONAUT_OUTPUT_DIR = outputDir;
 process.env.TESTRONAUT_RUN_ID = runId;
@@ -1133,6 +1184,7 @@ const report = {
     model: llmModel,
   },
   session: { mode: sessionMode },
+  optimization: optimizationPolicy,
   summary: {
     totalMissions: flatMissions.length,
     passed: flatMissions.filter(m => m.status === 'passed').length,

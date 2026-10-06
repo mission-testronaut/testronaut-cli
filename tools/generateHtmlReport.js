@@ -28,7 +28,7 @@ import { summarizeJevUsage } from '../core/jevUsage.js';
  * @returns {string} absolute path to the written HTML file
  */
 export function generateHtmlReport(report, outputPath) {
-  const { runId, startTime, endTime, missions = [], summary = {}, llm = {}, cli = {} } = report;
+  const { runId, startTime, endTime, missions = [], summary = {}, llm = {}, cli = {}, optimization } = report;
   const reportTags = normalizeTags(report.tags ?? missions.flatMap(m => m.submissionType === 'mission' ? (m.tags ?? []) : []));
   const durationSec =
     (startTime && endTime)
@@ -435,6 +435,7 @@ export function generateHtmlReport(report, outputPath) {
     <div class="pill">Missions: ${esc(summary.totalMissions ?? totals.total)}</div>
     <div class="pill ok">Passed: ${esc(summary.passed ?? totals.passed)}</div>
     <div class="pill bad">Failed: ${esc(summary.failed ?? totals.failed)}</div>
+    ${optimization?.configured ? `<div class="pill">Optimization: ${esc(optimization.objective)} (${esc(optimization.mode)})</div>` : ''}
     ${Object.entries(reportModelUsage.byModel).length > 1
       ? Object.entries(reportModelUsage.byModel).map(([model, usage]) => `<div class="pill">${esc(model)} tokens: ${esc(formatTokens(usage.total))} (${esc(formatTokens(usage.input))} in / ${esc(formatTokens(usage.output))} out)</div>`).join('')
       : `<div class="pill">Model tokens: ${esc(formatTokens(reportModelUsage.total))} (${esc(formatTokens(reportModelUsage.input))} in / ${esc(formatTokens(reportModelUsage.output))} out)</div>`}

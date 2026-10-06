@@ -465,6 +465,38 @@ unless a separate experiment such as dynamic routing is explicitly enabled.
 
 ### Experimental dynamic model routing
 
+Choose an optimization objective and whether it runs in shadow or live mode:
+
+```bash
+testronaut --optimize=cost --optimization-mode=live
+testronaut --optimize=tokens --optimization-mode=shadow
+testronaut --optimize=balanced --optimization-mode=live
+testronaut --optimize=off
+```
+
+The supported objectives are `off`, `cost`, `tokens`, `balanced`, and `speed`.
+`cost` uses cheaper family-local models; `tokens` currently uses the validated
+completion gate and is the extension point for context filtering;
+`balanced` combines both; and `speed` uses fast-model routing plus completion.
+When an objective is supplied without a mode, it defaults to `shadow`.
+
+The equivalent `testronaut-config.json` configuration is:
+
+```json
+{
+  "optimization": {
+    "objective": "balanced",
+    "mode": "live",
+    "guardrails": {
+      "minimumRoutingProbability": 0.4
+    }
+  }
+}
+```
+
+CLI flags override configuration. Existing `TESTRONAUT_JEV_*` variables remain
+available as lower-level experimental overrides.
+
 Dynamic routing uses a high-confidence Jev `fast_model` recommendation from the
 completed turn to choose the model for the next turn. Start in shadow mode to
 record eligibility without changing models:
