@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildBrowserEvidence } from '../../core/browserEvidence.js';
+import { buildBrowserEvidence, mergeBrowserControlState } from '../../core/browserEvidence.js';
 
 describe('browser evidence', () => {
   it('extracts bounded structure without field values or URL secrets', () => {
@@ -43,5 +43,28 @@ describe('browser evidence', () => {
       previousUrl: 'https://example.test/login',
       routeChanged: true,
     });
+  });
+
+  it('merges only boolean live state without exposing field contents', () => {
+    const evidence = { controls: [{ tag: 'input', id: 'password' }] };
+    const merged = mergeBrowserControlState(evidence, [{
+      hasValue: true,
+      checked: false,
+      disabled: false,
+      readOnly: true,
+      visible: true,
+      value: 'must-not-copy',
+    }]);
+
+    expect(merged.controls[0]).toEqual({
+      tag: 'input',
+      id: 'password',
+      hasValue: true,
+      checked: false,
+      disabled: false,
+      readOnly: true,
+      visible: true,
+    });
+    expect(JSON.stringify(merged)).not.toContain('must-not-copy');
   });
 });

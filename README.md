@@ -400,8 +400,9 @@ The shadow request contains a bounded representation of the mission, assistant
 response, redacted tool arguments, recent events, Ground Control state, and
 structured browser evidence derived from DOM snapshots already collected by
 Testronaut. Browser evidence includes the query-free URL, title, headings,
-control labels, and element counts. It excludes raw DOM, body text, input
-values, URL queries, and URL fragments. Because this data is sent to a
+control labels, element counts, and value-free live control flags (`hasValue`,
+`checked`, `disabled`, `readOnly`, and `visible`). It excludes raw DOM, body
+text, input values and value lengths, URL queries, and URL fragments. Because this data is sent to a
 third-party service, enable the experiment only for test data appropriate for that service.
 API errors and timeouts are recorded as shadow telemetry and do not stop the
 mission.

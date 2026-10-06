@@ -51,7 +51,7 @@ import { getLLM } from '../llm/llmFactory.js';
 import { summarizeTurnIntentFromMessage } from './turnIntent.js';
 import { maskPreview, redactArgs, redactPasswordInText } from './redaction.js';
 import { buildJevShadowState, buildJevStrategyQuestions, evaluateJevCompletionCandidate, evaluateJevShadow, extractJevStrategyResults, resolveJevShadowConfig, sanitizeJevShadowEvents } from './jevShadow.js';
-import { buildBrowserEvidence } from './browserEvidence.js';
+import { buildBrowserEvidence, collectBrowserControlState, mergeBrowserControlState } from './browserEvidence.js';
 import { 
   sanitizeHeavyToolHistory, 
   pruneConversationContext,
@@ -175,6 +175,16 @@ function currentBrowserUrl(browser) {
   try { return browser?.page?.url?.() || null; } catch { return null; }
 }
 
+async function captureBrowserEvidence(browser, html, previous) {
+  const evidence = buildBrowserEvidence(html, {
+    url: currentBrowserUrl(browser),
+    previous,
+    redactText: redactPasswordInText,
+  });
+  const states = await collectBrowserControlState(browser);
+  return mergeBrowserControlState(evidence, states);
+}
+
 /**
  * Utility: format byte counts into human-readable strings.
  * Used when reporting upload/download events in mission logs.
@@ -227,11 +237,11 @@ const pushDOMAssistant = async (browser, messages, agentMemory, { skipIfLastTool
     agentMemory
   );
   await tokenEstimate(MODEL_ID, domHtml);
-  agentMemory.browserEvidence = buildBrowserEvidence(domHtml, {
-    url: currentBrowserUrl(browser),
-    previous: agentMemory.browserEvidence,
-    redactText: redactPasswordInText,
-  });
+  agentMemory.browserEvidence = await captureBrowserEvidence(
+    browser,
+    domHtml,
+    agentMemory.browserEvidence,
+  );
 
   // Push the corresponding tool response back into the conversation
   messages.push({
@@ -299,11 +309,11 @@ export const turnLoop = async (
     // Keep status lines and purpose-built telemetry, but exclude raw tool payload
     // lines (which may contain DOM, page text, or other third-party data).
     const safeEvents = sanitizeJevShadowEvents(step.events, redactPasswordInText);
-    agentMemory.browserEvidence = buildBrowserEvidence(null, {
-      url: currentBrowserUrl(browser),
-      previous: agentMemory.browserEvidence,
-      redactText: redactPasswordInText,
-    });
+    agentMemory.browserEvidence = await captureBrowserEvidence(
+      browser,
+      null,
+      agentMemory.browserEvidence,
+    );
     const state = buildJevShadowState({
       mission: redactPasswordInText(ctx.goal || missionName),
       turn: step.turn,
@@ -868,11 +878,11 @@ export const turnLoop = async (
         }
 
         if (!errorMessage && fnName === 'get_dom') {
-          agentMemory.browserEvidence = buildBrowserEvidence(result, {
-            url: currentBrowserUrl(browser),
-            previous: agentMemory.browserEvidence,
-            redactText: redactPasswordInText,
-          });
+          agentMemory.browserEvidence = await captureBrowserEvidence(
+            browser,
+            result,
+            agentMemory.browserEvidence,
+          );
         }
 
         // Decide what to send back to the LLM for this tool.

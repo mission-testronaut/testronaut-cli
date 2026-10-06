@@ -132,4 +132,53 @@ export function buildBrowserEvidence(html, {
   };
 }
 
+export function mergeBrowserControlState(evidence, states = []) {
+  if (!evidence || !Array.isArray(evidence.controls)) return evidence;
+  return {
+    ...evidence,
+    controls: evidence.controls.map((control, index) => {
+      const state = states[index];
+      if (!state) return control;
+      return {
+        ...control,
+        hasValue: Boolean(state.hasValue),
+        checked: Boolean(state.checked),
+        disabled: Boolean(state.disabled),
+        readOnly: Boolean(state.readOnly),
+        visible: Boolean(state.visible),
+      };
+    }),
+  };
+}
+
+/**
+ * Read only boolean control state from the live page. Values and value lengths
+ * never leave the browser context.
+ */
+export async function collectBrowserControlState(browser) {
+  try {
+    const locator = browser?.page?.locator?.(
+      'button, a[href], input, select, textarea, [role="button"], [role="link"]',
+    );
+    if (!locator?.evaluateAll) return [];
+    return await locator.evaluateAll(elements => elements.slice(0, 20).map(element => {
+      const tag = element.tagName.toLowerCase();
+      const style = getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      const supportsValue = tag === 'input' || tag === 'select' || tag === 'textarea';
+      const inputType = tag === 'input' ? String(element.type || '').toLowerCase() : '';
+      const supportsChecked = tag === 'input' && ['checkbox', 'radio'].includes(inputType);
+      return {
+        hasValue: supportsValue ? String(element.value ?? '').length > 0 : false,
+        checked: supportsChecked ? Boolean(element.checked) : false,
+        disabled: 'disabled' in element ? Boolean(element.disabled) : element.getAttribute('aria-disabled') === 'true',
+        readOnly: 'readOnly' in element ? Boolean(element.readOnly) : false,
+        visible: rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden',
+      };
+    }));
+  } catch {
+    return [];
+  }
+}
+
 export const __browserEvidenceInternals = { compact, safeUrl };

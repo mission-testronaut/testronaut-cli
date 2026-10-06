@@ -41,9 +41,9 @@ const STRATEGY_QUESTIONS = {
     type: 'choice',
     instructions: 'Choose the least expensive reliable computation for the next turn.',
     criteria: {
-      deterministic: 'The CLI can execute a known action or assertion without a generative model.',
-      fast_model: 'A smaller fast generative model should be sufficient.',
-      full_model: 'Frontier reasoning or novel argument generation is required.',
+      deterministic: 'The exact action and every required argument are already constructed in state; code can execute it directly.',
+      fast_model: 'The relevant control or local intent is apparent, but a short tool choice, known-value mapping, or localized inference is still needed.',
+      full_model: 'Multi-step planning, broad ambiguity, novel content, or difficult recovery requires frontier reasoning.',
       observe: 'Collect more browser evidence before choosing.',
       finish: 'The mission is complete and should finish.',
     },
@@ -132,10 +132,16 @@ export function resolveJevShadowConfig(env = process.env) {
 function actionDescription(control = {}) {
   const selector = control.id ? `#${control.id}` : control.name ? `[name="${control.name}"]` : '';
   const label = control.label ? ` “${control.label}”` : '';
+  const state = [
+    control.hasValue ? 'currently populated' : 'currently empty',
+    control.checked ? 'checked' : '',
+    control.disabled ? 'disabled' : 'enabled',
+    control.visible === false ? 'not visible' : 'visible',
+  ].filter(Boolean).join(', ');
   if (['input', 'select', 'textarea'].includes(control.tag)) {
-    return `Fill or select ${control.tag}${label}${selector ? ` at ${selector}` : ''} using an already-known mission value.`;
+    return `Fill or select ${control.tag}${label}${selector ? ` at ${selector}` : ''} using an already-known mission value. Control state: ${state}. Do not refill an already populated control unless replacement is required.`;
   }
-  return `Click ${control.role || control.tag || 'control'}${label}${selector ? ` at ${selector}` : ''}.`;
+  return `Click ${control.role || control.tag || 'control'}${label}${selector ? ` at ${selector}` : ''}. Control state: ${state}.`;
 }
 
 export function buildJevStrategyQuestions(browserEvidence = {}) {
