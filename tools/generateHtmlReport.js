@@ -18,6 +18,7 @@
 import fs from 'fs';
 import path from 'path';
 import { normalizeTags } from '../core/tags.js';
+import { summarizeJevUsage } from '../core/jevUsage.js';
 
 /**
  * Render and write a Testronaut run report to disk.
@@ -59,6 +60,26 @@ export function generateHtmlReport(report, outputPath) {
     const [color, background] = tagPalette[index];
     return `color:${color};background:${background};border-color:${color}66`;
   };
+  const formatTokens = value => Number(value || 0).toLocaleString('en-US');
+  const formatUsd = value => `$${Number(value || 0).toFixed(Number(value || 0) < 0.01 ? 6 : 4)}`;
+  const jevMeta = (usage) => {
+    if (!usage?.evaluations) return '';
+    const spend = usage.completed
+      ? `${formatTokens(usage.inputTokens)} in / ${formatTokens(usage.outputTokens)} out • est. ${formatUsd(usage.estimatedInputCostUsd)}`
+      : 'no billable tokens';
+    const issues = [
+      usage.skipped ? `${formatTokens(usage.skipped)} skipped` : '',
+      usage.errors ? `${formatTokens(usage.errors)} errors` : '',
+      usage.triggeredCompletions ? `${formatTokens(usage.triggeredCompletions)} gates` : '',
+    ].filter(Boolean).join(' • ');
+    const strategy = usage.strategies?.evaluations
+      ? ` • ${formatTokens(usage.strategies.evaluations)} strategy eval`
+      : '';
+    return `Jev: ${formatTokens(usage.evaluations)} eval • ${spend}${issues ? ` • ${issues}` : ''}${strategy}`;
+  };
+  const reportJevUsage = report.jevShadow?.evaluations
+    ? report.jevShadow
+    : summarizeJevUsage(missions.flatMap(m => Array.isArray(m.steps) ? m.steps : []));
 
   const submissionBlock = (m) => {
     const mDurationSec =
@@ -67,6 +88,7 @@ export function generateHtmlReport(report, outputPath) {
         : (typeof m.durationSeconds === 'number' ? m.durationSeconds.toFixed(2) : '—');
 
     const steps = Array.isArray(m.steps) ? m.steps : [];
+    const missionJevUsage = m.jevShadow?.evaluations ? m.jevShadow : summarizeJevUsage(steps);
     const stepItems = steps.map((step, idx) => {
       const events = Array.isArray(step.events) ? step.events : [];
       const ok = /✅|Passed|Mission Success/i.test(step.result || '');
@@ -87,6 +109,11 @@ export function generateHtmlReport(report, outputPath) {
       const imgTag = step.screenshotPath
         ? `<img src="${esc(step.screenshotPath)}" alt="screenshot turn ${esc(step.turn ?? idx)}">`
         : '';
+      const stepJev = step.jevShadow?.status === 'ok'
+        ? ` • Jev: ${formatTokens(step.jevShadow.usage?.input_tokens)} in / ${formatTokens(step.jevShadow.usage?.output_tokens)} out`
+        : step.jevShadow
+          ? ` • Jev: ${esc(step.jevShadow.status)}${step.jevShadow.reason ? ` (${esc(step.jevShadow.reason)})` : ''}`
+          : '';
 
       const plan = (typeof step.summary === 'string' && step.summary.trim())
         ? step.summary.trim()
@@ -102,7 +129,7 @@ export function generateHtmlReport(report, outputPath) {
             ${humanInput}
             ${planSpan}
             <span class="step-result ${ok ? 'ok' : 'bad'}" ${resultTooltip ? `title="${esc(resultTooltip)}"` : ''}>${esc(resultRaw)}</span>
-            <span class="tokens">tokens: ${esc(step.tokensUsed ?? '—')} (in: ${esc(step.inputTokens ?? '—')}, out: ${esc(step.outputTokens ?? '—')}) / rolling: ${esc(step.totalTokensUsed ?? '—')}</span>
+            <span class="tokens">tokens: ${esc(step.tokensUsed ?? '—')} (in: ${esc(step.inputTokens ?? '—')}, out: ${esc(step.outputTokens ?? '—')}) / rolling: ${esc(step.totalTokensUsed ?? '—')}${stepJev}</span>
           </summary>
           <pre class="events">${esc(events.join('\n')) || '(no events)'}</pre>
           ${imgTag}
@@ -120,7 +147,7 @@ export function generateHtmlReport(report, outputPath) {
         <summary>
           <span class="name">${prettyTitle}</span>
           <span class="status ${statusClass}">${badge(m.status)}</span>
-          <span class="meta">steps: ${steps.length} • duration: ${mDurationSec}s</span>
+          <span class="meta">steps: ${steps.length} • duration: ${mDurationSec}s${missionJevUsage.evaluations ? ` • ${esc(jevMeta(missionJevUsage))}` : ''}</span>
           <span class="toolbar">
             <button class="btn-mini toggle" data-scope="submission" aria-label="Expand">▼</button>
           </span>
@@ -151,6 +178,7 @@ export function generateHtmlReport(report, outputPath) {
     const groupDur = (firstStart != null && lastEnd != null) ? ((lastEnd - firstStart) / 1000).toFixed(2) : '—';
     const tags = normalizeTags(subs.flatMap(s => s.submissionType === 'mission' ? (s.tags ?? []) : []));
     const sourceFiles = [...new Set(subs.map(s => s.file).filter(Boolean))];
+    const groupJevUsage = summarizeJevUsage(subs.flatMap(s => Array.isArray(s.steps) ? s.steps : []));
 
     // pre → mission → post
     const order = { premission: 0, mission: 1, postmission: 2 };
@@ -165,7 +193,7 @@ export function generateHtmlReport(report, outputPath) {
           <span class="name">${esc(missionName)}</span>
           <span class="mission-tags">${tags.map(tag => `<span class="tag-small" style="${tagStyle(tag)}">${esc(tag)}</span>`).join('')}</span>
           <span class="status ${status === 'failed' ? 'bad' : 'ok'}">${badge(status)}</span>
-          <span class="meta">${sourceFiles.length ? `${sourceFiles.map(esc).join(', ')} • ` : ''}submissions: ${subs.length} • steps: ${totalSteps} • duration: ${groupDur}s</span>
+          <span class="meta">${sourceFiles.length ? `${sourceFiles.map(esc).join(', ')} • ` : ''}submissions: ${subs.length} • steps: ${totalSteps} • duration: ${groupDur}s${groupJevUsage.evaluations ? ` • ${esc(jevMeta(groupJevUsage))}` : ''}</span>
           <span class="toolbar">
             <button class="btn-mini toggle" data-scope="mission" aria-label="Expand">▼</button>
           </span>
@@ -277,6 +305,7 @@ export function generateHtmlReport(report, outputPath) {
     .pill:first-child{border-color:rgba(255,138,67,.5);box-shadow:inset 3px 0 var(--orange);}
     .pill.ok{ background: var(--chip-ok-bg); color: var(--ok); border-color: var(--chip-ok-border); font-weight:700; }
     .pill.bad{ background: var(--chip-bad-bg); color: var(--bad); border-color: var(--chip-bad-border); font-weight:700; }
+    .pill.warn{ background:rgba(251,191,36,.14);color:#fbbf24;border-color:rgba(251,191,36,.4);font-weight:700; }
     .tag-filter{max-width:928px;margin:0 auto 20px;padding:18px 16px;background:rgba(2,6,23,.30);}
     .tag-filter-heading{display:flex;align-items:center;gap:7px;margin-bottom:12px;flex-wrap:wrap;}
     .tag-filter-title{font-size:14px;color:var(--text);font-weight:800;}
@@ -390,6 +419,16 @@ export function generateHtmlReport(report, outputPath) {
     <div class="pill">Missions: ${esc(summary.totalMissions ?? totals.total)}</div>
     <div class="pill ok">Passed: ${esc(summary.passed ?? totals.passed)}</div>
     <div class="pill bad">Failed: ${esc(summary.failed ?? totals.failed)}</div>
+    ${reportJevUsage.evaluations ? `<div class="pill">Jev input: ${esc(formatTokens(reportJevUsage.inputTokens))}</div>` : ''}
+    ${reportJevUsage.evaluations ? `<div class="pill">Jev output: ${esc(formatTokens(reportJevUsage.outputTokens))}</div>` : ''}
+    ${reportJevUsage.completed ? `<div class="pill">Jev estimated spend: ${esc(formatUsd(reportJevUsage.estimatedInputCostUsd))}</div>` : ''}
+    ${reportJevUsage.skipped ? `<div class="pill warn">Jev skipped: ${esc(formatTokens(reportJevUsage.skipped))}</div>` : ''}
+    ${reportJevUsage.errors ? `<div class="pill warn">Jev errors: ${esc(formatTokens(reportJevUsage.errors))}</div>` : ''}
+    ${reportJevUsage.strategies?.evaluations ? `<div class="pill">Jev strategy eval: ${esc(formatTokens(reportJevUsage.strategies.evaluations))}</div>` : ''}
+    ${reportJevUsage.strategies?.modelRoutes?.deterministic ? `<div class="pill">Deterministic routes: ${esc(formatTokens(reportJevUsage.strategies.modelRoutes.deterministic))}</div>` : ''}
+    ${reportJevUsage.strategies?.modelRoutes?.fast_model ? `<div class="pill">Fast-model routes: ${esc(formatTokens(reportJevUsage.strategies.modelRoutes.fast_model))}</div>` : ''}
+    ${reportJevUsage.strategies?.modelRoutes?.full_model ? `<div class="pill">Full-model routes: ${esc(formatTokens(reportJevUsage.strategies.modelRoutes.full_model))}</div>` : ''}
+    ${reportJevUsage.strategies?.regionsEvaluated ? `<div class="pill">Relevant DOM regions: ${esc(formatTokens(reportJevUsage.strategies.relevantRegions))}/${esc(formatTokens(reportJevUsage.strategies.regionsEvaluated))}</div>` : ''}
   </div>
 
   <div class="tag-filter glass">

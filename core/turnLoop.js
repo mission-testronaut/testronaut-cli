@@ -49,7 +49,9 @@ import {
 import { resolveProviderModel } from '../llm/modelResolver.js';
 import { getLLM } from '../llm/llmFactory.js';
 import { summarizeTurnIntentFromMessage } from './turnIntent.js';
-import { maskPreview, redactArgs } from './redaction.js';
+import { maskPreview, redactArgs, redactPasswordInText } from './redaction.js';
+import { buildJevShadowState, buildJevStrategyQuestions, evaluateJevCompletionCandidate, evaluateJevShadow, extractJevStrategyResults, resolveJevShadowConfig, sanitizeJevShadowEvents } from './jevShadow.js';
+import { buildBrowserEvidence } from './browserEvidence.js';
 import { 
   sanitizeHeavyToolHistory, 
   pruneConversationContext,
@@ -169,6 +171,10 @@ const FIRE_AND_FORGET_TOOLS = new Set([
   'record_mission_telemetry',
 ]);
 
+function currentBrowserUrl(browser) {
+  try { return browser?.page?.url?.() || null; } catch { return null; }
+}
+
 /**
  * Utility: format byte counts into human-readable strings.
  * Used when reporting upload/download events in mission logs.
@@ -221,6 +227,11 @@ const pushDOMAssistant = async (browser, messages, agentMemory, { skipIfLastTool
     agentMemory
   );
   await tokenEstimate(MODEL_ID, domHtml);
+  agentMemory.browserEvidence = buildBrowserEvidence(domHtml, {
+    url: currentBrowserUrl(browser),
+    previous: agentMemory.browserEvidence,
+    redactText: redactPasswordInText,
+  });
 
   // Push the corresponding tool response back into the conversation
   messages.push({
@@ -269,6 +280,7 @@ export const turnLoop = async (
     dataTypes: ['document', 'file', 'item', 'row'],
   };
   const stepsArchive = ctx.stepsArchive || steps;
+  const jevShadowConfig = resolveJevShadowConfig();
   const retryLimitClamped = Math.min(10, Math.max(1, Number.isFinite(retryLimitRaw) ? retryLimitRaw : DEFAULT_TURN_RETRY_LIMIT)); // retries allowed (excludes initial)
   const maxAttempts = retryLimitClamped + 1; // includes initial attempt
   ctx.groundControl = groundControl;
@@ -281,6 +293,98 @@ export const turnLoop = async (
   ensureDocProgress(agentMemory, resourceGuardCfg);
   let turnRetries = 0;
   let stepSeq = ctx._stepSeq || 0;
+
+  const recordJevShadow = async (step, msg, phase, proposedTools = []) => {
+    if (!jevShadowConfig.enabled) return;
+    // Keep status lines and purpose-built telemetry, but exclude raw tool payload
+    // lines (which may contain DOM, page text, or other third-party data).
+    const safeEvents = sanitizeJevShadowEvents(step.events, redactPasswordInText);
+    agentMemory.browserEvidence = buildBrowserEvidence(null, {
+      url: currentBrowserUrl(browser),
+      previous: agentMemory.browserEvidence,
+      redactText: redactPasswordInText,
+    });
+    const state = buildJevShadowState({
+      mission: redactPasswordInText(ctx.goal || missionName),
+      turn: step.turn,
+      maxTurns,
+      phase,
+      assistantSummary: redactPasswordInText(step.summary || ''),
+      assistantContent: redactPasswordInText(msg?.content || ''),
+      proposedTools,
+      events: safeEvents,
+      groundControl,
+      browserEvidence: agentMemory.browserEvidence,
+    });
+    const strategyCatalog = jevShadowConfig.strategiesEnabled
+      ? buildJevStrategyQuestions(agentMemory.browserEvidence)
+      : null;
+    step.jevShadow = await evaluateJevShadow(state, {
+      config: jevShadowConfig,
+      ...(strategyCatalog ? { questions: strategyCatalog.questions } : {}),
+    });
+    if (step.jevShadow.status === 'ok' && strategyCatalog) {
+      step.jevShadow.strategies = extractJevStrategyResults(
+        step.jevShadow.answers,
+        strategyCatalog,
+      );
+    }
+    step.jevShadow.completionGate = evaluateJevCompletionCandidate(step.jevShadow, {
+      threshold: jevShadowConfig.gateThreshold,
+      browserEvidence: agentMemory.browserEvidence,
+    });
+    const status = step.jevShadow?.status || 'unknown';
+    const latency = Number.isFinite(step.jevShadow?.latencyMs)
+      ? ` in ${step.jevShadow.latencyMs}ms`
+      : '';
+    console.log(`🔬 Jev shadow: ${status}${latency}`);
+  };
+
+  const finalizeWithJevGate = async (step) => {
+    if (!jevShadowConfig.gateEnabled || !step.jevShadow?.completionGate?.candidate) return null;
+
+    const prog = ensureDocProgress(agentMemory, resourceGuardCfg);
+    if (prog?.items.length && prog.downloaded.size < prog.items.length) {
+      step.jevGate = { triggered: false, reason: 'resource_guard_incomplete' };
+      return null;
+    }
+
+    const existingScreenshot = Boolean(
+      step.screenshotPath
+        || steps.some(existing => existing?.screenshotPath)
+        || stepsArchive.some(existing => existing?.screenshotPath),
+    );
+    if (process.env.TESTRONAUT_SCREENSHOTS !== '0' && !existingScreenshot) {
+      try {
+        const screenshotResult = await CHROME_TOOL_MAP.screenshot(
+          browser,
+          { name: `jev-completion-turn-${step.turn + 1}` },
+          agentMemory,
+        );
+        const match = String(screenshotResult).match(/screenshot.*?saved at: (.+\.png)/i);
+        if (match?.[1]) step.screenshotPath = match[1];
+        step.events.push('🖼️ Jev completion gate captured final screenshot');
+      } catch (error) {
+        step.jevGate = { triggered: false, reason: 'screenshot_failed', error: error?.message || String(error) };
+        step.events.push(`⚠️ Jev completion gate screenshot failed: ${error?.message || error}`);
+        return null;
+      }
+    }
+
+    const gate = step.jevShadow.completionGate;
+    recordGroundTelemetry(groundControl, {
+      kind: 'assertion',
+      text: `Jev completion gate satisfied at ${Math.round(gate.threshold * 100)}% threshold.`,
+      status: 'passed',
+    }, { turn: step.turn, source: 'jev_completion_gate', signals: gate.signals });
+
+    step.jevGate = { triggered: true, ...gate };
+    step.events.push(`🔬 Jev completion gate triggered at ${Math.round(gate.threshold * 100)}% threshold`);
+    step.result = '✅ Mission Success (Jev gate)';
+    recordStep(step);
+    const finalMessage = 'SUCCESS: Jev completion gate found sufficient browser evidence.';
+    return { success: true, finalMessage, steps: stepsArchive, completedBy: 'jev_gate' };
+  };
   
   // Centralized recorder: push to in-memory buffer AND fire optional callback for streaming
   // Idempotent recorder – prevents accidental double-push
@@ -460,6 +564,7 @@ export const turnLoop = async (
     if (msg.tool_calls?.length) {
       console.log('Processing tool calls...');
       const toolResponses = [];
+      const proposedTools = [];
       let hadToolIssues = false;
       let domRefreshSource = null;
 
@@ -467,6 +572,7 @@ export const turnLoop = async (
         const fnName = call.function.name;
         const args = JSON.parse(call.function.arguments || '{}');
         const safeArgs = redactArgs(fnName, args);
+        proposedTools.push({ name: fnName, arguments: safeArgs });
         console.log(`[model] → ${fnName}`, safeArgs);
         step.events.push(`[model] → ${fnName} ${JSON.stringify(safeArgs)}`);
 
@@ -761,6 +867,14 @@ export const turnLoop = async (
           }
         }
 
+        if (!errorMessage && fnName === 'get_dom') {
+          agentMemory.browserEvidence = buildBrowserEvidence(result, {
+            url: currentBrowserUrl(browser),
+            previous: agentMemory.browserEvidence,
+            redactText: redactPasswordInText,
+          });
+        }
+
         // Decide what to send back to the LLM for this tool.
         // - For "fire-and-forget" tools, send a tiny stub (OK/error) to avoid
         //   bloating context with large payloads (file JSON, etc.).
@@ -833,6 +947,11 @@ export const turnLoop = async (
           step.events.push(`[auto] → DOM size after ${domRefreshSource}: ${domRefresh.domLength} chars`);
         }
       }
+      await recordJevShadow(step, msg, hadToolIssues ? 'after_action_error' : 'after_action', proposedTools);
+      if (!hadToolIssues) {
+        const gatedResult = await finalizeWithJevGate(step);
+        if (gatedResult) return gatedResult;
+      }
       if (hadToolIssues && turnRetries < retryLimitClamped) {
         step.result = '⏳ Retrying turn';
         const retryNumber = attempt - 1;
@@ -875,6 +994,7 @@ export const turnLoop = async (
         turnRetries = 0;
         continue;
       }
+      await recordJevShadow(step, msg, 'final_response');
       step.events.push(finalResponse.finalMessage);
       step.result = finalResponse.success ? '✅ Mission Success' : '❌ Mission Failure';
       recordStep(step);
@@ -891,6 +1011,7 @@ export const turnLoop = async (
     });
     console.log(`[auto] → Injected DOM for next reasoning step`);
     step.events.push(`[auto] → Injected DOM for next reasoning step`);
+    await recordJevShadow(step, msg, 'after_observation');
     // This is a meaningful turn even without tool calls — record it.
     step.result = step.result || '🟡 In Progress';
     recordStep(step);

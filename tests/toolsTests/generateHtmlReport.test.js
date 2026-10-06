@@ -116,4 +116,56 @@ describe('generateHtmlReport', () => {
     expect(html).toContain('<strong>gpt-5.6</strong>');
     expect(html).not.toContain('<strong>LLM:</strong>');
   });
+
+  it('renders run, mission, and step Jev token spend', () => {
+    const steps = [{
+      turn: 0,
+      result: '✅ Mission Success (Jev gate)',
+      tokensUsed: 500,
+      inputTokens: 450,
+      outputTokens: 50,
+      events: [],
+      jevShadow: {
+        status: 'ok',
+        usage: { input_tokens: 1000, output_tokens: 25 },
+        latencyMs: 100,
+        completionGate: { candidate: true },
+      },
+      jevGate: { triggered: true },
+    }];
+    const outPath = path.join(tmpDir, 'jev.html');
+    generateHtmlReport({
+      runId: 'jev_run',
+      summary: { totalMissions: 1, passed: 1, failed: 0 },
+      jevShadow: {
+        evaluations: 1,
+        completed: 1,
+        errors: 0,
+        skipped: 0,
+        inputTokens: 1000,
+        outputTokens: 25,
+        estimatedInputCostUsd: 0.000042,
+      },
+      missions: [{ missionName: 'Jev Mission', status: 'passed', steps }],
+    }, outPath);
+
+    const html = fs.readFileSync(outPath, 'utf8');
+    expect(html).toContain('Jev input: 1,000');
+    expect(html).toContain('Jev output: 25');
+    expect(html).toContain('Jev estimated spend: $0.000042');
+    expect(html).toContain('Jev: 1 eval • 1,000 in / 25 out • est. $0.000042 • 1 gates');
+    expect(html).toContain('Jev: 1,000 in / 25 out');
+  });
+
+  it('makes skipped Jev evaluations visible', () => {
+    const outPath = path.join(tmpDir, 'jev-skipped.html');
+    generateHtmlReport({
+      runId: 'jev_skipped',
+      jevShadow: { evaluations: 3, completed: 0, errors: 0, skipped: 3, inputTokens: 0, outputTokens: 0 },
+    }, outPath);
+
+    const html = fs.readFileSync(outPath, 'utf8');
+    expect(html).toContain('Jev skipped: 3');
+    expect(html).not.toContain('Jev estimated spend:');
+  });
 });

@@ -259,6 +259,7 @@ Email invitation and magic links:
           steps,
           stepsArchive,
           missionName,
+          goal: userContent,
           retryLimit, 
           groundControl,
           resourceGuard: opts.resourceGuard,

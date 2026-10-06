@@ -374,6 +374,107 @@ Notes:
 
 ---
 
+## 🔬 Experimental Jev shadow mode
+
+Jev shadow mode evaluates each agent turn without changing browser actions,
+mission status, or exit codes. Its typed recommendations, latency, model, and
+token usage are written to each step in the JSON report. A run-level
+`jevShadow` summary aggregates completed calls, errors, latency, and tokens.
+
+Enable it with a TypeSafe API key:
+
+```bash
+export TYPESAFE_API_KEY=YOUR_KEY
+TESTRONAUT_JEV_SHADOW=1 testronaut login.mission.js
+```
+
+Optional overrides:
+
+```bash
+export TESTRONAUT_JEV_MODEL=jev-latest
+export TESTRONAUT_JEV_TIMEOUT_MS=5000
+export TESTRONAUT_JEV_API_BASE=https://api.typesafe.ai
+```
+
+The shadow request contains a bounded representation of the mission, assistant
+response, redacted tool arguments, recent events, Ground Control state, and
+structured browser evidence derived from DOM snapshots already collected by
+Testronaut. Browser evidence includes the query-free URL, title, headings,
+control labels, and element counts. It excludes raw DOM, body text, input
+values, URL queries, and URL fragments. Because this data is sent to a
+third-party service, enable the experiment only for test data appropriate for that service.
+API errors and timeouts are recorded as shadow telemetry and do not stop the
+mission.
+
+### Experimental completion gate
+
+After validating shadow results, opt into early completion with:
+
+```bash
+TESTRONAUT_JEV_GATE=1 testronaut login.mission.js
+```
+
+The gate defaults to an 80% threshold and requires all three independent Jev
+signals—mission completion, complete progress, and finish-next probability—to
+meet it. It also requires structured browser evidence and a clean tool turn.
+Before returning success, Testronaut captures a final screenshot when
+screenshots are enabled and records completion telemetry. Jev errors, missing
+evidence, incomplete resource guards, and screenshot failures fail open to the
+ordinary agent loop.
+
+Use a different experimental threshold with, for example:
+
+```bash
+TESTRONAUT_JEV_GATE=1 TESTRONAUT_JEV_GATE_THRESHOLD=0.85 testronaut login.mission.js
+```
+
+JSON and HTML reports show Jev evaluations, input/output tokens, latency,
+completion candidates, triggered gates, and estimated input cost for the full
+run and each mission submission. The estimate defaults to Jev's current
+`$0.042` per million input tokens. Override the reporting rate without changing
+API behavior:
+
+```bash
+TESTRONAUT_JEV_INPUT_USD_PER_MILLION=0.042 testronaut
+```
+
+If the gate is enabled without an API key, the report highlights every skipped
+evaluation. Ensure `TYPESAFE_API_KEY` or `TESTRONAUT_JEV_API_KEY` is exported in
+the same process that launches Testronaut.
+
+### Additional Jev savings experiments
+
+Enable the batched shadow strategy bundle without changing mission behavior:
+
+```bash
+TESTRONAUT_JEV_STRATEGIES=1 testronaut
+```
+
+The same Jev request then records:
+
+- relevant structured DOM regions for future context filtering;
+- a choice among controls already enumerated by Testronaut;
+- deterministic, fast-model, full-model, observe, or finish routing;
+- postcondition verification probability;
+- continue, retry, reobserve, escalate, or stop recovery policy;
+- mission stage and prerequisite readiness.
+
+Strategy results and aggregates appear in JSON and HTML reports. They remain
+advisory and cannot execute actions, change models, filter DOM, retry, or stop a
+mission.
+
+Evaluate risk-based suite selection separately as a dry run:
+
+```bash
+TYPESAFE_API_KEY=YOUR_KEY testronaut select --base=origin/main
+```
+
+This reads the git diff, asks one bounded relevance question per discovered
+mission, and prints selected mission filenames without running or skipping any
+tests. Use repeated `--changed-file=path` arguments instead of a git diff when
+testing a hypothetical change. The default selection threshold is 70%; override
+it with `TESTRONAUT_JEV_SELECTION_THRESHOLD`.
+
 ## 📋 Reports
 
 Testronaut generates JSON, HTML, and run-specific screenshots under the configured `outputDir` (default):
