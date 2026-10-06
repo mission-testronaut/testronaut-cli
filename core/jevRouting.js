@@ -1,4 +1,4 @@
-const DEFAULT_CONFIDENCE_THRESHOLD = 0.8;
+const DEFAULT_CONFIDENCE_THRESHOLD = 0.4;
 
 function probability(value, fallback) {
   const parsed = Number(value);
@@ -39,7 +39,8 @@ function belongsToProvider(model, provider) {
 
 export function chooseJevTurnModel(strategy, config, { provider, primaryModel } = {}) {
   const route = strategy?.modelRoute;
-  const confidence = Number(route?.confidence ?? route?.probabilities?.fast_model);
+  const score = Number(route?.probabilities?.fast_model);
+  const confidence = Number(route?.confidence);
   const recommendation = route?.choice || null;
   const stage = strategy?.missionStage?.choice || null;
   const recovery = strategy?.recovery?.choice || null;
@@ -49,7 +50,7 @@ export function chooseJevTurnModel(strategy, config, { provider, primaryModel } 
     !config.fastModel ? 'fast_model_unconfigured' :
     !belongsToProvider(config.fastModel, provider) ? 'fast_model_provider_mismatch' :
     config.fastModel === primaryModel ? 'fast_model_matches_primary' :
-    !Number.isFinite(confidence) || confidence < config.confidenceThreshold ? 'low_confidence' :
+    !Number.isFinite(score) || score < config.confidenceThreshold ? 'low_probability' :
     ['authenticate', 'failed', 'complete'].includes(stage) ? `stage_${stage}` :
     (recovery && recovery !== 'continue') ? `recovery_${recovery}` :
     null;
@@ -64,6 +65,8 @@ export function chooseJevTurnModel(strategy, config, { provider, primaryModel } 
     selectedModel: applied ? config.fastModel : primaryModel,
     recommendation,
     confidence: Number.isFinite(confidence) ? confidence : null,
+    score: Number.isFinite(score) ? score : null,
+    scoreType: 'fast_model_probability',
     threshold: config.confidenceThreshold,
     eligible,
     applied,

@@ -241,7 +241,7 @@ describe('turnLoop', () => {
       json: async () => ({
         model: 'jev-test',
         answers: {
-          modelRoute: { type: 'choice', choice: 'fast_model', confidence: 0.95 },
+          modelRoute: { type: 'choice', choice: 'fast_model', confidence: 0.25, probabilities: { fast_model: 0.55 } },
           missionStage: { type: 'choice', choice: 'interact', confidence: 0.9 },
           recoveryRoute: { type: 'choice', choice: 'continue', confidence: 0.9 },
         },
@@ -284,7 +284,7 @@ describe('turnLoop', () => {
       json: async () => ({
         model: 'jev-test',
         answers: {
-          modelRoute: { type: 'choice', choice: 'fast_model', confidence: 0.95 },
+          modelRoute: { type: 'choice', choice: 'fast_model', confidence: 0.25, probabilities: { fast_model: 0.55 } },
           missionStage: { type: 'choice', choice: 'interact', confidence: 0.9 },
           recoveryRoute: { type: 'choice', choice: 'continue', confidence: 0.9 },
         },
@@ -310,6 +310,56 @@ describe('turnLoop', () => {
       expect(shared.chatMock.mock.calls.map(([request]) => request.model)).toEqual(['stub-model', 'stub-fast', 'stub-model']);
       expect(result.steps[1].modelRouting).toMatchObject({ fallback: true, selectedModel: 'stub-model' });
       expect(result.steps[1].events).toContain('↩️ Jev route fallback to stub-model');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('forces a routed action retry back onto the primary model', async () => {
+    process.env.TESTRONAUT_JEV_ROUTING = 'live';
+    process.env.TESTRONAUT_JEV_FAST_MODEL = 'stub-fast';
+    process.env.TESTRONAUT_JEV_API_KEY = 'test-key';
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        model: 'jev-test',
+        answers: {
+          modelRoute: { type: 'choice', choice: 'fast_model', confidence: 0.2, probabilities: { fast_model: 0.55 } },
+          missionStage: { type: 'choice', choice: 'interact' },
+          recoveryRoute: { type: 'choice', choice: 'continue' },
+        },
+        usage: { input_tokens: 50, output_tokens: 2 },
+      }),
+    }));
+    shared.chromeToolSpies.click_text
+      .mockResolvedValueOnce(JSON.stringify({ ok: true }))
+      .mockRejectedValueOnce(new Error('temporary click failure'));
+    const toolResponse = id => ({
+      message: {
+        role: 'assistant', content: '',
+        tool_calls: [{ id, type: 'function', function: { name: 'click_text', arguments: '{"text":"Continue"}' } }],
+      },
+      usage: { total_tokens: 10 }, headers: {},
+    });
+    shared.chatMock
+      .mockResolvedValueOnce(toolResponse('primary_action'))
+      .mockResolvedValueOnce(toolResponse('fast_action'))
+      .mockResolvedValueOnce({
+        message: { role: 'assistant', content: 'FINAL: success' },
+        usage: { total_tokens: 5 }, headers: {},
+      });
+
+    try {
+      const result = await turnLoop(browser, baseMessages(), 3, 0, 0, {}, { steps: [], missionName: 'demo' });
+      expect(result.success).toBe(true);
+      expect(shared.chatMock.mock.calls.map(([request]) => request.model)).toEqual(['stub-model', 'stub-fast', 'stub-model']);
+      expect(result.steps[2].modelRouting).toMatchObject({
+        applied: false,
+        forcedPrimaryRetry: true,
+        reason: 'routed_retry_primary',
+        selectedModel: 'stub-model',
+      });
     } finally {
       globalThis.fetch = originalFetch;
     }

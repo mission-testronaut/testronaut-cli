@@ -309,6 +309,7 @@ export const turnLoop = async (
   let turnRetries = 0;
   let stepSeq = ctx._stepSeq || 0;
   let nextJevStrategy = null;
+  let forcePrimaryRetry = false;
 
   const recordJevShadow = async (step, msg, phase, proposedTools = []) => {
     if (!jevShadowConfig.enabled) return;
@@ -436,6 +437,13 @@ export const turnLoop = async (
       provider: PROVIDER_ID,
       primaryModel: MODEL_ID,
     });
+    if (forcePrimaryRetry) {
+      modelRouting.selectedModel = MODEL_ID;
+      modelRouting.applied = false;
+      modelRouting.reason = 'routed_retry_primary';
+      modelRouting.forcedPrimaryRetry = true;
+      forcePrimaryRetry = false;
+    }
     step.modelRouting = modelRouting;
     step.provider = PROVIDER_ID;
     step.model = modelRouting.selectedModel;
@@ -991,6 +999,7 @@ export const turnLoop = async (
         const retryNumber = attempt - 1;
         step.events.push(`🔁 Re-attempt ${retryNumber}/${retryLimitClamped} after tool issues`);
         recordStep(step);
+        forcePrimaryRetry = modelRouting.applied;
         turnRetries += 1;
         const delay = Math.min(TURN_RETRY_BASE_DELAY_MS * 2 ** (turnRetries - 1), 2000);
         await wait(delay);
