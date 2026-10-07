@@ -150,6 +150,21 @@ function findNewReport(repo, before) {
   return candidates[0] ? path.join(directory, candidates[0].file) : null;
 }
 
+function existingExperimentReports(repo, experimentId) {
+  const directory = path.join(repo, 'missions/mission_reports');
+  const reports = new Map();
+  if (!fs.existsSync(directory)) return reports;
+  for (const file of fs.readdirSync(directory).filter(name => /^run_\d+\.json$/.test(name))) {
+    const reportPath = path.join(directory, file);
+    try {
+      const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+      if (report.experiment?.id !== experimentId) continue;
+      reports.set(`${report.experiment.condition}:${report.experiment.block}`, reportPath);
+    } catch { /* ignore incomplete or unrelated reports */ }
+  }
+  return reports;
+}
+
 function loadState(file, metadata) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return { ...metadata, runs: {} }; }
 }
@@ -216,18 +231,49 @@ export function runBenchmark(options) {
   if (options.dryRun) return { schedule, completed: 0, skipped: 0 };
 
   const stateRoot = path.resolve(HERE, 'results', options.experimentId);
-  const stateFile = path.join(stateRoot, 'state.json');
-  const state = loadState(stateFile, {
-    experimentId: options.experimentId,
-    seed: options.seed,
-    repetitions: options.repetitions,
-    targets: options.targets,
-    createdAt: new Date().toISOString(),
-  });
+  const legacyStateFile = path.join(stateRoot, 'state.json');
+  const legacyState = loadState(legacyStateFile, { runs: {} });
+  const states = {};
+  const stateFiles = {};
+  for (const target of options.targets) {
+    const stateFile = path.join(stateRoot, `state-${target}.json`);
+    const legacyRuns = Object.fromEntries(
+      Object.entries(legacyState.runs || {}).filter(([, run]) => run.target === target),
+    );
+    const state = loadState(stateFile, {
+      experimentId: options.experimentId,
+      seed: options.seed,
+      repetitions: options.repetitions,
+      targets: [target],
+      createdAt: new Date().toISOString(),
+      runs: legacyRuns,
+    });
+    const targetSchedule = schedule.filter(run => run.target === target);
+    const existing = existingExperimentReports(targetSchedule[0]?.repo, options.experimentId);
+    for (const run of targetSchedule) {
+      if (state.runs[run.key]?.status === 'completed') continue;
+      const reportPath = existing.get(`${run.id}:${run.block}`);
+      if (!reportPath) continue;
+      state.runs[run.key] = {
+        ...run,
+        status: 'completed',
+        exitCode: null,
+        recoveredFromReport: true,
+        reportPath,
+        metrics: summarizeReport(reportPath),
+      };
+    }
+    states[target] = state;
+    stateFiles[target] = stateFile;
+    writeJson(stateFile, state);
+    writeSummaryCsv(path.join(stateRoot, `runs-${target}.csv`), state);
+  }
   let completed = 0;
   let skipped = 0;
 
   for (const run of schedule) {
+    const state = states[run.target];
+    const stateFile = stateFiles[run.target];
     if (state.runs[run.key]?.status === 'completed') {
       skipped += 1;
       continue;
@@ -267,11 +313,11 @@ export function runBenchmark(options) {
       metrics: summarizeReport(reportPath),
     };
     writeJson(stateFile, state);
-    writeSummaryCsv(path.join(stateRoot, 'runs.csv'), state);
+    writeSummaryCsv(path.join(stateRoot, `runs-${run.target}.csv`), state);
     console.log(`[${run.key}] ${status}; exit=${result.status}; report=${reportPath || 'none'}`);
     if (status === 'completed') completed += 1;
   }
-  return { schedule, completed, skipped, stateFile };
+  return { schedule, completed, skipped, stateFiles };
 }
 
 function printSchedule(schedule) {
@@ -286,7 +332,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const options = parseArgs(process.argv.slice(2));
   const result = runBenchmark(options);
   if (options.dryRun) printSchedule(result.schedule);
-  else console.log(`Benchmark progress saved to ${result.stateFile}. Completed ${result.completed}; resumed/skipped ${result.skipped}.`);
+  else console.log(`Benchmark progress saved to ${Object.values(result.stateFiles).join(', ')}. Completed ${result.completed}; resumed/skipped ${result.skipped}.`);
 }
 
 export const __benchmarkInternals = { hashSeed, seededRandom, shuffled, parseArgs, summarizeReport };
