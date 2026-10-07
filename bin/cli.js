@@ -1197,6 +1197,11 @@ if (process.env.TESTRONAUT_EXPERIMENT_ID) {
     id: process.env.TESTRONAUT_EXPERIMENT_ID,
     condition: process.env.TESTRONAUT_EXPERIMENT_CONDITION || null,
     block: Number(process.env.TESTRONAUT_EXPERIMENT_BLOCK) || null,
+    unit: process.env.TESTRONAUT_EXPERIMENT_UNIT || null,
+    selectedBy: process.env.TESTRONAUT_EXPERIMENT_SELECTED_BY || null,
+    selectionScore: process.env.TESTRONAUT_EXPERIMENT_SELECTION_SCORE === ''
+      ? null
+      : Number(process.env.TESTRONAUT_EXPERIMENT_SELECTION_SCORE),
   };
 }
 if (jevShadowUsage.evaluations) {
