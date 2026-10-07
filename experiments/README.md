@@ -49,3 +49,14 @@ The runner invokes this checkout's `bin/cli.js` directly and fixes the routing
 probability at 0.40. It does not alter either target repository's configuration.
 Model/API credentials must already be available in the environment or target
 repository `.env` files.
+
+After all 70 reports are present, generate the findings report and portable data
+package with:
+
+```bash
+npm run benchmark:package
+```
+
+This writes a Markdown report, normalized CSV datasets, the raw JSON reports,
+manifest, and checksums under `experiments/results/optimization-pilot-v1/`, plus
+a compressed `optimization-pilot-v1-data-package.tar.gz` archive.
