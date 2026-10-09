@@ -16,6 +16,10 @@ function normalize(value, allowed, aliases = {}) {
   return allowed.includes(resolved) ? resolved : null;
 }
 
+function truthy(value) {
+  return /^(1|true|yes|on)$/i.test(String(value ?? '').trim());
+}
+
 export function resolveOptimizationPolicy({ env = process.env, config = {} } = {}) {
   const configValue = config.optimization || {};
   const rawObjective = env.TESTRONAUT_OPTIMIZE ?? configValue.objective;
@@ -25,6 +29,10 @@ export function resolveOptimizationPolicy({ env = process.env, config = {} } = {
   const configured = rawObjective !== undefined || rawMode !== undefined;
   const effectiveObjective = objective ?? (configured ? 'off' : null);
   const effectiveMode = mode ?? (configured && effectiveObjective !== 'off' ? 'shadow' : 'off');
+  const routingRequested = ['cost', 'balanced', 'speed'].includes(effectiveObjective);
+  const betaModelRouting = truthy(
+    env.TESTRONAUT_BETA_MODEL_ROUTING ?? configValue.beta?.modelRouting,
+  );
   const threshold = Number(
     env.TESTRONAUT_JEV_ROUTING_THRESHOLD
       ?? configValue.guardrails?.minimumRoutingProbability,
@@ -34,12 +42,21 @@ export function resolveOptimizationPolicy({ env = process.env, config = {} } = {
     configured,
     objective: effectiveObjective,
     mode: effectiveObjective === 'off' ? 'off' : effectiveMode,
-    routing: ['cost', 'balanced', 'speed'].includes(effectiveObjective),
+    routingRequested,
+    betaModelRouting,
+    routing: routingRequested && betaModelRouting,
     tokenReduction: ['tokens', 'balanced'].includes(effectiveObjective),
     completionGate: effectiveMode === 'live' && effectiveObjective !== 'off',
     routingProbability: Number.isFinite(threshold) && threshold >= 0 && threshold <= 1
       ? threshold
       : 0.4,
+    completionProbability: (() => {
+      const value = Number(
+        env.TESTRONAUT_JEV_GATE_THRESHOLD
+          ?? configValue.guardrails?.completionProbability,
+      );
+      return Number.isFinite(value) && value >= 0 && value <= 1 ? value : 0.8;
+    })(),
     valid: (!configured || Boolean(objective || rawObjective === undefined))
       && (rawMode === undefined || Boolean(mode)),
   };
@@ -52,6 +69,9 @@ export function applyOptimizationPolicy(policy, env = process.env, { force = fal
   if (force || env.TESTRONAUT_JEV_ROUTING_THRESHOLD === undefined) {
     env.TESTRONAUT_JEV_ROUTING_THRESHOLD = String(policy.routingProbability);
   }
+  if (force || env.TESTRONAUT_JEV_GATE_THRESHOLD === undefined) {
+    env.TESTRONAUT_JEV_GATE_THRESHOLD = String(policy.completionProbability);
+  }
   if (force || env.TESTRONAUT_JEV_ROUTING === undefined) {
     env.TESTRONAUT_JEV_ROUTING = policy.routing ? policy.mode : 'off';
   }
@@ -59,7 +79,7 @@ export function applyOptimizationPolicy(policy, env = process.env, { force = fal
     env.TESTRONAUT_JEV_GATE = policy.completionGate ? '1' : '0';
   }
   if (force || env.TESTRONAUT_JEV_STRATEGIES === undefined) {
-    env.TESTRONAUT_JEV_STRATEGIES = policy.mode === 'off' ? '0' : '1';
+    env.TESTRONAUT_JEV_STRATEGIES = policy.routing ? '1' : '0';
   }
   if (force || env.TESTRONAUT_JEV_SHADOW === undefined) {
     env.TESTRONAUT_JEV_SHADOW = policy.mode === 'off' ? '0' : '1';

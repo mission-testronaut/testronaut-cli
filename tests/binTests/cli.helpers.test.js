@@ -130,9 +130,9 @@ describe('cli helpers', () => {
 
   it('parses optimization objective and execution mode flags', () => {
     expect(__test__.parseOptimizationArgs([
-      '--optimize=balanced', '--optimization-mode', 'live', 'login.mission.js',
+      '--optimize=balanced', '--optimization-mode', 'live', '--beta-model-routing', 'login.mission.js',
     ])).toMatchObject({
-      objective: 'balanced', mode: 'live', args: ['login.mission.js'], invalid: false,
+      objective: 'balanced', mode: 'live', betaModelRouting: true, args: ['login.mission.js'], invalid: false,
     });
     expect(__test__.parseOptimizationArgs(['--optimize=unknown'])).toMatchObject({ invalid: true });
   });

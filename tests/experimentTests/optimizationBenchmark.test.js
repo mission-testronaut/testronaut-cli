@@ -43,6 +43,7 @@ describe('optimization benchmark matrix', () => {
     expect(invocation.env).toMatchObject({
       TESTRONAUT_JEV_FAST_MODEL: 'gpt-5.5',
       TESTRONAUT_JEV_ROUTING_THRESHOLD: '0.4',
+      TESTRONAUT_BETA_MODEL_ROUTING: '1',
     });
   });
 });

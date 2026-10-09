@@ -519,6 +519,11 @@ function parseOptimizationArgs(argsList) {
   const nextArgs = [...argsList];
   const values = {};
   let invalid = false;
+  const betaRoutingIndex = nextArgs.indexOf('--beta-model-routing');
+  if (betaRoutingIndex >= 0) {
+    values.betaModelRouting = true;
+    nextArgs.splice(betaRoutingIndex, 1);
+  }
   const definitions = [
     { names: ['--optimize'], key: 'objective' },
     { names: ['--optimization-mode'], key: 'mode' },
@@ -578,6 +583,7 @@ if (optimizationArgs.invalid) {
 }
 if (optimizationArgs.objective) process.env.TESTRONAUT_OPTIMIZE = optimizationArgs.objective;
 if (optimizationArgs.mode) process.env.TESTRONAUT_OPTIMIZATION_MODE = optimizationArgs.mode;
+if (optimizationArgs.betaModelRouting) process.env.TESTRONAUT_BETA_MODEL_ROUTING = '1';
 const providerOverride = providerResult.provider;
 if (providerOverride) {
   process.env.TESTRONAUT_PROVIDER = providerOverride.trim();
@@ -814,6 +820,7 @@ Options:
   --model=<id>              Override the provider model for this run
   --optimize=<objective>    Optimization objective: off, cost, tokens, balanced, or speed
   --optimization-mode=<m>   Optimization control: off, shadow, or live
+  --beta-model-routing      Enable beta model switching for cost, balanced, or speed
   --session=<mode>          Browser auth reuse: isolated (default) or shared-auth
   -o, --options key=value   Set run options, such as mfa=github-test-mfa or inbox=github-staging
   --dev                     Use the staging API base URL
@@ -920,8 +927,11 @@ if (!optimizationPolicy.valid) {
   process.exit(1);
 }
 applyOptimizationPolicy(optimizationPolicy, process.env, {
-  force: Boolean(optimizationArgs.objective || optimizationArgs.mode),
+  force: Boolean(optimizationArgs.objective || optimizationArgs.mode || optimizationArgs.betaModelRouting),
 });
+if (optimizationPolicy.routingRequested && !optimizationPolicy.betaModelRouting) {
+  console.warn('⚠️ Model routing is beta and remains disabled. Add --beta-model-routing or optimization.beta.modelRouting=true to enable it.');
+}
 const outputDir = resolveReportDir(tagConfig);
 process.env.TESTRONAUT_OUTPUT_DIR = outputDir;
 process.env.TESTRONAUT_RUN_ID = runId;
@@ -1210,6 +1220,22 @@ if (jevShadowUsage.evaluations) {
     mode: gateMode ? 'completion-gate' : 'shadow',
     ...jevShadowUsage,
   };
+  const { strategies, ...guardrailUsage } = jevShadowUsage;
+  report.jevGuardrails = {
+    mode: gateMode ? 'live' : 'shadow',
+    completionProbability: optimizationPolicy.completionProbability,
+    failOpen: true,
+    ...guardrailUsage,
+  };
+  if (optimizationPolicy.routingRequested) {
+    report.modelRouting = {
+      stability: 'beta',
+      optedIn: optimizationPolicy.betaModelRouting,
+      active: optimizationPolicy.routing,
+      mode: optimizationPolicy.routing ? optimizationPolicy.mode : 'off',
+      strategies,
+    };
+  }
 }
 report.tags = normalizeTags(flatMissions.flatMap(m =>
   m.submissionType === 'mission' ? (m.tags ?? []) : []

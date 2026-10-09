@@ -15,6 +15,7 @@
     "benchmark:optimization": "node ./experiments/optimizationBenchmark.js",
     "benchmark:cross-provider": "node ./experiments/crossProviderBenchmark.js",
     "benchmark:package": "node ./experiments/buildOptimizationDataPackage.js",
+    "benchmark:publish-package": "node ./experiments/buildExperimentPublicationPackage.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "start": "node ./bin/cli.js"

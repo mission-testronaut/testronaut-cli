@@ -22,6 +22,7 @@
 
 ## Optimization and Rate-Limit Follow-Ups
 
+- [ ] Run a history-informed model-routing benchmark before expanding cross-provider routing. Give Jev versioned, per-model/per-mission-class reliability, token, latency, and price observations from prior runs; require a configurable reliability floor; compare against the best fixed-model-plus-guardrails control with blocked repetitions; keep selection at the mission boundary; record the evidence and reason for every choice; and define cold-start, stale-data, low-confidence, and provider-failure fallbacks. Do not retry a failed mission on another provider in the benchmark because that would confound routing quality with retry recovery.
 - [ ] Add an opt-in CLI/config policy that reroutes an imminent throttled LLM request to a compatible model as an alternative to the default backoff behavior. Keep backoff as the default; use observed TPM/RPM headroom and projected request tokens; constrain failover to explicitly configured provider/model families; preserve tool/history compatibility; prevent routing loops; fall back safely when the alternate model is unavailable; and record the original model, routed model, trigger, token usage, latency, and outcome in reports.
 
 ## Automated MFA Follow-Ups

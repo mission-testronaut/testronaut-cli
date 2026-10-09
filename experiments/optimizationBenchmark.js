@@ -116,6 +116,7 @@ export function commandForRun(run, cliPath = DEFAULT_CLI) {
     ],
     env: {
       TESTRONAUT_JEV_ROUTING_THRESHOLD: '0.4',
+      ...(run.secondary ? { TESTRONAUT_BETA_MODEL_ROUTING: '1' } : {}),
       ...(run.secondary ? { TESTRONAUT_JEV_FAST_MODEL: run.secondary } : {}),
     },
   };

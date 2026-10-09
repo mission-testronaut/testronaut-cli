@@ -463,21 +463,50 @@ The same Jev request then records:
 Strategy results and aggregates appear in JSON reports. They remain advisory
 unless a separate experiment such as dynamic routing is explicitly enabled.
 
-### Experimental dynamic model routing
+### Stable Jev guardrails
+
+Run Jev completion and evidence guardrails without allowing any model switch:
+
+```bash
+testronaut --optimize=tokens --optimization-mode=live
+```
+
+This profile is fail-open: if Jev is unavailable, times out, or lacks sufficient
+evidence, the primary model continues normally. It does not request the larger
+experimental strategy question set and ignores fast-model routing configuration.
+The default completion probability is 0.8.
+
+```json
+{
+  "optimization": {
+    "objective": "tokens",
+    "mode": "live",
+    "guardrails": {
+      "completionProbability": 0.8
+    }
+  }
+}
+```
+
+Reports expose stable `jevGuardrails` telemetry separately from beta
+`modelRouting` telemetry. The legacy `jevShadow` field remains for compatibility.
+
+### Beta dynamic model routing
 
 Choose an optimization objective and whether it runs in shadow or live mode:
 
 ```bash
-testronaut --optimize=cost --optimization-mode=live
+testronaut --optimize=cost --optimization-mode=live --beta-model-routing
 testronaut --optimize=tokens --optimization-mode=shadow
-testronaut --optimize=balanced --optimization-mode=live
+testronaut --optimize=balanced --optimization-mode=live --beta-model-routing
 testronaut --optimize=off
 ```
 
 The supported objectives are `off`, `cost`, `tokens`, `balanced`, and `speed`.
-`cost` uses cheaper family-local models; `tokens` currently uses the validated
-completion gate and is the extension point for context filtering;
-`balanced` combines both; and `speed` uses fast-model routing plus completion.
+`cost` requests cheaper family-local models; `tokens` uses stable guardrails
+without model switching; `balanced` combines guardrails and beta routing; and
+`speed` requests beta fast-model routing. The `cost`, `balanced`, and `speed`
+objectives cannot switch models unless beta routing is explicitly enabled.
 When an objective is supplied without a mode, it defaults to `shadow`.
 
 The equivalent `testronaut-config.json` configuration is:
@@ -488,7 +517,11 @@ The equivalent `testronaut-config.json` configuration is:
     "objective": "balanced",
     "mode": "live",
     "guardrails": {
+      "completionProbability": 0.8,
       "minimumRoutingProbability": 0.4
+    },
+    "beta": {
+      "modelRouting": true
     }
   }
 }
@@ -497,7 +530,7 @@ The equivalent `testronaut-config.json` configuration is:
 CLI flags override configuration. Existing `TESTRONAUT_JEV_*` variables remain
 available as lower-level experimental overrides.
 
-Dynamic routing uses a high-confidence Jev `fast_model` recommendation from the
+Beta dynamic routing uses a high-confidence Jev `fast_model` recommendation from the
 completed turn to choose the model for the next turn. Start in shadow mode to
 record eligibility without changing models:
 
