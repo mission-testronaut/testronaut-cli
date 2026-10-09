@@ -47,6 +47,15 @@ describe('optimization policy', () => {
     });
   });
 
+  it('accepts the top-level opt-in guardrails configuration', () => {
+    expect(resolveOptimizationPolicy({
+      env: {}, config: { guardrails: { enabled: true, mode: 'live', completionProbability: 0.85 } },
+    })).toMatchObject({ objective: 'tokens', mode: 'live', routing: false, completionProbability: 0.85 });
+    expect(resolveOptimizationPolicy({
+      env: {}, config: { guardrails: { enabled: false } },
+    })).toMatchObject({ objective: 'off', mode: 'off' });
+  });
+
   it('translates policy to legacy Jev controls without replacing explicit overrides', () => {
     const env = { TESTRONAUT_JEV_GATE: '0' };
     applyOptimizationPolicy(resolveOptimizationPolicy({

@@ -108,6 +108,7 @@ describe('cli helpers', () => {
     }, '/tmp/project');
     expect(effective.outputDir).toEqual({ value: '/tmp/project/artifacts', source: 'config' });
     expect(effective.authenticated).toBe(true);
+    expect(effective.guardrails).toMatchObject({ enabled: false, failOpen: true, credentialConfigured: false });
     expect(JSON.stringify(effective)).not.toContain('secret');
   });
 
@@ -135,6 +136,12 @@ describe('cli helpers', () => {
       objective: 'balanced', mode: 'live', betaModelRouting: true, args: ['login.mission.js'], invalid: false,
     });
     expect(__test__.parseOptimizationArgs(['--optimize=unknown'])).toMatchObject({ invalid: true });
+    expect(__test__.parseOptimizationArgs(['--guardrails', 'login.mission.js'])).toMatchObject({
+      objective: 'tokens', mode: 'live', guardrailsMode: 'live', args: ['login.mission.js'], invalid: false,
+    });
+    expect(__test__.parseOptimizationArgs(['--guardrails=shadow', 'login.mission.js'])).toMatchObject({
+      objective: 'tokens', mode: 'shadow', args: ['login.mission.js'], invalid: false,
+    });
   });
 
   it('parses vercel bypass value from next arg', () => {

@@ -408,6 +408,20 @@ function buildEffectiveConfig(config = {}, cwd = process.cwd()) {
     screenshots: screenshotsEnabled,
     authenticated: Boolean(config.sessionToken),
     optimization,
+    guardrails: {
+      enabled: optimization.objective === 'tokens' && optimization.mode !== 'off',
+      mode: optimization.objective === 'tokens' ? optimization.mode : 'off',
+      completionProbability: optimization.completionProbability,
+      failOpen: true,
+      credentialConfigured: Boolean(resolveJevShadowConfig().apiKey),
+      credentialSource: process.env.TESTRONAUT_JEV_API_KEY
+        ? 'TESTRONAUT_JEV_API_KEY'
+        : process.env.TYPESAFE_API_KEY
+          ? 'TYPESAFE_API_KEY'
+          : process.env.JEV_API_KEY
+            ? 'JEV_API_KEY'
+            : null,
+    },
   };
 }
 
@@ -519,6 +533,23 @@ function parseOptimizationArgs(argsList) {
   const nextArgs = [...argsList];
   const values = {};
   let invalid = false;
+  const guardrailsIndex = nextArgs.findIndex(arg => arg === '--guardrails' || arg.startsWith('--guardrails='));
+  if (guardrailsIndex >= 0) {
+    const raw = nextArgs[guardrailsIndex];
+    const inline = raw.includes('=');
+    const following = nextArgs[guardrailsIndex + 1];
+    const consumesFollowing = !inline && ['live', 'shadow', 'off'].includes(String(following || '').toLowerCase());
+    const guardrailsMode = inline
+      ? raw.slice(raw.indexOf('=') + 1).trim().toLowerCase()
+      : consumesFollowing ? following.toLowerCase() : 'live';
+    if (!['live', 'shadow', 'off'].includes(guardrailsMode)) invalid = true;
+    else {
+      values.guardrailsMode = guardrailsMode;
+      values.objective = guardrailsMode === 'off' ? 'off' : 'tokens';
+      values.mode = guardrailsMode;
+    }
+    nextArgs.splice(guardrailsIndex, consumesFollowing ? 2 : 1);
+  }
   const betaRoutingIndex = nextArgs.indexOf('--beta-model-routing');
   if (betaRoutingIndex >= 0) {
     values.betaModelRouting = true;
@@ -820,6 +851,7 @@ Options:
   --model=<id>              Override the provider model for this run
   --optimize=<objective>    Optimization objective: off, cost, tokens, balanced, or speed
   --optimization-mode=<m>   Optimization control: off, shadow, or live
+  --guardrails[=<mode>]      Opt in to Jev guardrails: live (default), shadow, or off
   --beta-model-routing      Enable beta model switching for cost, balanced, or speed
   --session=<mode>          Browser auth reuse: isolated (default) or shared-auth
   -o, --options key=value   Set run options, such as mfa=github-test-mfa or inbox=github-staging
@@ -929,6 +961,10 @@ if (!optimizationPolicy.valid) {
 applyOptimizationPolicy(optimizationPolicy, process.env, {
   force: Boolean(optimizationArgs.objective || optimizationArgs.mode || optimizationArgs.betaModelRouting),
 });
+const jevPreflight = resolveJevShadowConfig();
+if (optimizationPolicy.objective === 'tokens' && optimizationPolicy.mode !== 'off' && !jevPreflight.apiKey) {
+  console.warn('⚠️ Jev guardrails are enabled but no user-supplied key was found. Set TESTRONAUT_JEV_API_KEY; this run will fail open to the primary model.');
+}
 if (optimizationPolicy.routingRequested && !optimizationPolicy.betaModelRouting) {
   console.warn('⚠️ Model routing is beta and remains disabled. Add --beta-model-routing or optimization.beta.modelRouting=true to enable it.');
 }
@@ -1185,6 +1221,7 @@ const { provider: llmProvider, model: llmModel } = resolveProviderModel({ cwd: p
 
 
 const report = {
+  schemaVersion: 2,
   runId,
   cli: { version: CLI_VERSION },
   startTime: startTime.toISOString(),

@@ -22,8 +22,15 @@ function truthy(value) {
 
 export function resolveOptimizationPolicy({ env = process.env, config = {} } = {}) {
   const configValue = config.optimization || {};
-  const rawObjective = env.TESTRONAUT_OPTIMIZE ?? configValue.objective;
-  const rawMode = env.TESTRONAUT_OPTIMIZATION_MODE ?? configValue.mode;
+  const guardrailsValue = config.guardrails || {};
+  const guardrailsConfigured = guardrailsValue.enabled !== undefined || guardrailsValue.mode !== undefined;
+  const guardrailsEnabled = guardrailsValue.enabled !== false && guardrailsValue.mode !== 'off';
+  const rawObjective = env.TESTRONAUT_OPTIMIZE
+    ?? configValue.objective
+    ?? (guardrailsConfigured ? (guardrailsEnabled ? 'tokens' : 'off') : undefined);
+  const rawMode = env.TESTRONAUT_OPTIMIZATION_MODE
+    ?? configValue.mode
+    ?? (guardrailsConfigured ? (guardrailsEnabled ? (guardrailsValue.mode || 'live') : 'off') : undefined);
   const objective = normalize(rawObjective, OPTIMIZATION_OBJECTIVES, OBJECTIVE_ALIASES);
   const mode = normalize(rawMode, OPTIMIZATION_MODES);
   const configured = rawObjective !== undefined || rawMode !== undefined;
@@ -53,6 +60,7 @@ export function resolveOptimizationPolicy({ env = process.env, config = {} } = {
     completionProbability: (() => {
       const value = Number(
         env.TESTRONAUT_JEV_GATE_THRESHOLD
+          ?? guardrailsValue.completionProbability
           ?? configValue.guardrails?.completionProbability,
       );
       return Number.isFinite(value) && value >= 0 && value <= 1 ? value : 0.8;

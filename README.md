@@ -468,7 +468,8 @@ unless a separate experiment such as dynamic routing is explicitly enabled.
 Run Jev completion and evidence guardrails without allowing any model switch:
 
 ```bash
-testronaut --optimize=tokens --optimization-mode=live
+export TESTRONAUT_JEV_API_KEY="your-key"
+testronaut --guardrails
 ```
 
 This profile is fail-open: if Jev is unavailable, times out, or lacks sufficient
@@ -478,15 +479,18 @@ The default completion probability is 0.8.
 
 ```json
 {
-  "optimization": {
-    "objective": "tokens",
+  "guardrails": {
+    "enabled": true,
     "mode": "live",
-    "guardrails": {
-      "completionProbability": 0.8
-    }
+    "completionProbability": 0.8
   }
 }
 ```
+
+Guardrails are opt-in and use a user-supplied Jev key. The earlier
+`--optimize=tokens --optimization-mode=live` and nested optimization config
+remain supported as compatibility forms. Run `testronaut config --json` to
+check credential readiness without printing the key.
 
 Reports expose stable `jevGuardrails` telemetry separately from beta
 `modelRouting` telemetry. The legacy `jevShadow` field remains for compatibility.
