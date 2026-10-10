@@ -116,4 +116,84 @@ describe('generateHtmlReport', () => {
     expect(html).toContain('<strong>gpt-5.6</strong>');
     expect(html).not.toContain('<strong>LLM:</strong>');
   });
+
+  it('renders run, mission, and step Jev token spend', () => {
+    const steps = [{
+      turn: 0,
+      result: '✅ Mission Success (Jev gate)',
+      tokensUsed: 500,
+      inputTokens: 450,
+      outputTokens: 50,
+      events: [],
+      jevShadow: {
+        status: 'ok',
+        usage: { input_tokens: 1000, output_tokens: 25 },
+        latencyMs: 100,
+        completionGate: { candidate: true },
+      },
+      jevGate: { triggered: true },
+    }];
+    const outPath = path.join(tmpDir, 'jev.html');
+    generateHtmlReport({
+      runId: 'jev_run',
+      llm: { provider: 'openai', model: 'gpt-5.6-terra' },
+      summary: { totalMissions: 1, passed: 1, failed: 0 },
+      jevShadow: {
+        evaluations: 1,
+        completed: 1,
+        errors: 0,
+        skipped: 0,
+        inputTokens: 1000,
+        outputTokens: 25,
+        estimatedInputCostUsd: 0.000042,
+      },
+      missions: [{ missionName: 'Jev Mission', status: 'passed', steps }],
+    }, outPath);
+
+    const html = fs.readFileSync(outPath, 'utf8');
+    expect(html).toContain('<strong>gpt-5.6-terra</strong>');
+    expect(html).toContain('title="Jev"');
+    expect(html).toContain('<strong>Jev</strong>');
+    expect(html).toContain('Model tokens: 500 (450 in / 50 out)');
+    expect(html).toContain('Jev tokens: 1,000 in / 25 out');
+    expect(html).toContain('Jev: 1,000 in / 25 out');
+    expect(html).not.toContain('estimated spend');
+    expect(html).not.toContain('est. $');
+    expect(html).not.toContain('strategy eval');
+  });
+
+  it('breaks dynamically routed token usage down by model', () => {
+    const outPath = path.join(tmpDir, 'routed.html');
+    generateHtmlReport({
+      runId: 'routed_run',
+      llm: { provider: 'openai', model: 'gpt-5.6-terra' },
+      optimization: { configured: true, objective: 'cost', mode: 'live' },
+      missions: [{
+        missionName: 'Routed Mission', status: 'passed', steps: [
+          { turn: 0, model: 'gpt-5.6-terra', tokensUsed: 100, inputTokens: 90, outputTokens: 10, result: '✅ Passed' },
+          { turn: 1, model: 'gpt-5.6-luna', tokensUsed: 40, inputTokens: 35, outputTokens: 5, result: '✅ Passed', modelRouting: { applied: true } },
+        ],
+      }],
+    }, outPath);
+
+    const html = fs.readFileSync(outPath, 'utf8');
+    expect(html).toContain('<strong>gpt-5.6-terra + gpt-5.6-luna</strong>');
+    expect(html).toContain('gpt-5.6-terra tokens: 100 (90 in / 10 out)');
+    expect(html).toContain('gpt-5.6-luna tokens: 40 (35 in / 5 out)');
+    expect(html).toContain('By model: gpt-5.6-terra 100 / gpt-5.6-luna 40');
+    expect(html).toContain('routed by Jev');
+    expect(html).toContain('Optimization: cost (live)');
+  });
+
+  it('makes skipped Jev evaluations visible', () => {
+    const outPath = path.join(tmpDir, 'jev-skipped.html');
+    generateHtmlReport({
+      runId: 'jev_skipped',
+      jevShadow: { evaluations: 3, completed: 0, errors: 0, skipped: 3, inputTokens: 0, outputTokens: 0 },
+    }, outPath);
+
+    const html = fs.readFileSync(outPath, 'utf8');
+    expect(html).toContain('Jev skipped: 3');
+    expect(html).not.toContain('Jev estimated spend:');
+  });
 });

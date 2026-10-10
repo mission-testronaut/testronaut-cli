@@ -48,7 +48,7 @@ import fetch from 'node-fetch';
 import crypto from 'crypto';
 import http from 'http';
 import { resolveProviderModel } from '../llm/modelResolver.js';
-import { exec as execCmd } from 'child_process';
+import { exec as execCmd, execFileSync } from 'child_process';
 import { promisify } from 'util';
 const exec = promisify(execCmd);
 import url from 'url';
@@ -58,6 +58,10 @@ import { loadMissionModule } from '../core/missionLoader.js';
 import { loadConfig } from '../core/config.js';
 import { matchesTagFilter, normalizeTagMatch, normalizeTags } from '../core/tags.js';
 import { createTerminalUi } from './terminalUi.js';
+import { summarizeJevUsage } from '../core/jevUsage.js';
+import { evaluateJevShadow, resolveJevShadowConfig } from '../core/jevShadow.js';
+import { buildJevSuiteSelectionRequest, interpretJevSuiteSelection } from '../core/jevSuiteSelection.js';
+import { applyOptimizationPolicy, OPTIMIZATION_MODES, OPTIMIZATION_OBJECTIVES, resolveOptimizationPolicy } from '../core/optimization.js';
 
 // Keep PW browsers inside the project to avoid global cache skew
 process.env.PLAYWRIGHT_BROWSERS_PATH = process.env.PLAYWRIGHT_BROWSERS_PATH || '0';
@@ -360,6 +364,7 @@ export const __test__ = {
   createVercelBypassHeader,
   parseProviderArgs,
   parseRunOptionsArgs,
+  parseOptimizationArgs,
   detectCliName,
   isDirectInvocation,
   resolveMissionPath,
@@ -389,6 +394,7 @@ function resolveReportFile(requested, reportDir, cwd = process.cwd()) {
 
 function buildEffectiveConfig(config = {}, cwd = process.cwd()) {
   const resolved = resolveProviderModel({ cwd });
+  const optimization = resolveOptimizationPolicy({ config });
   const source = key => process.env[key] ? 'environment' : undefined;
   return {
     configFile: path.resolve(cwd, 'testronaut-config.json'),
@@ -401,6 +407,21 @@ function buildEffectiveConfig(config = {}, cwd = process.cwd()) {
     addTags: normalizeTags([...(config.addTags || []), ...cliAddTags]),
     screenshots: screenshotsEnabled,
     authenticated: Boolean(config.sessionToken),
+    optimization,
+    guardrails: {
+      enabled: optimization.objective === 'tokens' && optimization.mode !== 'off',
+      mode: optimization.objective === 'tokens' ? optimization.mode : 'off',
+      completionProbability: optimization.completionProbability,
+      failOpen: true,
+      credentialConfigured: Boolean(resolveJevShadowConfig().apiKey),
+      credentialSource: process.env.TESTRONAUT_JEV_API_KEY
+        ? 'TESTRONAUT_JEV_API_KEY'
+        : process.env.TYPESAFE_API_KEY
+          ? 'TYPESAFE_API_KEY'
+          : process.env.JEV_API_KEY
+            ? 'JEV_API_KEY'
+            : null,
+    },
   };
 }
 
@@ -508,6 +529,56 @@ function parseTagArgs(argsList) {
 }
 __test__.parseTagArgs = parseTagArgs;
 
+function parseOptimizationArgs(argsList) {
+  const nextArgs = [...argsList];
+  const values = {};
+  let invalid = false;
+  const guardrailsIndex = nextArgs.findIndex(arg => arg === '--guardrails' || arg.startsWith('--guardrails='));
+  if (guardrailsIndex >= 0) {
+    const raw = nextArgs[guardrailsIndex];
+    const inline = raw.includes('=');
+    const following = nextArgs[guardrailsIndex + 1];
+    const consumesFollowing = !inline && ['live', 'shadow', 'off'].includes(String(following || '').toLowerCase());
+    const guardrailsMode = inline
+      ? raw.slice(raw.indexOf('=') + 1).trim().toLowerCase()
+      : consumesFollowing ? following.toLowerCase() : 'live';
+    if (!['live', 'shadow', 'off'].includes(guardrailsMode)) invalid = true;
+    else {
+      values.guardrailsMode = guardrailsMode;
+      values.objective = guardrailsMode === 'off' ? 'off' : 'tokens';
+      values.mode = guardrailsMode;
+    }
+    nextArgs.splice(guardrailsIndex, consumesFollowing ? 2 : 1);
+  }
+  const betaRoutingIndex = nextArgs.indexOf('--beta-model-routing');
+  if (betaRoutingIndex >= 0) {
+    values.betaModelRouting = true;
+    nextArgs.splice(betaRoutingIndex, 1);
+  }
+  const definitions = [
+    { names: ['--optimize'], key: 'objective' },
+    { names: ['--optimization-mode'], key: 'mode' },
+  ];
+  for (const definition of definitions) {
+    const index = nextArgs.findIndex(arg => definition.names.some(name => arg === name || arg.startsWith(`${name}=`)));
+    if (index < 0) continue;
+    const raw = nextArgs[index];
+    const inline = raw.includes('=');
+    const value = inline ? raw.slice(raw.indexOf('=') + 1) : nextArgs[index + 1];
+    if (!value || (!inline && value.startsWith('-'))) invalid = true;
+    else values[definition.key] = value.trim().toLowerCase();
+    nextArgs.splice(index, inline ? 1 : (value && !value.startsWith('-') ? 2 : 1));
+  }
+  const probe = resolveOptimizationPolicy({
+    env: {
+      ...(values.objective ? { TESTRONAUT_OPTIMIZE: values.objective } : {}),
+      ...(values.mode ? { TESTRONAUT_OPTIMIZATION_MODE: values.mode } : {}),
+    },
+  });
+  if (!probe.valid) invalid = true;
+  return { args: nextArgs, ...values, invalid };
+}
+
 // Look for --model=<id> or --model <id>
 let modelOverride;
 const modelFlagIndex = args.findIndex(a => a === '--model' || a.startsWith('--model='));
@@ -534,6 +605,16 @@ if (providerResult.invalid) {
   console.warn('⚠️ Invalid --provider value. Provide a non-empty provider id.');
 }
 args = providerResult.args;
+
+const optimizationArgs = parseOptimizationArgs(args);
+args = optimizationArgs.args;
+if (optimizationArgs.invalid) {
+  console.error(`❌ --optimize must be one of ${OPTIMIZATION_OBJECTIVES.join(', ')} and --optimization-mode must be one of ${OPTIMIZATION_MODES.join(', ')}.`);
+  process.exit(1);
+}
+if (optimizationArgs.objective) process.env.TESTRONAUT_OPTIMIZE = optimizationArgs.objective;
+if (optimizationArgs.mode) process.env.TESTRONAUT_OPTIMIZATION_MODE = optimizationArgs.mode;
+if (optimizationArgs.betaModelRouting) process.env.TESTRONAUT_BETA_MODEL_ROUTING = '1';
 const providerOverride = providerResult.provider;
 if (providerOverride) {
   process.env.TESTRONAUT_PROVIDER = providerOverride.trim();
@@ -756,6 +837,7 @@ Usage:
   ${cliName} <file>         Run a .mission.js or .mission.ts file by name or path
   ${cliName} login          Log in and store session token
   ${cliName} list           List discovered missions and tags without running them
+  ${cliName} select         Ask Jev which missions are relevant to the current git diff (dry-run only)
   ${cliName} config         Show effective configuration and value sources
   ${cliName} upload [file]  Upload the latest report or a selected report file/run ID
   ${cliName} serve        Serve & open the most recent HTML report (read-only)
@@ -767,6 +849,10 @@ Options:
   --debug[=<bool>]          Enable verbose debug logs (or set TESTRONAUT_DEBUG=1)
   --provider=<id>           Override LLM provider (openai, gemini, or anthropic)
   --model=<id>              Override the provider model for this run
+  --optimize=<objective>    Optimization objective: off, cost, tokens, balanced, or speed
+  --optimization-mode=<m>   Optimization control: off, shadow, or live
+  --guardrails[=<mode>]      Opt in to Jev guardrails: live (default), shadow, or off
+  --beta-model-routing      Enable beta model switching for cost, balanced, or speed
   --session=<mode>          Browser auth reuse: isolated (default) or shared-auth
   -o, --options key=value   Set run options, such as mfa=github-test-mfa or inbox=github-staging
   --dev                     Use the staging API base URL
@@ -780,6 +866,8 @@ Options:
   --no-upload-screenshots   Upload report JSON without its screenshots
   --json                    Emit machine-readable command/run output
   --quiet                   Suppress informational logs
+  --base=<git-ref>          Base ref for Jev suite selection (default: HEAD~1)
+  --changed-file=<path>     Explicit changed file for Jev suite selection; repeatable
   --retry_limit=<n>         Override agent turn retry limits (minimum 1, maximum 10)
   --tag=<tag>               Run missions matching a tag; repeat for multiple tags
   --tags=<tag,...>          Compact comma-list form (OR/any by default)
@@ -791,6 +879,7 @@ Examples:
   ${cliName}
   ${cliName} login
   ${cliName} list
+  ${cliName} select --base=origin/main
   ${cliName} upload
   ${cliName} serve
   ${cliName} --init
@@ -864,9 +953,90 @@ if (args.includes('serve') || args.includes('view')) {
 
 const { root: missionsRoot, files: discoveredMissions } = await discoverMissionFiles({ cwd: process.cwd() });
 const tagConfig = await loadConfig(process.cwd());
+const optimizationPolicy = resolveOptimizationPolicy({ config: tagConfig });
+if (!optimizationPolicy.valid) {
+  console.error('❌ Invalid optimization objective or mode in testronaut-config.json.');
+  process.exit(1);
+}
+applyOptimizationPolicy(optimizationPolicy, process.env, {
+  force: Boolean(optimizationArgs.objective || optimizationArgs.mode || optimizationArgs.betaModelRouting),
+});
+const jevPreflight = resolveJevShadowConfig();
+if (optimizationPolicy.objective === 'tokens' && optimizationPolicy.mode !== 'off' && !jevPreflight.apiKey) {
+  console.warn('⚠️ Jev guardrails are enabled but no user-supplied key was found. Set TESTRONAUT_JEV_API_KEY; this run will fail open to the primary model.');
+}
+if (optimizationPolicy.routingRequested && !optimizationPolicy.betaModelRouting) {
+  console.warn('⚠️ Model routing is beta and remains disabled. Add --beta-model-routing or optimization.beta.modelRouting=true to enable it.');
+}
 const outputDir = resolveReportDir(tagConfig);
 process.env.TESTRONAUT_OUTPUT_DIR = outputDir;
 process.env.TESTRONAUT_RUN_ID = runId;
+
+if (args[0] === 'select') {
+  const baseArg = args.find(arg => arg.startsWith('--base='));
+  const base = baseArg ? baseArg.slice('--base='.length) : 'HEAD~1';
+  const explicitChangedFiles = args
+    .filter(arg => arg.startsWith('--changed-file='))
+    .map(arg => arg.slice('--changed-file='.length))
+    .filter(Boolean);
+  let changedFiles = explicitChangedFiles;
+  if (!changedFiles.length) {
+    try {
+      const outputs = [
+        execFileSync('git', ['diff', '--name-only', `${base}...HEAD`], { cwd: process.cwd(), encoding: 'utf8' }),
+        execFileSync('git', ['diff', '--name-only'], { cwd: process.cwd(), encoding: 'utf8' }),
+        execFileSync('git', ['ls-files', '--others', '--exclude-standard'], { cwd: process.cwd(), encoding: 'utf8' }),
+      ];
+      changedFiles = [...new Set(outputs.flatMap(output => output.split(/\r?\n/).filter(Boolean)))].sort();
+    } catch (error) {
+      writeOutput({ mode: 'jev-suite-selection', status: 'error', error: `Could not resolve git diff from ${base}: ${error.message}` });
+      process.exitCode = 1;
+      return;
+    }
+  }
+
+  const missions = [];
+  for (const file of discoveredMissions) {
+    try {
+      const mission = await loadMissionModule(path.resolve(missionsRoot, file));
+      missions.push({ file, tags: normalizeTags(mission.tags) });
+    } catch (error) {
+      missions.push({ file, tags: [], loadError: error.message });
+    }
+  }
+  if (!missions.length) {
+    writeOutput({ mode: 'jev-suite-selection', status: 'error', error: 'No missions were discovered.' });
+    process.exitCode = 1;
+    return;
+  }
+  const request = buildJevSuiteSelectionRequest({ changedFiles, missions });
+  const config = { ...resolveJevShadowConfig(), enabled: true };
+  const evaluation = await evaluateJevShadow(request.state, { config, questions: request.questions });
+  const thresholdRaw = Number(process.env.TESTRONAUT_JEV_SELECTION_THRESHOLD);
+  const threshold = Number.isFinite(thresholdRaw) && thresholdRaw >= 0 && thresholdRaw <= 1 ? thresholdRaw : 0.7;
+  const selection = evaluation.status === 'ok'
+    ? interpretJevSuiteSelection(evaluation.answers, request.catalog, threshold)
+    : [];
+  writeOutput({
+    mode: 'jev-suite-selection',
+    dryRun: true,
+    base,
+    changedFiles,
+    threshold,
+    evaluation: {
+      status: evaluation.status,
+      model: evaluation.model,
+      usage: evaluation.usage,
+      latencyMs: evaluation.latencyMs,
+      reason: evaluation.reason,
+      error: evaluation.error,
+    },
+    missions: selection,
+    selected: selection.filter(mission => mission.selected).map(mission => mission.file),
+  });
+  if (evaluation.status !== 'ok') process.exitCode = 1;
+  return;
+}
 
 if (args.length === 1 && args[0] === 'config') {
   writeOutput(buildEffectiveConfig(tagConfig));
@@ -1032,19 +1202,26 @@ const flatMissions = allResults.flatMap(entry => {
         steps = mergeDuplicateTurns(fromJsonl);
       }
     }
-    return {
+    const mission = {
       ...m,
       steps,
       file: entry.file,
     };
+    const jevShadow = summarizeJevUsage(steps);
+    return jevShadow.evaluations ? { ...mission, jevShadow } : mission;
   });
 });
+
+const allMissionSteps = flatMissions
+  .flatMap(mission => Array.isArray(mission.steps) ? mission.steps : []);
+const jevShadowUsage = summarizeJevUsage(allMissionSteps);
 
 // Read provider/model from config (allow env override)
 const { provider: llmProvider, model: llmModel } = resolveProviderModel({ cwd: process.cwd() });
 
 
 const report = {
+  schemaVersion: 2,
   runId,
   cli: { version: CLI_VERSION },
   startTime: startTime.toISOString(),
@@ -1054,6 +1231,7 @@ const report = {
     model: llmModel,
   },
   session: { mode: sessionMode },
+  optimization: optimizationPolicy,
   summary: {
     totalMissions: flatMissions.length,
     passed: flatMissions.filter(m => m.status === 'passed').length,
@@ -1061,6 +1239,41 @@ const report = {
   },
   missions: flatMissions
 };
+if (process.env.TESTRONAUT_EXPERIMENT_ID) {
+  report.experiment = {
+    id: process.env.TESTRONAUT_EXPERIMENT_ID,
+    condition: process.env.TESTRONAUT_EXPERIMENT_CONDITION || null,
+    block: Number(process.env.TESTRONAUT_EXPERIMENT_BLOCK) || null,
+    unit: process.env.TESTRONAUT_EXPERIMENT_UNIT || null,
+    selectedBy: process.env.TESTRONAUT_EXPERIMENT_SELECTED_BY || null,
+    selectionScore: process.env.TESTRONAUT_EXPERIMENT_SELECTION_SCORE === ''
+      ? null
+      : Number(process.env.TESTRONAUT_EXPERIMENT_SELECTION_SCORE),
+  };
+}
+if (jevShadowUsage.evaluations) {
+  const gateMode = /^(1|true|yes|on)$/i.test(String(process.env.TESTRONAUT_JEV_GATE || ''));
+  report.jevShadow = {
+    mode: gateMode ? 'completion-gate' : 'shadow',
+    ...jevShadowUsage,
+  };
+  const { strategies, ...guardrailUsage } = jevShadowUsage;
+  report.jevGuardrails = {
+    mode: gateMode ? 'live' : 'shadow',
+    completionProbability: optimizationPolicy.completionProbability,
+    failOpen: true,
+    ...guardrailUsage,
+  };
+  if (optimizationPolicy.routingRequested) {
+    report.modelRouting = {
+      stability: 'beta',
+      optedIn: optimizationPolicy.betaModelRouting,
+      active: optimizationPolicy.routing,
+      mode: optimizationPolicy.routing ? optimizationPolicy.mode : 'off',
+      strategies,
+    };
+  }
+}
 report.tags = normalizeTags(flatMissions.flatMap(m =>
   m.submissionType === 'mission' ? (m.tags ?? []) : []
 ));

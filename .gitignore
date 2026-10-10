@@ -13,3 +13,4 @@ testronaut-report-*/*
 periapsis-local.tgz
 .github/workflows/*-local.yml
 policy/reports/
+experiments/results/

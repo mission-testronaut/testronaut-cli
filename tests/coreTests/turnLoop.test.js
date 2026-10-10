@@ -112,6 +112,7 @@ vi.mock('../../core/turnIntent.js', () => ({
 vi.mock('../../core/redaction.js', () => ({
   maskPreview: (value) => `masked:${String(value ?? '').length}`,
   redactArgs: (name, args) => args,
+  redactPasswordInText: (value) => String(value ?? ''),
 }));
 
 // Import SUT after mocks
@@ -130,6 +131,13 @@ describe('turnLoop', () => {
 
   beforeEach(() => {
     delete process.env.TESTRONAUT_SCREENSHOTS;
+    delete process.env.TESTRONAUT_JEV_SHADOW;
+    delete process.env.TESTRONAUT_JEV_GATE;
+    delete process.env.TESTRONAUT_JEV_STRATEGIES;
+    delete process.env.TESTRONAUT_JEV_ROUTING;
+    delete process.env.TESTRONAUT_JEV_FAST_MODEL;
+    delete process.env.TESTRONAUT_JEV_ROUTING_THRESHOLD;
+    delete process.env.TESTRONAUT_JEV_API_KEY;
     browser = {};
     // reset spies and chat mock
     shared.chromeToolSpies.fill.mockClear();
@@ -172,6 +180,302 @@ describe('turnLoop', () => {
 
     expect(shared.chromeToolSpies.click_text).not.toHaveBeenCalled();
     expect(shared.chromeToolSpies.get_dom).not.toHaveBeenCalled();
+  });
+
+  it('records Jev shadow telemetry without changing the final result', async () => {
+    process.env.TESTRONAUT_JEV_SHADOW = '1';
+    process.env.TESTRONAUT_JEV_STRATEGIES = '1';
+    process.env.TESTRONAUT_JEV_API_KEY = 'test-key';
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        model: 'jev-test',
+        answers: {
+          missionComplete: { type: 'noul', noul: 0.95 },
+          modelRoute: { type: 'choice', choice: 'finish', confidence: 0.9, probabilities: { finish: 0.9 } },
+          postconditionSatisfied: { type: 'noul', noul: 0.9 },
+          recoveryRoute: { type: 'choice', choice: 'continue', confidence: 0.9, probabilities: { continue: 0.9 } },
+          missionStage: { type: 'choice', choice: 'complete', confidence: 0.9, probabilities: { complete: 0.9 } },
+          prerequisiteSatisfied: { type: 'noul', noul: 0.9 },
+        },
+        usage: { input_tokens: 75, output_tokens: 2 },
+      }),
+    }));
+    shared.chatMock.mockResolvedValueOnce({
+      message: { role: 'assistant', content: 'FINAL: success' },
+      usage: { total_tokens: 10 },
+      headers: {},
+    });
+
+    try {
+      const result = await turnLoop(browser, baseMessages(), 1, 0, 0, {}, {
+        steps: [],
+        missionName: 'demo',
+        goal: 'Complete the demo mission',
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.steps[0].result).toMatch(/Success/);
+      expect(result.steps[0].jevShadow).toMatchObject({
+        status: 'ok',
+        model: 'jev-test',
+        usage: { input_tokens: 75, output_tokens: 2 },
+        strategies: { modelRoute: { choice: 'finish' } },
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+      delete process.env.TESTRONAUT_JEV_SHADOW;
+      delete process.env.TESTRONAUT_JEV_STRATEGIES;
+      delete process.env.TESTRONAUT_JEV_API_KEY;
+    }
+  });
+
+  it('routes the turn after a safe Jev fast-model recommendation', async () => {
+    process.env.TESTRONAUT_JEV_ROUTING = 'live';
+    process.env.TESTRONAUT_JEV_FAST_MODEL = 'stub-fast';
+    process.env.TESTRONAUT_JEV_API_KEY = 'test-key';
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        model: 'jev-test',
+        answers: {
+          modelRoute: { type: 'choice', choice: 'fast_model', confidence: 0.25, probabilities: { fast_model: 0.55 } },
+          missionStage: { type: 'choice', choice: 'interact', confidence: 0.9 },
+          recoveryRoute: { type: 'choice', choice: 'continue', confidence: 0.9 },
+        },
+        usage: { input_tokens: 50, output_tokens: 2 },
+      }),
+    }));
+    shared.chatMock
+      .mockResolvedValueOnce({
+        message: {
+          role: 'assistant', content: '',
+          tool_calls: [{ id: 'route_1', type: 'function', function: { name: 'click_text', arguments: '{"text":"Continue"}' } }],
+        },
+        usage: { total_tokens: 10 }, headers: {},
+      })
+      .mockResolvedValueOnce({
+        message: { role: 'assistant', content: 'FINAL: success' },
+        usage: { total_tokens: 5 }, headers: {},
+      });
+
+    try {
+      const result = await turnLoop(browser, baseMessages(), 2, 0, 0, {}, { steps: [], missionName: 'demo' });
+      expect(result.success).toBe(true);
+      expect(shared.chatMock.mock.calls.map(([request]) => request.model)).toEqual(['stub-model', 'stub-fast']);
+      expect(result.steps[1]).toMatchObject({
+        model: 'stub-fast',
+        modelRouting: { recommendation: 'fast_model', applied: true, reason: 'jev_fast_model' },
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('falls back to the primary model when a routed request fails', async () => {
+    process.env.TESTRONAUT_JEV_ROUTING = 'live';
+    process.env.TESTRONAUT_JEV_FAST_MODEL = 'stub-fast';
+    process.env.TESTRONAUT_JEV_API_KEY = 'test-key';
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        model: 'jev-test',
+        answers: {
+          modelRoute: { type: 'choice', choice: 'fast_model', confidence: 0.25, probabilities: { fast_model: 0.55 } },
+          missionStage: { type: 'choice', choice: 'interact', confidence: 0.9 },
+          recoveryRoute: { type: 'choice', choice: 'continue', confidence: 0.9 },
+        },
+        usage: { input_tokens: 50, output_tokens: 2 },
+      }),
+    }));
+    shared.chatMock
+      .mockResolvedValueOnce({
+        message: {
+          role: 'assistant', content: '',
+          tool_calls: [{ id: 'route_1', type: 'function', function: { name: 'click_text', arguments: '{"text":"Continue"}' } }],
+        },
+        usage: { total_tokens: 10 }, headers: {},
+      })
+      .mockRejectedValueOnce(new Error('fast model unavailable'))
+      .mockResolvedValueOnce({
+        message: { role: 'assistant', content: 'FINAL: success' },
+        usage: { total_tokens: 5 }, headers: {},
+      });
+
+    try {
+      const result = await turnLoop(browser, baseMessages(), 2, 0, 0, {}, { steps: [], missionName: 'demo' });
+      expect(shared.chatMock.mock.calls.map(([request]) => request.model)).toEqual(['stub-model', 'stub-fast', 'stub-model']);
+      expect(result.steps[1].modelRouting).toMatchObject({ fallback: true, selectedModel: 'stub-model' });
+      expect(result.steps[1].events).toContain('↩️ Jev route fallback to stub-model');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('forces a routed action retry back onto the primary model', async () => {
+    process.env.TESTRONAUT_JEV_ROUTING = 'live';
+    process.env.TESTRONAUT_JEV_FAST_MODEL = 'stub-fast';
+    process.env.TESTRONAUT_JEV_API_KEY = 'test-key';
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        model: 'jev-test',
+        answers: {
+          modelRoute: { type: 'choice', choice: 'fast_model', confidence: 0.2, probabilities: { fast_model: 0.55 } },
+          missionStage: { type: 'choice', choice: 'interact' },
+          recoveryRoute: { type: 'choice', choice: 'continue' },
+        },
+        usage: { input_tokens: 50, output_tokens: 2 },
+      }),
+    }));
+    shared.chromeToolSpies.click_text
+      .mockResolvedValueOnce(JSON.stringify({ ok: true }))
+      .mockRejectedValueOnce(new Error('temporary click failure'));
+    const toolResponse = id => ({
+      message: {
+        role: 'assistant', content: '',
+        tool_calls: [{ id, type: 'function', function: { name: 'click_text', arguments: '{"text":"Continue"}' } }],
+      },
+      usage: { total_tokens: 10 }, headers: {},
+    });
+    shared.chatMock
+      .mockResolvedValueOnce(toolResponse('primary_action'))
+      .mockResolvedValueOnce(toolResponse('fast_action'))
+      .mockResolvedValueOnce({
+        message: { role: 'assistant', content: 'FINAL: success' },
+        usage: { total_tokens: 5 }, headers: {},
+      });
+
+    try {
+      const result = await turnLoop(browser, baseMessages(), 3, 0, 0, {}, { steps: [], missionName: 'demo' });
+      expect(result.success).toBe(true);
+      expect(shared.chatMock.mock.calls.map(([request]) => request.model)).toEqual(['stub-model', 'stub-fast', 'stub-model']);
+      expect(result.steps[2].modelRouting).toMatchObject({
+        applied: false,
+        forcedPrimaryRetry: true,
+        reason: 'routed_retry_primary',
+        selectedModel: 'stub-model',
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('allows the opt-in Jev gate to finish after strong browser evidence', async () => {
+    process.env.TESTRONAUT_JEV_GATE = '1';
+    process.env.TESTRONAUT_JEV_API_KEY = 'test-key';
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        model: 'jev-test',
+        answers: {
+          missionComplete: { type: 'noul', noul: 0.91 },
+          progressState: { type: 'choice', choice: 'complete', confidence: 0.9, probabilities: { complete: 0.92 } },
+          nextCompute: { type: 'choice', choice: 'finish', confidence: 0.9, probabilities: { finish: 0.93 } },
+        },
+        usage: { input_tokens: 75, output_tokens: 2 },
+      }),
+    }));
+    shared.chromeToolSpies.get_dom.mockResolvedValueOnce('<html><title>Dashboard</title><h1>Mission complete</h1></html>');
+    shared.chromeToolSpies.screenshot.mockResolvedValueOnce('Screenshot saved at: ./screenshots/jev-gate.png');
+    shared.chatMock.mockResolvedValueOnce({
+      message: {
+        role: 'assistant',
+        content: '',
+        tool_calls: [{
+          id: 'tool_gate',
+          type: 'function',
+          function: { name: 'click_text', arguments: '{"text":"Sign in"}' },
+        }],
+      },
+      usage: { total_tokens: 10 },
+      headers: {},
+    });
+
+    try {
+      const result = await turnLoop(browser, baseMessages(), 5, 0, 0, {}, {
+        steps: [],
+        missionName: 'demo',
+        goal: 'Reach the dashboard',
+      });
+
+      expect(result).toMatchObject({ success: true, completedBy: 'jev_gate' });
+      expect(shared.chatMock).toHaveBeenCalledTimes(1);
+      expect(shared.chromeToolSpies.screenshot).toHaveBeenCalledTimes(1);
+      expect(result.steps[0]).toMatchObject({
+        result: '✅ Mission Success (Jev gate)',
+        screenshotPath: './screenshots/jev-gate.png',
+        jevGate: { triggered: true, candidate: true, threshold: 0.8 },
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+      delete process.env.TESTRONAUT_JEV_GATE;
+      delete process.env.TESTRONAUT_JEV_API_KEY;
+    }
+  });
+
+  it('fails open to the normal loop when gate finalization cannot capture a screenshot', async () => {
+    process.env.TESTRONAUT_JEV_GATE = '1';
+    process.env.TESTRONAUT_JEV_API_KEY = 'test-key';
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        model: 'jev-test',
+        answers: {
+          missionComplete: { type: 'noul', noul: 0.91 },
+          progressState: { type: 'choice', choice: 'complete', confidence: 0.9, probabilities: { complete: 0.92 } },
+          nextCompute: { type: 'choice', choice: 'finish', confidence: 0.9, probabilities: { finish: 0.93 } },
+        },
+        usage: { input_tokens: 75, output_tokens: 2 },
+      }),
+    }));
+    shared.chromeToolSpies.get_dom.mockResolvedValueOnce('<html><title>Dashboard</title><h1>Mission complete</h1></html>');
+    shared.chromeToolSpies.screenshot.mockRejectedValueOnce(new Error('disk unavailable'));
+    shared.chatMock
+      .mockResolvedValueOnce({
+        message: {
+          role: 'assistant',
+          content: '',
+          tool_calls: [{
+            id: 'tool_gate_fail_open',
+            type: 'function',
+            function: { name: 'click_text', arguments: '{"text":"Sign in"}' },
+          }],
+        },
+        usage: { total_tokens: 10 },
+        headers: {},
+      })
+      .mockResolvedValueOnce({
+        message: { role: 'assistant', content: 'FINAL: success' },
+        usage: { total_tokens: 10 },
+        headers: {},
+      });
+
+    try {
+      const result = await turnLoop(browser, baseMessages(), 5, 0, 0, {}, {
+        steps: [],
+        missionName: 'demo',
+        goal: 'Reach the dashboard',
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.completedBy).toBeUndefined();
+      expect(shared.chatMock).toHaveBeenCalledTimes(2);
+      expect(result.steps[0].jevGate).toMatchObject({
+        triggered: false,
+        reason: 'screenshot_failed',
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+      delete process.env.TESTRONAUT_JEV_GATE;
+      delete process.env.TESTRONAUT_JEV_API_KEY;
+    }
   });
 
   it('executes a tool call, injects DOM, then finishes on next turn', async () => {

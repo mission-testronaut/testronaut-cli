@@ -62,6 +62,20 @@ describe('CLI inspection commands', () => {
     expect(result.stdout).not.toContain('private');
   });
 
+  it('reports opt-in guardrail readiness without exposing the Jev key', () => {
+    const cwd = makeProject();
+    fs.writeFileSync(path.join(cwd, 'testronaut-config.json'), JSON.stringify({
+      provider: 'openai', model: 'gpt-5.6', guardrails: { enabled: true, completionProbability: 0.85 },
+    }));
+    const result = spawnSync(process.execPath, [cliPath, 'config', '--json'], {
+      cwd, encoding: 'utf8', env: { ...process.env, TESTRONAUT_JEV_API_KEY: 'private-jev-key' },
+    });
+    expect(result.status).toBe(0);
+    const output = JSON.parse(result.stdout);
+    expect(output.guardrails).toMatchObject({ enabled: true, mode: 'live', completionProbability: 0.85, credentialConfigured: true, credentialSource: 'TESTRONAUT_JEV_API_KEY' });
+    expect(result.stdout).not.toContain('private-jev-key');
+  });
+
   it('suggests a close mission name and exits nonzero during dry-run', () => {
     const result = run(makeProject(), ['logn.mission.js', '--dry-run', '--json']);
     expect(result.status).toBe(1);

@@ -18,6 +18,7 @@
 import fs from 'fs';
 import path from 'path';
 import { normalizeTags } from '../core/tags.js';
+import { summarizeJevUsage } from '../core/jevUsage.js';
 
 /**
  * Render and write a Testronaut run report to disk.
@@ -27,7 +28,7 @@ import { normalizeTags } from '../core/tags.js';
  * @returns {string} absolute path to the written HTML file
  */
 export function generateHtmlReport(report, outputPath) {
-  const { runId, startTime, endTime, missions = [], summary = {}, llm = {}, cli = {} } = report;
+  const { runId, startTime, endTime, missions = [], summary = {}, llm = {}, cli = {}, optimization } = report;
   const reportTags = normalizeTags(report.tags ?? missions.flatMap(m => m.submissionType === 'mission' ? (m.tags ?? []) : []));
   const durationSec =
     (startTime && endTime)
@@ -47,6 +48,7 @@ export function generateHtmlReport(report, outputPath) {
     : String(llm.provider ?? '').trim().toLowerCase();
   const provider = {
     openai: { name: 'OpenAI', logo: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M9.205 8.658v-2.26c0-.19.072-.333.238-.428l4.543-2.616c.619-.357 1.356-.523 2.117-.523 2.854 0 4.662 2.212 4.662 4.566 0 .167 0 .357-.024.547l-4.71-2.759a.797.797 0 00-.856 0l-5.97 3.473zm10.609 8.8V12.06c0-.333-.143-.57-.429-.737l-5.97-3.473 1.95-1.118a.433.433 0 01.476 0l4.543 2.617c1.309.76 2.189 2.378 2.189 3.948 0 1.808-1.07 3.473-2.76 4.163zM7.802 12.703l-1.95-1.142c-.167-.095-.239-.238-.239-.428V5.899c0-2.545 1.95-4.472 4.591-4.472 1 0 1.927.333 2.712.928L8.23 5.067c-.285.166-.428.404-.428.737v6.898zM12 15.128l-2.795-1.57v-3.33L12 8.658l2.795 1.57v3.33L12 15.128zm1.796 7.23c-1 0-1.927-.332-2.712-.927l4.686-2.712c.285-.166.428-.404.428-.737v-6.898l1.974 1.142c.167.095.238.238.238.428v5.233c0 2.545-1.974 4.472-4.614 4.472zm-5.637-5.303l-4.544-2.617c-1.308-.761-2.188-2.378-2.188-3.948A4.482 4.482 0 014.21 6.327v5.423c0 .333.143.571.428.738l5.947 3.449-1.95 1.118a.432.432 0 01-.476 0zm-.262 3.9c-2.688 0-4.662-2.021-4.662-4.519 0-.19.024-.38.047-.57l4.686 2.71c.286.167.571.167.856 0l5.97-3.448v2.26c0 .19-.07.333-.237.428l-4.543 2.616c-.619.357-1.356.523-2.117.523zm5.899 2.83a5.947 5.947 0 005.827-4.756C22.287 18.339 24 15.84 24 13.296c0-1.665-.713-3.282-1.998-4.448.119-.5.19-.999.19-1.498 0-3.401-2.759-5.947-5.946-5.947-.642 0-1.26.095-1.88.31A5.962 5.962 0 0010.205 0a5.947 5.947 0 00-5.827 4.757C1.713 5.447 0 7.945 0 10.49c0 1.666.713 3.283 1.998 4.448-.119.5-.19 1-.19 1.499 0 3.401 2.759 5.946 5.946 5.946.642 0 1.26-.095 1.88-.309a5.96 5.96 0 004.162 1.713z"/></svg>' },
+    gemini: { name: 'Google Gemini', logo: '<svg viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="gemini-gradient" x1="4" y1="20" x2="20" y2="4"><stop stop-color="#3186ff"/><stop offset=".5" stop-color="#8e68ff"/><stop offset="1" stop-color="#ef78b5"/></linearGradient></defs><path fill="url(#gemini-gradient)" d="M12 2c.7 5.8 4.2 9.3 10 10-5.8.7-9.3 4.2-10 10-.7-5.8-4.2-9.3-10-10 5.8-.7 9.3-4.2 10-10z"/></svg>' },
     anthropic: { name: 'Anthropic', logo: '<img src="data:image/svg+xml;base64,PHN2ZyByb2xlPSJpbWciIHZpZXdCb3g9IjAgMCAyNCAyNCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8dGl0bGU+Q2xhdWRlPC90aXRsZT4KICA8cmVjdCB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHJ4PSI1IiBmaWxsPSIjRDk3NzU3Ii8+CiAgPHBhdGggZmlsbD0iI2ZmZiIgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMyAzKSBzY2FsZSguNzUpIiBkPSJNNC43MDkgMTUuOTU1bDQuNzItMi42NDcuMDgtLjIzLS4wOC0uMTI4SDkuMmwtLjc5LS4wNDgtMi42OTgtLjA3My0yLjMzOS0uMDk3LTIuMjY2LS4xMjItLjU3MS0uMTIxTDAgMTEuNzg0bC4wNTUtLjM1Mi40OC0uMzIxLjY4Ni4wNiAxLjUyLjEwMyAyLjI3OC4xNTggMS42NTIuMDk3IDIuNDQ5LjI1NWguMzg5bC4wNTUtLjE1Ny0uMTM0LS4wOTgtLjEwMy0uMDk3LTIuMzU4LTEuNTk2LTIuNTUyLTEuNjg4LTEuMzM2LS45NzItLjcyNC0uNDkxLS4zNjQtLjQ2Mi0uMTU4LTEuMDA4LjY1Ni0uNzIyLjg4MS4wNi4yMjUuMDYxLjg5My42ODYgMS45MDggMS40NzYgMi40OTEgMS44MzMuMzY1LjMwNC4xNDUtLjEwMy4wMTktLjA3My0uMTY0LS4yNzQtMS4zNTUtMi40NDYtMS40NDYtMi40OS0uNjQ0LTEuMDMyLS4xNy0uNjE5YTIuOTcgMi45NyAwIDAxLS4xMDQtLjcyOUw2LjI4My4xMzQgNi42OTYgMGwuOTk2LjEzNC40Mi4zNjQuNjIgMS40MTQgMS4wMDIgMi4yMjkgMS41NTUgMy4wMy40NTYuODk4LjI0My44MzIuMDkxLjI1NWguMTU4VjkuMDFsLjEyOC0xLjcwNi4yMzctMi4wOTUuMjMtMi42OTUuMDgtLjc2LjM3Ni0uOTEuNzQ3LS40OTIuNTg0LjI4LjQ4LjY4NS0uMDY3LjQ0NC0uMjg2IDEuODUxLS41NTkgMi45MDMtLjM2NCAxLjk0MmguMjEybC4yNDMtLjI0Mi45ODUtMS4zMDYgMS42NTItMi4wNjQuNzMtLjgyLjg1LS45MDQuNTQ3LS40MzFoMS4wMzNsLjc2IDEuMTI5LS4zNCAxLjE2Ni0xLjA2NCAxLjM0Ny0uODgxIDEuMTQyLTEuMjY0IDEuNy0uNzkgMS4zNi4wNzMuMTEuMTg4LS4wMiAyLjg1Ni0uNjA2IDEuNTQzLS4yOCAxLjg0MS0uMzE1LjgzMy4zODguMDkxLjM5NS0uMzI4LjgwNy0xLjk2OS40ODYtMi4zMDkuNDYyLTMuNDM5LjgxMy0uMDQyLjAzLjA0OS4wNjEgMS41NDkuMTQ2LjY2Mi4wMzZoMS42MjJsMy4wMi4yMjUuNzkuNTIyLjQ3NC42MzgtLjA3OS40ODUtMS4yMTUuNjItMS42NC0uMzg5LTMuODI5LS45MS0xLjMxMi0uMzI5aC0uMTgydi4xMWwxLjA5MyAxLjA2OCAyLjAwNiAxLjgxIDIuNTA5IDIuMzMuMTI3LjU3OC0uMzIyLjQ1NS0uMzQtLjA0OS0yLjIwNS0xLjY1Ny0uODUxLS43NDctMS45MjYtMS42MmgtLjEyOHYuMTdsLjQ0NC42NDkgMi4zNDUgMy41MjEuMTIyIDEuMDgtLjE3LjM1My0uNjA4LjIxMy0uNjY4LS4xMjItMS4zNzQtMS45MjUtMS40MTUtMi4xNjctMS4xNDMtMS45NDMtLjE0LjA4LS42NzQgNy4yNTQtLjMxNi4zNy0uNzI5LjI4LS42MDctLjQ2MS0uMzIyLS43NDcuMzIyLTEuNDc2LjM4OS0xLjkyNC4zMTUtMS41My4yODYtMS45LjE3LS42MzItLjAxMi0uMDQyLS4xNC4wMTgtMS40MzQgMS45NjctMi4xOCAyLjk0NS0xLjcyNiAxLjg0NS0uNDE0LjE2NC0uNzE3LS4zNy4wNjctLjY2Mi40MDEtLjU4OSAyLjM4OC0zLjAzNiAxLjQ0LTEuODgyLjkzLTEuMDg2LS4wMDYtLjE1OGgtLjA1NUw0LjEzMiAxOC41NmwtMS4xMy4xNDYtLjQ4Ny0uNDU2LjA2MS0uNzQ2LjIzMS0uMjQzIDEuOTA4LTEuMzEyLS4wMDYuMDA2eiIvPgo8L3N2Zz4K" alt="" />' },
   }[providerKey] ?? { name: llm.provider || 'Unknown provider', logo: '' };
   const tagPalette = [
@@ -59,6 +61,34 @@ export function generateHtmlReport(report, outputPath) {
     const [color, background] = tagPalette[index];
     return `color:${color};background:${background};border-color:${color}66`;
   };
+  const formatTokens = value => Number(value || 0).toLocaleString('en-US');
+  const summarizeModelTokens = (steps) => steps.reduce((usage, step) => {
+    const input = Number(step.inputTokens || 0);
+    const output = Number(step.outputTokens || 0);
+    const model = String(step.model || llm.model || 'Model');
+    usage.input += input;
+    usage.output += output;
+    usage.total += Number(step.tokensUsed ?? (input + output));
+    usage.byModel[model] ||= { input: 0, output: 0, total: 0, turns: 0 };
+    usage.byModel[model].input += input;
+    usage.byModel[model].output += output;
+    usage.byModel[model].total += Number(step.tokensUsed ?? (input + output));
+    usage.byModel[model].turns += 1;
+    return usage;
+  }, { input: 0, output: 0, total: 0, byModel: {} });
+  const tokenMeta = (modelUsage, jevUsage) => [
+    `Model tokens: ${formatTokens(modelUsage.total)} (${formatTokens(modelUsage.input)} in / ${formatTokens(modelUsage.output)} out)`,
+    Object.keys(modelUsage.byModel).length > 1
+      ? `By model: ${Object.entries(modelUsage.byModel).map(([model, usage]) => `${model} ${formatTokens(usage.total)}`).join(' / ')}`
+      : '',
+    jevUsage?.completed ? `Jev tokens: ${formatTokens(jevUsage.inputTokens)} in / ${formatTokens(jevUsage.outputTokens)} out` : '',
+  ].filter(Boolean).join(' • ');
+  const reportJevUsage = report.jevShadow?.evaluations
+    ? report.jevShadow
+    : summarizeJevUsage(missions.flatMap(m => Array.isArray(m.steps) ? m.steps : []));
+  const reportModelUsage = summarizeModelTokens(missions.flatMap(m => Array.isArray(m.steps) ? m.steps : []));
+  const reportModels = Object.keys(reportModelUsage.byModel);
+  const jevLogo = '<svg viewBox="0 0 24 24" role="img" aria-hidden="true"><rect width="24" height="24" rx="4" fill="#e547b5"/><g fill="none" stroke="#181a1b" stroke-width="2.25" stroke-linecap="square" stroke-linejoin="round"><path d="M12 2.5 6.1 6v10.1l3.2 1.9 2.7-1.6V9.6l3-1.8V4.3z"/><path d="m9.3 9.6 2.7 1.6 3-1.8 3 1.8v7L12 21.5l-3-1.8V13z"/><path d="m12 11.2 3 1.8 3-1.8M15 13v5.2l-6 3.3M9.3 9.6 12 8l3 1.8"/></g></svg>';
 
   const submissionBlock = (m) => {
     const mDurationSec =
@@ -67,6 +97,8 @@ export function generateHtmlReport(report, outputPath) {
         : (typeof m.durationSeconds === 'number' ? m.durationSeconds.toFixed(2) : '—');
 
     const steps = Array.isArray(m.steps) ? m.steps : [];
+    const missionJevUsage = m.jevShadow?.evaluations ? m.jevShadow : summarizeJevUsage(steps);
+    const missionModelUsage = summarizeModelTokens(steps);
     const stepItems = steps.map((step, idx) => {
       const events = Array.isArray(step.events) ? step.events : [];
       const ok = /✅|Passed|Mission Success/i.test(step.result || '');
@@ -87,6 +119,16 @@ export function generateHtmlReport(report, outputPath) {
       const imgTag = step.screenshotPath
         ? `<img src="${esc(step.screenshotPath)}" alt="screenshot turn ${esc(step.turn ?? idx)}">`
         : '';
+      const stepJev = step.jevShadow?.status === 'ok'
+        ? ` • Jev: ${formatTokens(step.jevShadow.usage?.input_tokens)} in / ${formatTokens(step.jevShadow.usage?.output_tokens)} out`
+        : step.jevShadow
+          ? ` • Jev: ${esc(step.jevShadow.status)}${step.jevShadow.reason ? ` (${esc(step.jevShadow.reason)})` : ''}`
+          : '';
+      const routeLabel = step.modelRouting?.fallback
+        ? ' • Jev route fallback'
+        : step.modelRouting?.applied
+          ? ' • routed by Jev'
+          : '';
 
       const plan = (typeof step.summary === 'string' && step.summary.trim())
         ? step.summary.trim()
@@ -102,7 +144,7 @@ export function generateHtmlReport(report, outputPath) {
             ${humanInput}
             ${planSpan}
             <span class="step-result ${ok ? 'ok' : 'bad'}" ${resultTooltip ? `title="${esc(resultTooltip)}"` : ''}>${esc(resultRaw)}</span>
-            <span class="tokens">tokens: ${esc(step.tokensUsed ?? '—')} (in: ${esc(step.inputTokens ?? '—')}, out: ${esc(step.outputTokens ?? '—')}) / rolling: ${esc(step.totalTokensUsed ?? '—')}</span>
+            <span class="tokens">${esc(step.model || llm.model || 'Model')} tokens: ${esc(step.tokensUsed ?? '—')} (${esc(step.inputTokens ?? '—')} in / ${esc(step.outputTokens ?? '—')} out)${routeLabel}${stepJev}</span>
           </summary>
           <pre class="events">${esc(events.join('\n')) || '(no events)'}</pre>
           ${imgTag}
@@ -120,7 +162,7 @@ export function generateHtmlReport(report, outputPath) {
         <summary>
           <span class="name">${prettyTitle}</span>
           <span class="status ${statusClass}">${badge(m.status)}</span>
-          <span class="meta">steps: ${steps.length} • duration: ${mDurationSec}s</span>
+          <span class="meta">steps: ${steps.length} • duration: ${mDurationSec}s • ${esc(tokenMeta(missionModelUsage, missionJevUsage))}</span>
           <span class="toolbar">
             <button class="btn-mini toggle" data-scope="submission" aria-label="Expand">▼</button>
           </span>
@@ -151,6 +193,8 @@ export function generateHtmlReport(report, outputPath) {
     const groupDur = (firstStart != null && lastEnd != null) ? ((lastEnd - firstStart) / 1000).toFixed(2) : '—';
     const tags = normalizeTags(subs.flatMap(s => s.submissionType === 'mission' ? (s.tags ?? []) : []));
     const sourceFiles = [...new Set(subs.map(s => s.file).filter(Boolean))];
+    const groupJevUsage = summarizeJevUsage(subs.flatMap(s => Array.isArray(s.steps) ? s.steps : []));
+    const groupModelUsage = summarizeModelTokens(subs.flatMap(s => Array.isArray(s.steps) ? s.steps : []));
 
     // pre → mission → post
     const order = { premission: 0, mission: 1, postmission: 2 };
@@ -165,7 +209,7 @@ export function generateHtmlReport(report, outputPath) {
           <span class="name">${esc(missionName)}</span>
           <span class="mission-tags">${tags.map(tag => `<span class="tag-small" style="${tagStyle(tag)}">${esc(tag)}</span>`).join('')}</span>
           <span class="status ${status === 'failed' ? 'bad' : 'ok'}">${badge(status)}</span>
-          <span class="meta">${sourceFiles.length ? `${sourceFiles.map(esc).join(', ')} • ` : ''}submissions: ${subs.length} • steps: ${totalSteps} • duration: ${groupDur}s</span>
+          <span class="meta">${sourceFiles.length ? `${sourceFiles.map(esc).join(', ')} • ` : ''}submissions: ${subs.length} • steps: ${totalSteps} • duration: ${groupDur}s • ${esc(tokenMeta(groupModelUsage, groupJevUsage))}</span>
           <span class="toolbar">
             <button class="btn-mini toggle" data-scope="mission" aria-label="Expand">▼</button>
           </span>
@@ -277,6 +321,7 @@ export function generateHtmlReport(report, outputPath) {
     .pill:first-child{border-color:rgba(255,138,67,.5);box-shadow:inset 3px 0 var(--orange);}
     .pill.ok{ background: var(--chip-ok-bg); color: var(--ok); border-color: var(--chip-ok-border); font-weight:700; }
     .pill.bad{ background: var(--chip-bad-bg); color: var(--bad); border-color: var(--chip-bad-border); font-weight:700; }
+    .pill.warn{ background:rgba(251,191,36,.14);color:#fbbf24;border-color:rgba(251,191,36,.4);font-weight:700; }
     .tag-filter{max-width:928px;margin:0 auto 20px;padding:18px 16px;background:rgba(2,6,23,.30);}
     .tag-filter-heading{display:flex;align-items:center;gap:7px;margin-bottom:12px;flex-wrap:wrap;}
     .tag-filter-title{font-size:14px;color:var(--text);font-weight:800;}
@@ -377,7 +422,7 @@ export function generateHtmlReport(report, outputPath) {
     <div class="eyebrow">Mission Control · Flight Report</div>
     <h1>🧑‍🚀 <span class="gradient-text">Testronaut Report</span></h1>
     <div class="run-meta">
-      <div class="provider-meta"><span class="provider-logo" title="${esc(provider.name)}" aria-label="${esc(provider.name)}">${provider.logo}</span><strong>${esc(llm.model ?? '—')}</strong></div>
+      <div class="provider-meta"><span class="provider-logo" title="${esc(provider.name)}" aria-label="${esc(provider.name)}">${provider.logo}</span><strong>${esc((reportModels.length ? reportModels : [llm.model ?? '—']).join(' + '))}</strong>${reportJevUsage.evaluations ? ` <span aria-hidden="true">+</span> <span class="provider-logo" title="Jev" aria-label="Jev">${jevLogo}</span><strong>Jev</strong>` : ''}</div>
       <div><strong>Run ID:</strong> ${esc(runId ?? '—')}</div>
       <div><strong>Start:</strong> ${esc(startTime ?? '—')}</div>
       <div><strong>End:</strong> ${esc(endTime ?? '—')}</div>
@@ -390,6 +435,13 @@ export function generateHtmlReport(report, outputPath) {
     <div class="pill">Missions: ${esc(summary.totalMissions ?? totals.total)}</div>
     <div class="pill ok">Passed: ${esc(summary.passed ?? totals.passed)}</div>
     <div class="pill bad">Failed: ${esc(summary.failed ?? totals.failed)}</div>
+    ${optimization?.configured ? `<div class="pill">Optimization: ${esc(optimization.objective)} (${esc(optimization.mode)})</div>` : ''}
+    ${Object.entries(reportModelUsage.byModel).length > 1
+      ? Object.entries(reportModelUsage.byModel).map(([model, usage]) => `<div class="pill">${esc(model)} tokens: ${esc(formatTokens(usage.total))} (${esc(formatTokens(usage.input))} in / ${esc(formatTokens(usage.output))} out)</div>`).join('')
+      : `<div class="pill">Model tokens: ${esc(formatTokens(reportModelUsage.total))} (${esc(formatTokens(reportModelUsage.input))} in / ${esc(formatTokens(reportModelUsage.output))} out)</div>`}
+    ${reportJevUsage.completed ? `<div class="pill">Jev tokens: ${esc(formatTokens(reportJevUsage.inputTokens))} in / ${esc(formatTokens(reportJevUsage.outputTokens))} out</div>` : ''}
+    ${reportJevUsage.skipped ? `<div class="pill warn">Jev skipped: ${esc(formatTokens(reportJevUsage.skipped))}</div>` : ''}
+    ${reportJevUsage.errors ? `<div class="pill warn">Jev errors: ${esc(formatTokens(reportJevUsage.errors))}</div>` : ''}
   </div>
 
   <div class="tag-filter glass">
