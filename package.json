@@ -32,7 +32,7 @@
     "@dqbd/tiktoken": "^1.0.21",
     "@google/generative-ai": "^0.24.1",
     "cheerio": "^1.1.0",
-    "dotenv": "^17.2.0",
+    "dotenv": "^18.0.4",
     "fast-glob": "^3.3.3",
     "inquirer": "^12.9.1",
     "jiti": "^2.7.0",
