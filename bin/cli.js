@@ -951,7 +951,12 @@ if (args.includes('serve') || args.includes('view')) {
   await new Promise(() => {}); // ✅ never resolves; Ctrl+C will terminate
 }
 
-const { root: missionsRoot, files: discoveredMissions } = await discoverMissionFiles({ cwd: process.cwd() });
+const {
+  root: missionsRoot,
+  files: discoveredMissions,
+  warnings: missionDiscoveryWarnings = [],
+} = await discoverMissionFiles({ cwd: process.cwd() });
+for (const warning of missionDiscoveryWarnings) console.warn(`⚠️ ${warning}`);
 const tagConfig = await loadConfig(process.cwd());
 const optimizationPolicy = resolveOptimizationPolicy({ config: tagConfig });
 if (!optimizationPolicy.valid) {
@@ -1144,14 +1149,19 @@ const runFile = async (filePath) => {
 
     if (typeof missionsModule.executeMission === 'function') {
       if (!jsonOutput) terminalUi.phase('launch', path.relative(process.cwd(), modulePath) || filePath);
+      const missionFileStartTime = Date.now();
       const result = await missionsModule.executeMission();
+      const missionFileEndTime = Date.now();
       if (result == null) {
         console.error(`❌ Mission did not return a result: ${filePath}`);
         return false;
       }
       allResults.push({
         file: path.relative(process.cwd(), modulePath) || path.basename(modulePath),
-        result
+        result,
+        startTime: missionFileStartTime,
+        endTime: missionFileEndTime,
+        durationMs: Math.max(0, missionFileEndTime - missionFileStartTime),
       });
       const missionResults = Array.isArray(result) ? result : [result];
       return !missionResults.some(item => item?.status === 'failed');
@@ -1206,6 +1216,9 @@ const flatMissions = allResults.flatMap(entry => {
       ...m,
       steps,
       file: entry.file,
+      startTime: m.startTime ?? entry.startTime,
+      endTime: m.endTime ?? entry.endTime,
+      durationMs: m.durationMs ?? entry.durationMs,
     };
     const jevShadow = summarizeJevUsage(steps);
     return jevShadow.evaluations ? { ...mission, jevShadow } : mission;
@@ -1226,6 +1239,7 @@ const report = {
   cli: { version: CLI_VERSION },
   startTime: startTime.toISOString(),
   endTime: endTime.toISOString(),
+  durationMs: Math.max(0, endTime.getTime() - startTime.getTime()),
   llm: {
     provider: llmProvider,
     model: llmModel,
@@ -1283,7 +1297,7 @@ fs.writeFileSync(path.join(outputDir, `${runId}.json`), JSON.stringify(report, n
 const htmlReportPath = path.join(outputDir, `${runId}.html`);
 generateHtmlReport(report, htmlReportPath);
 if (jsonOutput) writeOutput(report);
-else terminalUi.summary({ ...report.summary, reportPath: path.relative(process.cwd(), htmlReportPath) });
+else terminalUi.summary({ ...report.summary, durationMs: report.durationMs, reportPath: path.relative(process.cwd(), htmlReportPath) });
 
   try {
     if (!process.env.TN_KEEP_TMP && fs.existsSync(TMP_DIR)) {

@@ -9,6 +9,12 @@ const ANSI = {
   cream: '\u001b[38;5;230m',
 };
 
+export function formatDuration(durationMs) {
+  if (!Number.isFinite(durationMs)) return null;
+  const seconds = Math.max(0, durationMs) / 1000;
+  return seconds < 60 ? `${seconds.toFixed(2)}s` : `${Math.floor(seconds / 60)}m ${(seconds % 60).toFixed(1)}s`;
+}
+
 export function shouldUseColor(stream = process.stdout, env = process.env) {
   return Boolean(stream?.isTTY) && !('NO_COLOR' in env) && env.TERM !== 'dumb';
 }
@@ -38,13 +44,15 @@ export function createTerminalUi({
       const tagText = tags.length ? paint(ANSI.dim, `  ${tags.map(tag => `#${tag}`).join(' ')}`) : '';
       write(`   ${marker} ${file}${tagText}`);
     },
-    summary({ totalMissions = 0, passed = 0, failed = 0, reportPath }) {
+    summary({ totalMissions = 0, passed = 0, failed = 0, durationMs, reportPath }) {
       const status = failed === 0
         ? paint(`${ANSI.bold}${ANSI.teal}`, 'MISSION COMPLETE')
         : paint(`${ANSI.bold}${ANSI.red}`, 'MISSION NEEDS REVIEW');
       write('');
       write(`${label('COMPLETE')}${status}`);
       write(`   ${paint(ANSI.teal, `${passed} passed`)}  ${paint(failed ? ANSI.red : ANSI.dim, `${failed} failed`)}  ${paint(ANSI.dim, `${totalMissions} total`)}`);
+      const duration = formatDuration(durationMs);
+      if (duration) write(paint(ANSI.dim, `   Duration: ${duration}`));
       if (reportPath) write(paint(ANSI.dim, `   Report: ${reportPath}`));
     },
   };

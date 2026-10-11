@@ -96,7 +96,7 @@ vi.mock('../../tools/turnLoopUtils.js', async () => {
     finalResponseHandler: (msg) => {
       const content = (msg?.content || '').toString();
       if (content.includes('FINAL')) {
-        return { finalMessage: 'Mission complete', success: true };
+        return { finalMessage: content, success: !content.includes('FAILURE') };
       }
       return null;
     },
@@ -180,6 +180,52 @@ describe('turnLoop', () => {
 
     expect(shared.chromeToolSpies.click_text).not.toHaveBeenCalled();
     expect(shared.chromeToolSpies.get_dom).not.toHaveBeenCalled();
+  });
+
+  it('uses one tool-free closure turn after the working-turn budget is exhausted', async () => {
+    shared.chatMock
+      .mockResolvedValueOnce({
+        message: { role: 'assistant', content: 'Still investigating' },
+        usage: { total_tokens: 10 },
+        headers: {},
+      })
+      .mockResolvedValueOnce({
+        message: { role: 'assistant', content: 'FINAL: FAILURE: budget exhausted before completion' },
+        usage: { total_tokens: 4 },
+        headers: {},
+      });
+
+    const result = await turnLoop(browser, baseMessages(), 1, 0, 0, {}, {
+      steps: [], missionName: 'demo',
+    });
+
+    expect(result).toMatchObject({ success: false, completedBy: 'budget_closure' });
+    expect(shared.chatMock).toHaveBeenCalledTimes(2);
+    expect(shared.chatMock.mock.calls[1][0].tools).toEqual([]);
+    expect(shared.chatMock.mock.calls[1][0].messages.at(-1).content).toContain('working-turn budget is exhausted');
+    expect(result.steps.at(-1)).toMatchObject({
+      isClosureTurn: true,
+      result: '❌ Mission Failure',
+      tokensUsed: 4,
+    });
+  });
+
+  it('records elapsed milliseconds for normal and closure turns', async () => {
+    shared.chatMock
+      .mockResolvedValueOnce({ message: { role: 'assistant', content: 'Continue' }, usage: {} })
+      .mockResolvedValueOnce({ message: { role: 'assistant', content: 'FINAL: FAILURE: incomplete' }, usage: {} });
+
+    const result = await turnLoop(browser, baseMessages(), 1, 0, 0, {}, {
+      steps: [], missionName: 'timed',
+    });
+
+    expect(result.steps).toHaveLength(2);
+    for (const step of result.steps) {
+      expect(step.startTime).toEqual(expect.any(Number));
+      expect(step.endTime).toEqual(expect.any(Number));
+      expect(step.durationMs).toEqual(expect.any(Number));
+      expect(step.durationMs).toBeGreaterThanOrEqual(0);
+    }
   });
 
   it('records Jev shadow telemetry without changing the final result', async () => {

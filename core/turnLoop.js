@@ -409,6 +409,8 @@ export const turnLoop = async (
   // Idempotent recorder – prevents accidental double-push
   const recordStep = (step) => {
     if (!step || step.__recorded) return;
+    step.endTime = Date.now();
+    step.durationMs = Math.max(0, step.endTime - (step.startTime ?? step.endTime));
     step._seq = stepSeq++;
     step.__recorded = true;
     try { steps.push(step); } catch {}
@@ -427,6 +429,7 @@ export const turnLoop = async (
     const attempt = turnRetries + 1;
     const step = {
       turn,
+      startTime: Date.now(),
       retryAttempt: attempt,
       retryLimit: retryLimitClamped, // number of retries allowed (excludes initial)
       events: [],
@@ -1061,7 +1064,61 @@ export const turnLoop = async (
     turnRetries = 0;
   }
 
-  return { success: false, steps: stepsArchive };
+  // The configured budget covers working turns. Once those are consumed, make
+  // one final tool-free request so every mission ends with an explicit verdict.
+  const closureStep = {
+    turn: maxTurns,
+    startTime: Date.now(),
+    isClosureTurn: true,
+    retryAttempt: 1,
+    retryLimit: 0,
+    events: ['⏱️ Working-turn budget exhausted; requesting final mission verdict.'],
+    result: '🟡 Awaiting Closure',
+    missionName,
+    provider: PROVIDER_ID,
+    model: MODEL_ID,
+  };
+  console.log(`\n🏁 Turn budget exhausted after ${maxTurns} working turn(s). Requesting closure.`);
+  messages.push({
+    role: 'user',
+    content: 'The working-turn budget is exhausted. Do not call tools or continue the task. Based only on the evidence already collected, respond with exactly SUCCESS: followed by a short reason if the goal was achieved, otherwise FAILURE: followed by a short reason.',
+  });
+
+  try {
+    const closureResponse = await llm.chat({ model: MODEL_ID, messages, tools: [] });
+    const msg = closureResponse?.message ?? { role: 'assistant', content: '' };
+    const usage = closureResponse?.usage;
+    if (usage) {
+      closureStep.tokensUsed = usage.total_tokens || 0;
+      closureStep.inputTokens = usage.input_tokens ?? usage.prompt_tokens ?? usage.providerRaw?.input_tokens ?? usage.providerRaw?.prompt_tokens;
+      closureStep.outputTokens = usage.output_tokens ?? usage.completion_tokens ?? usage.providerRaw?.output_tokens ?? usage.providerRaw?.completion_tokens;
+    }
+    closureStep.summary = summarizeTurnIntentFromMessage(msg, { emoji: true });
+    const finalResponse = finalResponseHandler(msg);
+    if (finalResponse) {
+      closureStep.events.push(finalResponse.finalMessage);
+      closureStep.result = finalResponse.success ? '✅ Mission Success' : '❌ Mission Failure';
+      recordStep(closureStep);
+      return {
+        success: finalResponse.success,
+        finalMessage: finalResponse.finalMessage,
+        steps: stepsArchive,
+        completedBy: 'budget_closure',
+      };
+    }
+    closureStep.events.push('FAILURE: The closure response did not provide an explicit SUCCESS or FAILURE verdict.');
+  } catch (error) {
+    closureStep.events.push(`FAILURE: Unable to obtain the closure verdict: ${error?.message || error}`);
+  }
+
+  closureStep.result = '❌ Mission Failure';
+  recordStep(closureStep);
+  return {
+    success: false,
+    finalMessage: closureStep.events.at(-1),
+    steps: stepsArchive,
+    completedBy: 'budget_closure',
+  };
 };
 
 // Expose small helper bundle for unit tests (no production use).
