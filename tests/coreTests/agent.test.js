@@ -61,6 +61,8 @@ describe('core/agent.runAgent', () => {
     expect(res).toHaveLength(2);
     expect(res[0].status).toBe('passed');
     expect(res[1].status).toBe('passed');
+    expect(res[0].durationMs).toEqual(expect.any(Number));
+    expect(res[0].endTime).toBeGreaterThanOrEqual(res[0].startTime);
   });
 
   it('stops early on first failure and returns partial results', async () => {

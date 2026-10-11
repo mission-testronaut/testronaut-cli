@@ -18,6 +18,26 @@ afterEach(() => {
 });
 
 describe('generateHtmlReport', () => {
+  it('renders explicit suite, mission, and turn durations', () => {
+    const report = {
+      runId: 'timed_run',
+      durationMs: 6500,
+      missions: [{
+        missionName: 'Timed Mission',
+        submissionType: 'mission',
+        status: 'passed',
+        durationMs: 2500,
+        steps: [{ turn: 0, result: '✅ Mission Success', durationMs: 1250 }],
+      }],
+    };
+    const outPath = path.join(tmpDir, 'timed.html');
+    generateHtmlReport(report, outPath);
+    const html = fs.readFileSync(outPath, 'utf8');
+    expect(html).toContain('<strong>Duration:</strong> 6.50s');
+    expect(html).toContain('duration: 2.50s');
+    expect(html).toContain('Turn 1 • 1.25s');
+  });
+
   it('writes an HTML report containing mission and retry metadata', () => {
     const report = {
       runId: 'run_test',

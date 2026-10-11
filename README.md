@@ -239,6 +239,34 @@ await runMissions({
 }, "Contact Form Flow");
 ```
 
+Control the order of an automatically discovered suite in
+`testronaut-config.json`:
+
+```json
+{
+  "missions": {
+    "include": ["**/*.mission.js"],
+    "order": [
+      "login.mission.js",
+      "account/**/*.mission.js",
+      "*",
+      "logout.mission.js"
+    ]
+  }
+}
+```
+
+Order entries are applied from top to bottom. Each pattern's matches remain
+alphabetical, `*` places missions not claimed by another entry, and unlisted
+missions are appended alphabetically. An exact filename that is not discovered
+produces a warning. Without `missions.order`, discovery remains alphabetical.
+Mission filenames supplied directly on the command line run in argument order.
+
+`maxTurns` counts working turns. If a mission spends the full budget without a
+verdict, Testronaut makes one additional tool-free closure request so the report
+ends with an explicit success or failure. JSON and HTML reports include elapsed
+milliseconds for each turn and mission plus the duration of the complete suite.
+
 ---
 
 ## 🧰 Developer Mode (Staging API)

@@ -98,7 +98,10 @@ describe('CLI inspection commands', () => {
     const result = run(cwd, ['--tags', 'authentication', '--json', '--quiet']);
 
     expect(result.status).toBe(0);
-    expect(JSON.parse(result.stdout).missions[0].missionName).toBe('https://example.test');
+    const report = JSON.parse(result.stdout);
+    expect(report.missions[0].missionName).toBe('https://example.test');
+    expect(report.durationMs).toEqual(expect.any(Number));
+    expect(report.missions[0].durationMs).toEqual(expect.any(Number));
   });
 
   it('records shared-auth session mode in the report', () => {

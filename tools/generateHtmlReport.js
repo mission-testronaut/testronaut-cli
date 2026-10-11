@@ -30,8 +30,9 @@ import { summarizeJevUsage } from '../core/jevUsage.js';
 export function generateHtmlReport(report, outputPath) {
   const { runId, startTime, endTime, missions = [], summary = {}, llm = {}, cli = {}, optimization } = report;
   const reportTags = normalizeTags(report.tags ?? missions.flatMap(m => m.submissionType === 'mission' ? (m.tags ?? []) : []));
-  const durationSec =
-    (startTime && endTime)
+  const durationSec = Number.isFinite(report.durationMs)
+    ? (report.durationMs / 1000).toFixed(2)
+    : (startTime && endTime)
       ? ((new Date(endTime) - new Date(startTime)) / 1000).toFixed(2)
       : '—';
 
@@ -91,8 +92,9 @@ export function generateHtmlReport(report, outputPath) {
   const jevLogo = '<svg viewBox="0 0 24 24" role="img" aria-hidden="true"><rect width="24" height="24" rx="4" fill="#e547b5"/><g fill="none" stroke="#181a1b" stroke-width="2.25" stroke-linecap="square" stroke-linejoin="round"><path d="M12 2.5 6.1 6v10.1l3.2 1.9 2.7-1.6V9.6l3-1.8V4.3z"/><path d="m9.3 9.6 2.7 1.6 3-1.8 3 1.8v7L12 21.5l-3-1.8V13z"/><path d="m12 11.2 3 1.8 3-1.8M15 13v5.2l-6 3.3M9.3 9.6 12 8l3 1.8"/></g></svg>';
 
   const submissionBlock = (m) => {
-    const mDurationSec =
-      m.endTime && m.startTime
+    const mDurationSec = Number.isFinite(m.durationMs)
+      ? (m.durationMs / 1000).toFixed(2)
+      : m.endTime && m.startTime
         ? ((m.endTime - m.startTime) / 1000).toFixed(2)
         : (typeof m.durationSeconds === 'number' ? m.durationSeconds.toFixed(2) : '—');
 
@@ -129,6 +131,9 @@ export function generateHtmlReport(report, outputPath) {
         : step.modelRouting?.applied
           ? ' • routed by Jev'
           : '';
+      const stepDuration = Number.isFinite(step.durationMs)
+        ? ` • ${(step.durationMs / 1000).toFixed(2)}s`
+        : '';
 
       const plan = (typeof step.summary === 'string' && step.summary.trim())
         ? step.summary.trim()
@@ -140,7 +145,7 @@ export function generateHtmlReport(report, outputPath) {
       return `
         <details class="step" ${ok ? '' : 'open'}>
           <summary>
-            <span class="turn">Turn ${esc((step.turn ?? idx) + 1)}${esc(attemptLabel)}</span>
+            <span class="turn">${step.isClosureTurn ? 'Closure' : `Turn ${esc((step.turn ?? idx) + 1)}`}${esc(attemptLabel)}${stepDuration}</span>
             ${humanInput}
             ${planSpan}
             <span class="step-result ${ok ? 'ok' : 'bad'}" ${resultTooltip ? `title="${esc(resultTooltip)}"` : ''}>${esc(resultRaw)}</span>
