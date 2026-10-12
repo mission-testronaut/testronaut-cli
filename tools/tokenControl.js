@@ -85,13 +85,13 @@ function getTokenizer(model) {
   } catch (_) {
     const m = String(model || '').toLowerCase();
 
-    // Treat Gemini 2.5 like modern long-context models
-    const isGemini25 = /^gemini-2\.5/.test(m);
+    // Treat current Gemini generations like modern long-context models.
+    const isGemini = /^gemini-(?:2\.5|3(?:\.|-))/.test(m);
     const isClaude = /^claude-/.test(m);
 
     // OpenAI modern families also map well to o200k_base
     const useO200k =
-      isGemini25 ||
+      isGemini ||
       isClaude ||
       m.startsWith('gpt-5') ||
       m.startsWith('gpt-4o') ||

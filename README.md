@@ -1,6 +1,6 @@
-# 🧑‍🚀 Testronaut — Agentic End-to-End Testing
+# 🧑‍🚀 Testronaut™ — Agentic End-to-End Testing
 
-**Testronaut** is an open-source **agentic end-to-end testing** framework powered by AI agents and **Playwright**.
+**Testronaut™** is an open-source **agentic end-to-end testing** framework powered by AI agents and **Playwright**.
 
 Define complete user journeys as plain-English *missions*. Testronaut reasons about the interface, chooses browser actions, adapts as the journey unfolds, and produces inspectable reports from real browser sessions.
 
@@ -145,7 +145,7 @@ Choose your preferred LLM at init or via environment variables.
 testronaut --init
 
 # Or override anytime
-TESTRONAUT_PROVIDER=gemini TESTRONAUT_MODEL=gemini-2.5-pro testronaut
+TESTRONAUT_PROVIDER=gemini TESTRONAUT_MODEL=gemini-3.8-flash testronaut
 ```
 
 ### Token-rate override
@@ -172,7 +172,7 @@ Current supported providers:
 | Provider | Example Models |
 |-----------|----------------|
 | **OpenAI** | gpt-5.6, gpt-5.6-terra, gpt-5.6-luna, gpt-5.5, and legacy GPT/o-series models |
-| **Google Gemini** | gemini-2.5-pro, gemini-2.5-flash, gemini-2.5-flash-8b |
+| **Google Gemini** | gemini-3.8-flash, gemini-3.7-flash, gemini-3.6-flash, gemini-3.5-flash-lite, gemini-3.1-pro-preview, Gemini 2.5 legacy models |
 | **Anthropic Claude** | claude-sonnet-5, claude-opus-5, claude-haiku-4-5 |
 
 The canonical Claude provider ID is `anthropic`; `claude` is also accepted as a CLI alias.
@@ -191,6 +191,31 @@ Run a specific mission:
 testronaut login.mission.js
 ```
 
+Reuse cookies, local storage, and IndexedDB authentication state across an ordered set of mission files:
+
+```bash
+testronaut --session=shared-auth checkout.mission.js account.mission.js
+```
+
+Each mission still receives a fresh browser context. The default
+`--session=isolated` mode does not carry authentication forward. Shared-auth
+suites can wrap a reusable login prerequisite in `launchProtocol()` so later
+mission files probe the restored authenticated page without an LLM call:
+
+```js
+import { launchProtocol, runMissions } from 'testronaut';
+
+const login = launchProtocol('Visit the app and log in.', {
+  id: 'authenticated:test-user',
+  probe: { url: process.env.URL, selector: '#dashboard' },
+});
+
+await runMissions({ preMission: login, mission: 'Test the dashboard.' }, 'dashboard');
+```
+
+Unwrapped `preMission` values remain fully compatible and always run normally.
+Place logout last in a shared-auth suite.
+
 Preview or inspect without launching a browser:
 ```bash
 testronaut list
@@ -205,6 +230,10 @@ testronaut upload run_1788745106444
 testronaut upload run_1788745106444.json --no-upload-screenshots
 ```
 
+The local HTML report stays focused on inspecting one run without a service
+dependency. Upload a report to Mission Control for filterable per-mission and
+per-turn token, estimated-cost, and duration charts, including cumulative views.
+
 Chain missions together:
 ```js
 await runMissions({
@@ -213,6 +242,34 @@ await runMissions({
   postMission: logoutMission,
 }, "Contact Form Flow");
 ```
+
+Control the order of an automatically discovered suite in
+`testronaut-config.json`:
+
+```json
+{
+  "missions": {
+    "include": ["**/*.mission.js"],
+    "order": [
+      "login.mission.js",
+      "account/**/*.mission.js",
+      "*",
+      "logout.mission.js"
+    ]
+  }
+}
+```
+
+Order entries are applied from top to bottom. Each pattern's matches remain
+alphabetical, `*` places missions not claimed by another entry, and unlisted
+missions are appended alphabetically. An exact filename that is not discovered
+produces a warning. Without `missions.order`, discovery remains alphabetical.
+Mission filenames supplied directly on the command line run in argument order.
+
+`maxTurns` counts working turns. If a mission spends the full budget without a
+verdict, Testronaut makes one additional tool-free closure request so the report
+ends with an explicit success or failure. JSON and HTML reports include elapsed
+milliseconds for each turn and mission plus the duration of the complete suite.
 
 ---
 
@@ -349,6 +406,204 @@ Notes:
 
 ---
 
+## 🔬 Experimental Jev shadow mode
+
+Jev shadow mode evaluates each agent turn without changing browser actions,
+mission status, or exit codes. Its typed recommendations, latency, model, and
+token usage are written to each step in the JSON report. A run-level
+`jevShadow` summary aggregates completed calls, errors, latency, and tokens.
+
+Enable it with a TypeSafe API key:
+
+```bash
+export TYPESAFE_API_KEY=YOUR_KEY
+TESTRONAUT_JEV_SHADOW=1 testronaut login.mission.js
+```
+
+Optional overrides:
+
+```bash
+export TESTRONAUT_JEV_MODEL=jev-latest
+export TESTRONAUT_JEV_TIMEOUT_MS=5000
+export TESTRONAUT_JEV_API_BASE=https://api.typesafe.ai
+```
+
+The shadow request contains a bounded representation of the mission, assistant
+response, redacted tool arguments, recent events, Ground Control state, and
+structured browser evidence derived from DOM snapshots already collected by
+Testronaut. Browser evidence includes the query-free URL, title, headings,
+control labels, element counts, and value-free live control flags (`hasValue`,
+`checked`, `disabled`, `readOnly`, and `visible`). It excludes raw DOM, body
+text, input values and value lengths, URL queries, and URL fragments. Because this data is sent to a
+third-party service, enable the experiment only for test data appropriate for that service.
+API errors and timeouts are recorded as shadow telemetry and do not stop the
+mission.
+
+### Experimental completion gate
+
+After validating shadow results, opt into early completion with:
+
+```bash
+TESTRONAUT_JEV_GATE=1 testronaut login.mission.js
+```
+
+The gate defaults to an 80% threshold and requires all three independent Jev
+signals—mission completion, complete progress, and finish-next probability—to
+meet it. It also requires structured browser evidence and a clean tool turn.
+Before returning success, Testronaut captures a final screenshot when
+screenshots are enabled and records completion telemetry. Jev errors, missing
+evidence, incomplete resource guards, and screenshot failures fail open to the
+ordinary agent loop.
+
+Use a different experimental threshold with, for example:
+
+```bash
+TESTRONAUT_JEV_GATE=1 TESTRONAUT_JEV_GATE_THRESHOLD=0.85 testronaut login.mission.js
+```
+
+JSON reports retain the full Jev evaluation telemetry. HTML reports show the
+models used and input/output token totals at run, mission, and turn levels
+without displaying internal strategy counts or estimated cost. The JSON cost
+estimate defaults to Jev's current `$0.042` per million input tokens. Override
+the reporting rate without changing API behavior:
+
+```bash
+TESTRONAUT_JEV_INPUT_USD_PER_MILLION=0.042 testronaut
+```
+
+If the gate is enabled without an API key, the report highlights every skipped
+evaluation. Ensure `TYPESAFE_API_KEY` or `TESTRONAUT_JEV_API_KEY` is exported in
+the same process that launches Testronaut.
+
+### Additional Jev savings experiments
+
+Enable the batched shadow strategy bundle without changing mission behavior:
+
+```bash
+TESTRONAUT_JEV_STRATEGIES=1 testronaut
+```
+
+The same Jev request then records:
+
+- relevant structured DOM regions for future context filtering;
+- a choice among controls already enumerated by Testronaut;
+- deterministic, fast-model, full-model, observe, or finish routing;
+- postcondition verification probability;
+- continue, retry, reobserve, escalate, or stop recovery policy;
+- mission stage and prerequisite readiness.
+
+Strategy results and aggregates appear in JSON reports. They remain advisory
+unless a separate experiment such as dynamic routing is explicitly enabled.
+
+### Stable Jev guardrails
+
+Run Jev completion and evidence guardrails without allowing any model switch:
+
+```bash
+export TESTRONAUT_JEV_API_KEY="your-key"
+testronaut --guardrails
+```
+
+This profile is fail-open: if Jev is unavailable, times out, or lacks sufficient
+evidence, the primary model continues normally. It does not request the larger
+experimental strategy question set and ignores fast-model routing configuration.
+The default completion probability is 0.8.
+
+```json
+{
+  "guardrails": {
+    "enabled": true,
+    "mode": "live",
+    "completionProbability": 0.8
+  }
+}
+```
+
+Guardrails are opt-in and use a user-supplied Jev key. The earlier
+`--optimize=tokens --optimization-mode=live` and nested optimization config
+remain supported as compatibility forms. Run `testronaut config --json` to
+check credential readiness without printing the key.
+
+Reports expose stable `jevGuardrails` telemetry separately from beta
+`modelRouting` telemetry. The legacy `jevShadow` field remains for compatibility.
+
+### Beta dynamic model routing
+
+Choose an optimization objective and whether it runs in shadow or live mode:
+
+```bash
+testronaut --optimize=cost --optimization-mode=live --beta-model-routing
+testronaut --optimize=tokens --optimization-mode=shadow
+testronaut --optimize=balanced --optimization-mode=live --beta-model-routing
+testronaut --optimize=off
+```
+
+The supported objectives are `off`, `cost`, `tokens`, `balanced`, and `speed`.
+`cost` requests cheaper family-local models; `tokens` uses stable guardrails
+without model switching; `balanced` combines guardrails and beta routing; and
+`speed` requests beta fast-model routing. The `cost`, `balanced`, and `speed`
+objectives cannot switch models unless beta routing is explicitly enabled.
+When an objective is supplied without a mode, it defaults to `shadow`.
+
+The equivalent `testronaut-config.json` configuration is:
+
+```json
+{
+  "optimization": {
+    "objective": "balanced",
+    "mode": "live",
+    "guardrails": {
+      "completionProbability": 0.8,
+      "minimumRoutingProbability": 0.4
+    },
+    "beta": {
+      "modelRouting": true
+    }
+  }
+}
+```
+
+CLI flags override configuration. Existing `TESTRONAUT_JEV_*` variables remain
+available as lower-level experimental overrides.
+
+Beta dynamic routing uses a high-confidence Jev `fast_model` recommendation from the
+completed turn to choose the model for the next turn. Start in shadow mode to
+record eligibility without changing models:
+
+```bash
+TESTRONAUT_JEV_ROUTING=shadow TESTRONAUT_JEV_FAST_MODEL=gpt-5.6-luna testronaut
+```
+
+After reviewing the recommendations, enable one-turn live routing:
+
+```bash
+TESTRONAUT_JEV_ROUTING=live TESTRONAUT_JEV_FAST_MODEL=gpt-5.6-luna testronaut
+```
+
+The family-local defaults are `gpt-5.6-luna` for OpenAI,
+`gemini-3.5-flash-lite` for Gemini, and `claude-haiku-4-5` for Anthropic. An
+explicit `TESTRONAUT_JEV_FAST_MODEL` must still belong to the active provider
+family. Routing uses Jev's selected `fast_model` probability with a default
+threshold of 40%; change it with `TESTRONAUT_JEV_ROUTING_THRESHOLD`.
+Authentication, completion, failed,
+uncertain recovery, and low-confidence turns stay on the primary model. If the
+routed request fails—or a routed action requires a retry—Testronaut retries on
+the primary model. Reports
+record the actual model and tokens for every turn and split aggregate tokens by
+model.
+
+Evaluate risk-based suite selection separately as a dry run:
+
+```bash
+TYPESAFE_API_KEY=YOUR_KEY testronaut select --base=origin/main
+```
+
+This reads the git diff, asks one bounded relevance question per discovered
+mission, and prints selected mission filenames without running or skipping any
+tests. Use repeated `--changed-file=path` arguments instead of a git diff when
+testing a hypothetical change. The default selection threshold is 70%; override
+it with `TESTRONAUT_JEV_SELECTION_THRESHOLD`.
+
 ## 📋 Reports
 
 Testronaut generates JSON, HTML, and run-specific screenshots under the configured `outputDir` (default):
@@ -371,7 +626,7 @@ Each includes:
 - **LLMs** for reasoning, DOM parsing, and tool use  
 - **Token throttling** + adaptive cooldowns  
 - **Extensible architecture** for custom tools and workflows  
-- **DOM trimming controls** to cap list sizes (env `TESTRONAUT_DOM_LIST_LIMIT` or config `dom.listItemLimit`; use `all` cautiously—it can spike token use)
+- **DOM trimming controls** to cap list/table sizes (`TESTRONAUT_DOM_LIST_LIMIT`) and automatic post-action snapshots (`TESTRONAUT_AUTO_DOM_LIMIT` or `dom.automaticLimit`)
 - **Resource guard** to ensure full list/table downloads (config `resourceGuard` or env `TESTRONAUT_RESOURCE_*`)
 
 ---

@@ -130,6 +130,22 @@ export function getDomListLimit(cfg, fallback = 3) {
   return { ...fbParsed, source: 'default' };
 }
 
+/** Resolve the character limit for automatic DOM snapshots injected after actions. */
+export function getAutomaticDomLimit(cfg, fallback = 15000) {
+  const parse = raw => {
+    if (raw === undefined || raw === null || String(raw).trim() === '') return null;
+    const value = Number(raw);
+    if (!Number.isFinite(value)) return null;
+    const clamped = Math.min(100000, Math.max(1000, Math.trunc(value)));
+    return { value: clamped, clamped: clamped !== value };
+  };
+  const env = parse(process.env.TESTRONAUT_AUTO_DOM_LIMIT);
+  if (env) return { ...env, source: 'env' };
+  const configured = parse(cfg?.dom?.automaticLimit ?? cfg?.automaticDomLimit);
+  if (configured) return { ...configured, source: 'config' };
+  return { ...parse(fallback), source: 'default' };
+}
+
 /**
  * Resolve resource guard settings for generic list/table harvesting.
  * - Patterns are used to detect resource anchors/data attributes.

@@ -29,8 +29,11 @@ import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
 import { redactPasswordInText } from '../core/redaction.js';
-import { loadConfig, enforceTurnBudget, getRetryLimit, getDomListLimit, getResourceGuardConfig, getHumanInputConfig } from '../core/config.js';
+import { loadConfig, enforceTurnBudget, getRetryLimit, getDomListLimit, getAutomaticDomLimit, getResourceGuardConfig, getHumanInputConfig } from '../core/config.js';
 import { normalizeTags } from '../core/tags.js';
+import { launchProtocol, unwrapLaunchProtocol } from '../core/launchProtocol.js';
+
+export { launchProtocol };
 
 // Check process env for debug toggles (shared helper for tests and CLI).
 const isDebugEnabled = () => {
@@ -55,6 +58,7 @@ export async function runMissions({ preMission, mission, postMission, tags = [] 
   const retryInfo = getRetryLimit(cfg);
   const retryLimit = retryInfo.value;
   const domListLimitInfo = getDomListLimit(cfg);
+  const automaticDomLimitInfo = getAutomaticDomLimit(cfg);
   const resourceGuard = getResourceGuardConfig(cfg);
   const humanInput = getHumanInputConfig(cfg);
   const debugEnabled = isDebugEnabled();
@@ -99,6 +103,7 @@ export async function runMissions({ preMission, mission, postMission, tags = [] 
       source: domListLimitInfo?.source,
       clamped: domListLimitInfo?.clamped,
     });
+    console.log('[debug] Automatic DOM limit', automaticDomLimitInfo);
     console.log('[debug] Resource guard', {
       enabled: resourceGuard.enabled,
       hrefIncludes: resourceGuard.hrefIncludes,
@@ -161,12 +166,16 @@ export async function runMissions({ preMission, mission, postMission, tags = [] 
 
   if (pre.length) {
     goals.push(
-      ...pre.map((fn, i) => ({
-        goal: fn,
-        label: 'pre-mission',          // legacy label (kept for logs)
-        submissionType: 'premission',  // normalized
-        submissionName: pickName('premission', fn, i),
-      }))
+      ...pre.map((fn, i) => {
+        const { goal, protocol } = unwrapLaunchProtocol(fn);
+        return {
+          goal,
+          launchProtocol: protocol,
+          label: 'pre-mission',          // legacy label (kept for logs)
+          submissionType: 'premission',  // normalized
+          submissionName: pickName('premission', goal, i),
+        };
+      })
     );
   }
 
@@ -210,7 +219,14 @@ export async function runMissions({ preMission, mission, postMission, tags = [] 
     missionName,
     maxTurns,
     retryLimit,
-    { domListLimit: domListLimitInfo?.value, debug: debugEnabled, resourceGuard, humanInput }
+    {
+      domListLimit: domListLimitInfo?.value,
+      automaticDomLimit: automaticDomLimitInfo.value,
+      storageStatePath: process.env.TESTRONAUT_STORAGE_STATE_PATH,
+      debug: debugEnabled,
+      resourceGuard,
+      humanInput,
+    }
   );
   if (!success) {
     console.log(`❌ Aborting after failed goal.`);

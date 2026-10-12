@@ -1,6 +1,6 @@
 {
   "name": "testronaut",
-  "version": "1.9.1",
+  "version": "1.12.2",
   "main": "./runner/testronaut.js",
   "bin": {
     "testronaut": "bin/cli.js"
@@ -15,6 +15,10 @@
     "node": ">=20"
   },
   "scripts": {
+    "benchmark:optimization": "node ./experiments/optimizationBenchmark.js",
+    "benchmark:cross-provider": "node ./experiments/crossProviderBenchmark.js",
+    "benchmark:package": "node ./experiments/buildOptimizationDataPackage.js",
+    "benchmark:publish-package": "node ./experiments/buildExperimentPublicationPackage.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "start": "node ./bin/cli.js"
@@ -54,8 +58,8 @@
     "cli"
   ],
   "devDependencies": {
-    "@types/node": "^25.9.3",
-    "periapsis": "^2.0.1",
+    "@types/node": "^26.5.0",
+    "periapsis": "^2.1.2",
     "vitest": "^4.1.11"
   },
   "homepage": "https://testronaut.app"

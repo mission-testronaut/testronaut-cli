@@ -44,6 +44,7 @@ export function sanitizeHeavyToolHistory(messages, { keepRecentPerTool = 2 } = {
  *
  * Strategy:
  *   - Always keep all system messages.
+ *   - Always keep the latest real user instruction as a protocol anchor.
  *   - Start from the end and keep the last `maxNonSystemMessages` non-system messages.
  *   - Ensure protocol correctness:
  *       * If a tool message is kept, its parent assistant with matching tool_call_id
@@ -62,6 +63,15 @@ export function pruneConversationContext(messages, { maxNonSystemMessages = 40 }
 
   // Take last N non-system messages (raw window)
   const tail = nonSystem.slice(-maxNonSystemMessages);
+
+  // Gemini function-calling validation locates the current turn by scanning
+  // backward for a normal user message (not a function response). Testronaut's
+  // internal tool results use role `tool`, so retain the newest role `user`
+  // message even when a long agent loop pushes it outside the rolling tail.
+  // This is also useful context for OpenAI and Anthropic: it is the instruction
+  // the retained tool activity is attempting to satisfy.
+  const latestUser = nonSystem.findLast(m => m.role === 'user');
+  const userAnchor = latestUser && !tail.includes(latestUser) ? [latestUser] : [];
 
   // Pass 1: build map of tool_call_id -> index of assistant in tail
   const assistantToolParents = new Map(); // tool_call_id -> index in tail
@@ -93,7 +103,7 @@ export function pruneConversationContext(messages, { maxNonSystemMessages = 40 }
     cleanedTail.push(m);
   }
 
-  return [...systemMessages, ...cleanedTail];
+  return [...systemMessages, ...userAnchor, ...cleanedTail];
 }
 
 /* ---------------- Ground Control state helpers ----------------

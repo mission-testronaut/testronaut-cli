@@ -63,6 +63,8 @@ export class OpenAIProvider {
     const message = res.choices?.[0]?.message ?? { role: 'assistant', content: '' };
     const usage = {
       total_tokens: res.usage?.total_tokens,
+      input_tokens: res.usage?.prompt_tokens,
+      output_tokens: res.usage?.completion_tokens,
       providerRaw: res.usage,
     };
 

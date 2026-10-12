@@ -2,6 +2,22 @@ import { describe, it, expect, vi } from 'vitest';
 import { finalResponseHandler } from '../../tools/turnLoopUtils.js';
 
 describe('tools/turnLoopUtils', () => {
+  it.each([
+    ['SUCCESS: completed', true],
+    ['FAILURE: blocked', false],
+    ['RESULT: SUCCESS - all checkpoints passed', true],
+    ['RESULT: FAILURE - checkpoint failed', false],
+    ['FINAL: success', true],
+    ['**RESULT: SUCCESS**', true],
+  ])('recognizes supported verdict form %s', (content, success) => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      expect(finalResponseHandler({ content })).toMatchObject({ success });
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
   it('redacts verification codes before printing and returning final responses', () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
@@ -17,6 +33,23 @@ describe('tools/turnLoopUtils', () => {
       const printed = logSpy.mock.calls.flat().join('\n');
       expect(printed).toContain('MFA (entered •••••• (6))');
       expect(printed).not.toContain('123456');
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it('uses the mission transmission frame without changing result data', () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      expect(finalResponseHandler({ content: 'SUCCESS: Docking complete' })).toEqual({
+        finalMessage: 'SUCCESS: Docking complete',
+        success: true,
+      });
+      const printed = logSpy.mock.calls.flat().join('\n');
+      expect(printed).toContain('🧑‍🚀 MISSION TRANSMISSION / SUCCESS');
+      expect(printed).toContain('│ SUCCESS: Docking complete');
+      expect(printed).toContain('END TRANSMISSION');
+      expect(printed).not.toContain('FINAL AGENT RESPONSE');
     } finally {
       logSpy.mockRestore();
     }

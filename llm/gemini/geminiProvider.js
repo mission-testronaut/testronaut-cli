@@ -28,6 +28,13 @@
 
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
+// Gemini 3 validates thought signatures on function calls in the current turn.
+// Calls synthesized by Testronaut (for example, automatic get_dom calls) were
+// not emitted by Gemini and therefore have no real signature to preserve.
+// Google documents this sentinel specifically for deterministic client-injected
+// function-call history.
+const SYNTHETIC_THOUGHT_SIGNATURE = 'skip_thought_signature_validator';
+
 /**
  * Convert OpenAI-like messages → Gemini "contents" array.
  * - System messages are coalesced and injected as a prefix into the next user turn.
@@ -49,29 +56,41 @@ function toGeminiContents(messages) {
       continue;
     }
 
+    // Gemini 3 requires thought signatures to be returned exactly where the
+    // model emitted them. Prefer the untouched provider parts when available.
+    const geminiParts = m.provider_metadata?.gemini?.parts;
+    if (m.role === 'assistant' && Array.isArray(geminiParts) && geminiParts.length) {
+      contents.push({ role: 'model', parts: geminiParts });
+      continue;
+    }
+
     // Assistant tool calls → Gemini functionCall parts on a model turn
     if (m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length) {
       contents.push({
         role: 'model',
-        parts: m.tool_calls.map(tc => ({
+        parts: m.tool_calls.map((tc, index) => ({
           functionCall: {
             name: tc.function?.name,
             args: safeJsonParse(tc.function?.arguments) ?? {},
           },
+          // For parallel calls Gemini expects the signature only on the first
+          // functionCall part. Genuine provider parts take the branch above and
+          // retain their original signatures instead of receiving this sentinel.
+          ...(index === 0 ? { thoughtSignature: SYNTHETIC_THOUGHT_SIGNATURE } : {}),
         })),
       });
       continue;
     }
 
-    // Tool results → encode as a user turn with a JSON part the model can parse
+    // Tool results → Gemini function responses. This keeps function-calling
+    // history valid for Gemini 3 and gives earlier models structured results.
     if (m.role === 'tool') {
+      const parsed = safeJsonParse(m.content);
       const parts = [{
-        text: JSON.stringify({
-          _tool_result: true,
-          tool_call_id: m.tool_call_id,
+        functionResponse: {
           name: m.name,
-          content: m.content,
-        }),
+          response: parsed ?? { result: m.content },
+        },
       }];
       contents.push({ role: 'user', parts });
       continue;
@@ -148,7 +167,14 @@ function fromGeminiCandidate(cand) {
   }
 
   const content = texts.join('');
-  return { role: 'assistant', content, tool_calls: tool_calls.length ? tool_calls : undefined };
+  return {
+    role: 'assistant',
+    content,
+    tool_calls: tool_calls.length ? tool_calls : undefined,
+    // Retain all parts, including Gemini 3 thought signatures and function IDs,
+    // so the next request can replay them without lossy format conversion.
+    provider_metadata: { gemini: { parts } },
+  };
 }
 
 function cryptoRandomId() {
@@ -193,6 +219,8 @@ export class GeminiProvider {
     const usageMeta = res?.response?.usageMetadata;
     const usage = {
       total_tokens: usageMeta?.totalTokenCount,
+      input_tokens: usageMeta?.promptTokenCount,
+      output_tokens: usageMeta?.candidatesTokenCount,
       providerRaw: usageMeta,
     };
 

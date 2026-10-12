@@ -83,6 +83,10 @@ const toolsSchema = [
             default: true,
             description: 'Whether to exclude noisy tags like script/style/etc.',
           },
+          selector: {
+            type: 'string',
+            description: 'Optional CSS selector that scopes the returned DOM to matching elements.',
+          },
         },
       },
     },
@@ -154,21 +158,6 @@ const toolsSchema = [
   //     }
   //   }
   // },
-  {
-    type: 'function',
-    function: {
-      name: 'get_dom_chunk',
-      description: 'Return a specific chunk of the DOM by index',
-      parameters: {
-        type: 'object',
-        properties: {
-          chunkIndex: { type: 'number' },
-          totalChunks: { type: 'number' }
-        },
-        required: ['chunkIndex', 'totalChunks']
-      }
-    }
-  },
   {
     type: 'function',
     function: {

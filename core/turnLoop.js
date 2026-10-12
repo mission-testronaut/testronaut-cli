@@ -49,7 +49,10 @@ import {
 import { resolveProviderModel } from '../llm/modelResolver.js';
 import { getLLM } from '../llm/llmFactory.js';
 import { summarizeTurnIntentFromMessage } from './turnIntent.js';
-import { maskPreview, redactArgs } from './redaction.js';
+import { maskPreview, redactArgs, redactPasswordInText } from './redaction.js';
+import { buildJevShadowState, buildJevStrategyQuestions, evaluateJevCompletionCandidate, evaluateJevShadow, extractJevStrategyResults, resolveJevShadowConfig, sanitizeJevShadowEvents } from './jevShadow.js';
+import { buildBrowserEvidence, collectBrowserControlState, mergeBrowserControlState } from './browserEvidence.js';
+import { chooseJevTurnModel, resolveJevRoutingConfig } from './jevRouting.js';
 import { 
   sanitizeHeavyToolHistory, 
   pruneConversationContext,
@@ -169,6 +172,20 @@ const FIRE_AND_FORGET_TOOLS = new Set([
   'record_mission_telemetry',
 ]);
 
+function currentBrowserUrl(browser) {
+  try { return browser?.page?.url?.() || null; } catch { return null; }
+}
+
+async function captureBrowserEvidence(browser, html, previous) {
+  const evidence = buildBrowserEvidence(html, {
+    url: currentBrowserUrl(browser),
+    previous,
+    redactText: redactPasswordInText,
+  });
+  const states = await collectBrowserControlState(browser);
+  return mergeBrowserControlState(evidence, states);
+}
+
 /**
  * Utility: format byte counts into human-readable strings.
  * Used when reporting upload/download events in mission logs.
@@ -190,14 +207,15 @@ function formatBytes(n) {
  * @param {object} agentMemory - Memory object storing recent agent state.
  * @param {{skipIfLastTool?: string[]}} opts - Optional tool skip conditions.
  */
-const pushDOMAssistant = async (browser, messages, agentMemory, { skipIfLastTool } = {}) => {
+const pushDOMAssistant = async (browser, messages, agentMemory, { skipIfLastTool, limit = 15000 } = {}) => {
   // Avoid redundant DOM pushes immediately following tools that already include DOM context.
   if (skipIfLastTool && skipIfLastTool.includes(messages.at(-1)?.name)) {
     console.log(`[skip] Skipping DOM push after redundant tool: ${messages.at(-1)?.name}`);
-    return;
+    return { injected: false, domLength: 0 };
   }
 
   const domCallId = `get_dom_${Date.now()}`;
+  const automaticDomLimit = limit;
 
   // Inject a synthetic assistant tool call
   messages.push({
@@ -208,14 +226,23 @@ const pushDOMAssistant = async (browser, messages, agentMemory, { skipIfLastTool
         type: 'function',
         function: {
           name: 'get_dom',
-          arguments: JSON.stringify({ limit: 100000, exclude: true }),
+          arguments: JSON.stringify({ limit: automaticDomLimit, exclude: true }),
         },
       },
     ],
   });
 
-  const domHtml = await CHROME_TOOL_MAP.get_dom(browser, { limit: 100000, exclude: true }, agentMemory);
+  const domHtml = await CHROME_TOOL_MAP.get_dom(
+    browser,
+    { limit: automaticDomLimit, exclude: true },
+    agentMemory
+  );
   await tokenEstimate(MODEL_ID, domHtml);
+  agentMemory.browserEvidence = await captureBrowserEvidence(
+    browser,
+    domHtml,
+    agentMemory.browserEvidence,
+  );
 
   // Push the corresponding tool response back into the conversation
   messages.push({
@@ -225,6 +252,11 @@ const pushDOMAssistant = async (browser, messages, agentMemory, { skipIfLastTool
     type: 'function',
     content: typeof domHtml === 'string' ? domHtml : JSON.stringify(domHtml),
   });
+
+  return {
+    injected: true,
+    domLength: typeof domHtml === 'string' ? domHtml.length : JSON.stringify(domHtml).length,
+  };
 };
 
 /**
@@ -259,6 +291,11 @@ export const turnLoop = async (
     dataTypes: ['document', 'file', 'item', 'row'],
   };
   const stepsArchive = ctx.stepsArchive || steps;
+  const jevShadowConfig = resolveJevShadowConfig();
+  const jevRoutingConfig = resolveJevRoutingConfig(process.env, {
+    provider: PROVIDER_ID,
+    primaryModel: MODEL_ID,
+  });
   const retryLimitClamped = Math.min(10, Math.max(1, Number.isFinite(retryLimitRaw) ? retryLimitRaw : DEFAULT_TURN_RETRY_LIMIT)); // retries allowed (excludes initial)
   const maxAttempts = retryLimitClamped + 1; // includes initial attempt
   ctx.groundControl = groundControl;
@@ -271,11 +308,109 @@ export const turnLoop = async (
   ensureDocProgress(agentMemory, resourceGuardCfg);
   let turnRetries = 0;
   let stepSeq = ctx._stepSeq || 0;
+  let nextJevStrategy = null;
+  let forcePrimaryRetry = false;
+
+  const recordJevShadow = async (step, msg, phase, proposedTools = []) => {
+    if (!jevShadowConfig.enabled) return;
+    nextJevStrategy = null;
+    // Keep status lines and purpose-built telemetry, but exclude raw tool payload
+    // lines (which may contain DOM, page text, or other third-party data).
+    const safeEvents = sanitizeJevShadowEvents(step.events, redactPasswordInText);
+    agentMemory.browserEvidence = await captureBrowserEvidence(
+      browser,
+      null,
+      agentMemory.browserEvidence,
+    );
+    const state = buildJevShadowState({
+      mission: redactPasswordInText(ctx.goal || missionName),
+      turn: step.turn,
+      maxTurns,
+      phase,
+      assistantSummary: redactPasswordInText(step.summary || ''),
+      assistantContent: redactPasswordInText(msg?.content || ''),
+      proposedTools,
+      events: safeEvents,
+      groundControl,
+      browserEvidence: agentMemory.browserEvidence,
+    });
+    const strategyCatalog = jevShadowConfig.strategiesEnabled
+      ? buildJevStrategyQuestions(agentMemory.browserEvidence)
+      : null;
+    step.jevShadow = await evaluateJevShadow(state, {
+      config: jevShadowConfig,
+      ...(strategyCatalog ? { questions: strategyCatalog.questions } : {}),
+    });
+    if (step.jevShadow.status === 'ok' && strategyCatalog) {
+      step.jevShadow.strategies = extractJevStrategyResults(
+        step.jevShadow.answers,
+        strategyCatalog,
+      );
+      nextJevStrategy = step.jevShadow.strategies;
+    }
+    step.jevShadow.completionGate = evaluateJevCompletionCandidate(step.jevShadow, {
+      threshold: jevShadowConfig.gateThreshold,
+      browserEvidence: agentMemory.browserEvidence,
+    });
+    const status = step.jevShadow?.status || 'unknown';
+    const latency = Number.isFinite(step.jevShadow?.latencyMs)
+      ? ` in ${step.jevShadow.latencyMs}ms`
+      : '';
+    console.log(`🔬 Jev shadow: ${status}${latency}`);
+  };
+
+  const finalizeWithJevGate = async (step) => {
+    if (!jevShadowConfig.gateEnabled || !step.jevShadow?.completionGate?.candidate) return null;
+
+    const prog = ensureDocProgress(agentMemory, resourceGuardCfg);
+    if (prog?.items.length && prog.downloaded.size < prog.items.length) {
+      step.jevGate = { triggered: false, reason: 'resource_guard_incomplete' };
+      return null;
+    }
+
+    const existingScreenshot = Boolean(
+      step.screenshotPath
+        || steps.some(existing => existing?.screenshotPath)
+        || stepsArchive.some(existing => existing?.screenshotPath),
+    );
+    if (process.env.TESTRONAUT_SCREENSHOTS !== '0' && !existingScreenshot) {
+      try {
+        const screenshotResult = await CHROME_TOOL_MAP.screenshot(
+          browser,
+          { name: `jev-completion-turn-${step.turn + 1}` },
+          agentMemory,
+        );
+        const match = String(screenshotResult).match(/screenshot.*?saved at: (.+\.png)/i);
+        if (match?.[1]) step.screenshotPath = match[1];
+        step.events.push('🖼️ Jev completion gate captured final screenshot');
+      } catch (error) {
+        step.jevGate = { triggered: false, reason: 'screenshot_failed', error: error?.message || String(error) };
+        step.events.push(`⚠️ Jev completion gate screenshot failed: ${error?.message || error}`);
+        return null;
+      }
+    }
+
+    const gate = step.jevShadow.completionGate;
+    recordGroundTelemetry(groundControl, {
+      kind: 'assertion',
+      text: `Jev completion gate satisfied at ${Math.round(gate.threshold * 100)}% threshold.`,
+      status: 'passed',
+    }, { turn: step.turn, source: 'jev_completion_gate', signals: gate.signals });
+
+    step.jevGate = { triggered: true, ...gate };
+    step.events.push(`🔬 Jev completion gate triggered at ${Math.round(gate.threshold * 100)}% threshold`);
+    step.result = '✅ Mission Success (Jev gate)';
+    recordStep(step);
+    const finalMessage = 'SUCCESS: Jev completion gate found sufficient browser evidence.';
+    return { success: true, finalMessage, steps: stepsArchive, completedBy: 'jev_gate' };
+  };
   
   // Centralized recorder: push to in-memory buffer AND fire optional callback for streaming
   // Idempotent recorder – prevents accidental double-push
   const recordStep = (step) => {
     if (!step || step.__recorded) return;
+    step.endTime = Date.now();
+    step.durationMs = Math.max(0, step.endTime - (step.startTime ?? step.endTime));
     step._seq = stepSeq++;
     step.__recorded = true;
     try { steps.push(step); } catch {}
@@ -294,12 +429,27 @@ export const turnLoop = async (
     const attempt = turnRetries + 1;
     const step = {
       turn,
+      startTime: Date.now(),
       retryAttempt: attempt,
       retryLimit: retryLimitClamped, // number of retries allowed (excludes initial)
       events: [],
       result: '🟡 In Progress',
       missionName,
     };
+    const modelRouting = chooseJevTurnModel(nextJevStrategy, jevRoutingConfig, {
+      provider: PROVIDER_ID,
+      primaryModel: MODEL_ID,
+    });
+    if (forcePrimaryRetry) {
+      modelRouting.selectedModel = MODEL_ID;
+      modelRouting.applied = false;
+      modelRouting.reason = 'routed_retry_primary';
+      modelRouting.forcedPrimaryRetry = true;
+      forcePrimaryRetry = false;
+    }
+    step.modelRouting = modelRouting;
+    step.provider = PROVIDER_ID;
+    step.model = modelRouting.selectedModel;
     if (attempt > 1) {
       const retryNumber = attempt - 1;
       step.events.push(`🔁 Re-attempt ${retryNumber}/${retryLimitClamped} for turn`);
@@ -362,13 +512,14 @@ export const turnLoop = async (
       // ─────────────────────────────────────────────
       // STEP 2: Request next reasoning turn from model
       // ─────────────────────────────────────────────
-      const contextCheck = await warnIfContextNearLimit(MODEL_ID, { messages, tools: activeToolsSchema });
+      const turnModel = modelRouting.selectedModel;
+      const contextCheck = await warnIfContextNearLimit(turnModel, { messages, tools: activeToolsSchema });
       const projectedTokens = contextCheck.estimatedTokens
-        ?? await tokenEstimate(MODEL_ID, { messages, tools: activeToolsSchema });
+        ?? await tokenEstimate(turnModel, { messages, tools: activeToolsSchema });
       ({ totalTokensUsed, turnTimestamps, shouldBackoff } = await tokenUseCoolOff(
         totalTokensUsed,
         turnTimestamps,
-        MODEL_ID,
+        turnModel,
         projectedTokens
       ));
       if (shouldBackoff) {
@@ -376,13 +527,21 @@ export const turnLoop = async (
         turn -= 1;
         continue;
       }
-      const { message, usage, headers } = await llm.chat({
-        model: MODEL_ID,
-        messages,
-        tools: activeToolsSchema,
-      });
+      let modelResponse;
+      try {
+        modelResponse = await llm.chat({ model: turnModel, messages, tools: activeToolsSchema });
+      } catch (routingError) {
+        if (!modelRouting.applied) throw routingError;
+        modelRouting.fallback = true;
+        modelRouting.fallbackReason = routingError?.message || String(routingError);
+        modelRouting.selectedModel = MODEL_ID;
+        step.model = MODEL_ID;
+        step.events.push(`↩️ Jev route fallback to ${MODEL_ID}`);
+        modelResponse = await llm.chat({ model: MODEL_ID, messages, tools: activeToolsSchema });
+      }
+      const { message, usage, headers } = modelResponse;
       response = { message, usage, headers };
-      updateLimitsFromHeaders(MODEL_ID, headers);
+      updateLimitsFromHeaders(modelRouting.selectedModel, headers);
 
     } catch (err) {
       // ─────────────────────────────────────────────
@@ -427,6 +586,8 @@ export const turnLoop = async (
       const tokensUsed = usage.total_tokens || 0;
       console.log(`📊 Token Usage This Turn → Total: ${tokensUsed}`);
       step.tokensUsed = tokensUsed;
+      step.inputTokens = usage.input_tokens ?? usage.prompt_tokens ?? usage.providerRaw?.input_tokens ?? usage.providerRaw?.prompt_tokens;
+      step.outputTokens = usage.output_tokens ?? usage.completion_tokens ?? usage.providerRaw?.output_tokens ?? usage.providerRaw?.completion_tokens;
       recordTokenUsage(turnTimestamps, tokensUsed);
       ({ turnTimestamps, totalTokensUsed } = pruneOldTokenUsage(turnTimestamps));
       console.log(`📈 Running Total Tokens Used (Rolling 60s): ${totalTokensUsed}`);
@@ -448,14 +609,17 @@ export const turnLoop = async (
     if (msg.tool_calls?.length) {
       console.log('Processing tool calls...');
       const toolResponses = [];
+      const proposedTools = [];
       let hadToolIssues = false;
+      let domRefreshSource = null;
 
       for (const call of msg.tool_calls) {
         const fnName = call.function.name;
         const args = JSON.parse(call.function.arguments || '{}');
         const safeArgs = redactArgs(fnName, args);
+        proposedTools.push({ name: fnName, arguments: safeArgs });
         console.log(`[model] → ${fnName}`, safeArgs);
-        step.events.push(`[model] → ${fnName} ${safeArgs}`);
+        step.events.push(`[model] → ${fnName} ${JSON.stringify(safeArgs)}`);
 
         let result;
         let errorMessage = null;
@@ -748,6 +912,14 @@ export const turnLoop = async (
           }
         }
 
+        if (!errorMessage && fnName === 'get_dom') {
+          agentMemory.browserEvidence = await captureBrowserEvidence(
+            browser,
+            result,
+            agentMemory.browserEvidence,
+          );
+        }
+
         // Decide what to send back to the LLM for this tool.
         // - For "fire-and-forget" tools, send a tiny stub (OK/error) to avoid
         //   bloating context with large payloads (file JSON, etc.).
@@ -796,31 +968,41 @@ export const turnLoop = async (
           content: contentForModel,
         });
 
-        // After interactive DOM actions, refresh model context
-        if (['click_text', 'click', 'expand_menu'].includes(fnName)) {
-          console.log(`[auto] → Injecting DOM after ${fnName}...`);
-          step.events.push(`[auto] → Injecting DOM after ${fnName}...`);
-          const domHtml = await CHROME_TOOL_MAP.get_dom(browser, {
-            limit: 100000,
-            exclude: true,
-            focus: [],
-          }, agentMemory);
-          await tokenEstimate(MODEL_ID, domHtml);
-          await pushDOMAssistant(browser, messages, agentMemory, {
-            skipIfLastTool: ['get_dom', 'check_text'],
-          });
-          console.log(`[auto] → DOM size after ${fnName}: ${domHtml.length} chars`);
-          step.events.push(`[auto] → DOM size after ${fnName}: ${domHtml.length} chars`);
+        // Defer automatic DOM injection until the originating assistant call
+        // and all of its function responses are in history. Gemini requires a
+        // model functionCall to immediately follow user content or a
+        // functionResponse; inserting it before `msg` would create adjacent,
+        // reversed model function-call turns.
+        if (!errorMessage && ['click_text', 'click', 'expand_menu'].includes(fnName)) {
+          domRefreshSource = fnName;
         }
       }
 
       // Merge new assistant + tool responses back into conversation
       messages.push(msg, ...toolResponses);
+      if (domRefreshSource && !hadToolIssues) {
+        console.log(`[auto] → Injecting DOM after ${domRefreshSource}...`);
+        step.events.push(`[auto] → Injecting DOM after ${domRefreshSource}...`);
+        const domRefresh = await pushDOMAssistant(browser, messages, agentMemory, {
+          skipIfLastTool: ['get_dom', 'check_text'],
+          limit: ctx.automaticDomLimit,
+        });
+        if (domRefresh?.injected) {
+          console.log(`[auto] → DOM size after ${domRefreshSource}: ${domRefresh.domLength} chars`);
+          step.events.push(`[auto] → DOM size after ${domRefreshSource}: ${domRefresh.domLength} chars`);
+        }
+      }
+      await recordJevShadow(step, msg, hadToolIssues ? 'after_action_error' : 'after_action', proposedTools);
+      if (!hadToolIssues) {
+        const gatedResult = await finalizeWithJevGate(step);
+        if (gatedResult) return gatedResult;
+      }
       if (hadToolIssues && turnRetries < retryLimitClamped) {
         step.result = '⏳ Retrying turn';
         const retryNumber = attempt - 1;
         step.events.push(`🔁 Re-attempt ${retryNumber}/${retryLimitClamped} after tool issues`);
         recordStep(step);
+        forcePrimaryRetry = modelRouting.applied;
         turnRetries += 1;
         const delay = Math.min(TURN_RETRY_BASE_DELAY_MS * 2 ** (turnRetries - 1), 2000);
         await wait(delay);
@@ -858,6 +1040,7 @@ export const turnLoop = async (
         turnRetries = 0;
         continue;
       }
+      await recordJevShadow(step, msg, 'final_response');
       step.events.push(finalResponse.finalMessage);
       step.result = finalResponse.success ? '✅ Mission Success' : '❌ Mission Failure';
       recordStep(step);
@@ -870,16 +1053,72 @@ export const turnLoop = async (
     // ─────────────────────────────────────────────
     await pushDOMAssistant(browser, messages, agentMemory, {
       skipIfLastTool: ['get_dom', 'check_text'],
+      limit: ctx.automaticDomLimit,
     });
     console.log(`[auto] → Injected DOM for next reasoning step`);
     step.events.push(`[auto] → Injected DOM for next reasoning step`);
+    await recordJevShadow(step, msg, 'after_observation');
     // This is a meaningful turn even without tool calls — record it.
     step.result = step.result || '🟡 In Progress';
     recordStep(step);
     turnRetries = 0;
   }
 
-  return { success: false, steps: stepsArchive };
+  // The configured budget covers working turns. Once those are consumed, make
+  // one final tool-free request so every mission ends with an explicit verdict.
+  const closureStep = {
+    turn: maxTurns,
+    startTime: Date.now(),
+    isClosureTurn: true,
+    retryAttempt: 1,
+    retryLimit: 0,
+    events: ['⏱️ Working-turn budget exhausted; requesting final mission verdict.'],
+    result: '🟡 Awaiting Closure',
+    missionName,
+    provider: PROVIDER_ID,
+    model: MODEL_ID,
+  };
+  console.log(`\n🏁 Turn budget exhausted after ${maxTurns} working turn(s). Requesting closure.`);
+  messages.push({
+    role: 'user',
+    content: 'The working-turn budget is exhausted. Do not call tools or continue the task. Based only on the evidence already collected, respond with exactly SUCCESS: followed by a short reason if the goal was achieved, otherwise FAILURE: followed by a short reason.',
+  });
+
+  try {
+    const closureResponse = await llm.chat({ model: MODEL_ID, messages, tools: [] });
+    const msg = closureResponse?.message ?? { role: 'assistant', content: '' };
+    const usage = closureResponse?.usage;
+    if (usage) {
+      closureStep.tokensUsed = usage.total_tokens || 0;
+      closureStep.inputTokens = usage.input_tokens ?? usage.prompt_tokens ?? usage.providerRaw?.input_tokens ?? usage.providerRaw?.prompt_tokens;
+      closureStep.outputTokens = usage.output_tokens ?? usage.completion_tokens ?? usage.providerRaw?.output_tokens ?? usage.providerRaw?.completion_tokens;
+    }
+    closureStep.summary = summarizeTurnIntentFromMessage(msg, { emoji: true });
+    const finalResponse = finalResponseHandler(msg);
+    if (finalResponse) {
+      closureStep.events.push(finalResponse.finalMessage);
+      closureStep.result = finalResponse.success ? '✅ Mission Success' : '❌ Mission Failure';
+      recordStep(closureStep);
+      return {
+        success: finalResponse.success,
+        finalMessage: finalResponse.finalMessage,
+        steps: stepsArchive,
+        completedBy: 'budget_closure',
+      };
+    }
+    closureStep.events.push('FAILURE: The closure response did not provide an explicit SUCCESS or FAILURE verdict.');
+  } catch (error) {
+    closureStep.events.push(`FAILURE: Unable to obtain the closure verdict: ${error?.message || error}`);
+  }
+
+  closureStep.result = '❌ Mission Failure';
+  recordStep(closureStep);
+  return {
+    success: false,
+    finalMessage: closureStep.events.at(-1),
+    steps: stepsArchive,
+    completedBy: 'budget_closure',
+  };
 };
 
 // Expose small helper bundle for unit tests (no production use).

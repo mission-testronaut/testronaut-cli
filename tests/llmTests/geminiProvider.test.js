@@ -146,14 +146,17 @@ describe('GeminiProvider', () => {
 
     // 2) Assistant tool call → model role with functionCall
     expect(c[1].role).toBe('model');
-    expect(c[1].parts[0].functionCall).toEqual({ name: 'search', args: { q: 'x' } });
+    expect(c[1].parts[0]).toEqual({
+      functionCall: { name: 'search', args: { q: 'x' } },
+      thoughtSignature: 'skip_thought_signature_validator',
+    });
 
-    // 3) Tool result → user role with JSON marker
+    // 3) Tool result → structured Gemini function response
     expect(c[2].role).toBe('user');
-    const toolJson = JSON.parse(c[2].parts[0].text);
-    expect(toolJson._tool_result).toBe(true);
-    expect(toolJson.tool_call_id).toBe('1');
-    expect(toolJson.name).toBe('search');
+    expect(c[2].parts[0].functionResponse).toEqual({
+      name: 'search',
+      response: { results: [1, 2, 3] },
+    });
 
     // 4) Final assistant text → model role with text
     expect(c[3].role).toBe('model');
@@ -168,7 +171,10 @@ describe('GeminiProvider', () => {
           {
             content: {
               parts: [
-                { functionCall: { name: 'open', args: { url: 'https://example.com' } } },
+                {
+                  functionCall: { name: 'open', args: { url: 'https://example.com' } },
+                  thoughtSignature: 'encrypted-signature',
+                },
                 { text: 'Ok!' },
               ],
             },
@@ -189,9 +195,85 @@ describe('GeminiProvider', () => {
     expect(Array.isArray(message.tool_calls)).toBe(true);
     expect(message.tool_calls[0].function.name).toBe('open');
     expect(JSON.parse(message.tool_calls[0].function.arguments)).toEqual({ url: 'https://example.com' });
+    expect(message.provider_metadata.gemini.parts[0].thoughtSignature).toBe('encrypted-signature');
 
     expect(usage.total_tokens).toBe(999);
     expect(usage.providerRaw).toEqual({ totalTokenCount: 999, other: 'meta' });
+  });
+
+  it('replays Gemini response parts so thought signatures survive tool loops', async () => {
+    const prov = new GeminiProvider({ apiKey: 'gk-xyz' });
+    const signedPart = {
+      functionCall: { name: 'click', args: { selector: '#submit' } },
+      thoughtSignature: 'opaque-signature',
+    };
+
+    await prov.chat({
+      model: 'gemini-3.8-flash',
+      messages: [
+        { role: 'user', content: 'Submit the form' },
+        {
+          role: 'assistant',
+          content: '',
+          tool_calls: [{ type: 'function', function: { name: 'click', arguments: '{"selector":"#submit"}' } }],
+          provider_metadata: { gemini: { parts: [signedPart] } },
+        },
+        { role: 'tool', name: 'click', content: 'Clicked' },
+      ],
+    });
+
+    expect(shared.lastContents[1]).toEqual({ role: 'model', parts: [signedPart] });
+    expect(shared.lastContents[2].parts[0].functionResponse).toEqual({
+      name: 'click',
+      response: { result: 'Clicked' },
+    });
+  });
+
+  it('signs deterministic client-injected function calls for Gemini 3 history', async () => {
+    const prov = new GeminiProvider({ apiKey: 'gk-xyz' });
+
+    await prov.chat({
+      model: 'gemini-3.8-flash',
+      messages: [
+        { role: 'user', content: 'Open the dashboard' },
+        {
+          role: 'assistant',
+          content: '',
+          tool_calls: [{
+            id: 'synthetic-dom',
+            type: 'function',
+            function: { name: 'get_dom', arguments: '{"selector":"main"}' },
+          }],
+        },
+        { role: 'tool', tool_call_id: 'synthetic-dom', name: 'get_dom', content: '<main>Dashboard</main>' },
+      ],
+    });
+
+    expect(shared.lastContents[1].parts[0]).toEqual({
+      functionCall: { name: 'get_dom', args: { selector: 'main' } },
+      thoughtSignature: 'skip_thought_signature_validator',
+    });
+  });
+
+  it('adds the synthetic signature only to the first parallel function call', async () => {
+    const prov = new GeminiProvider({ apiKey: 'gk-xyz' });
+
+    await prov.chat({
+      model: 'gemini-3.8-flash',
+      messages: [
+        { role: 'user', content: 'Inspect both regions' },
+        {
+          role: 'assistant',
+          tool_calls: [
+            { type: 'function', function: { name: 'get_dom', arguments: '{"selector":"main"}' } },
+            { type: 'function', function: { name: 'get_dom', arguments: '{"selector":"nav"}' } },
+          ],
+        },
+      ],
+    });
+
+    expect(shared.lastContents[1].parts[0].thoughtSignature).toBe('skip_thought_signature_validator');
+    expect(shared.lastContents[1].parts[1].thoughtSignature).toBeUndefined();
   });
 
   it('supports image parts (encoded to inlineData)', async () => {

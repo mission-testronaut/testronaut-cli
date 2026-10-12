@@ -3,18 +3,15 @@ import { redactPasswordInText } from '../core/redaction.js';
 export const finalResponseHandler = (msg) => {
   const content = String(msg.content ?? '');
   const safeContent = redactPasswordInText(content);
-  const final = content.trim().toLowerCase();
-  if (final?.startsWith('success')) {
-    console.log('\n┏━ FINAL AGENT RESPONSE ━━━━━━━━━━━━━━━━━━━');
-    console.log(safeContent);
-    console.log('┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    return { finalMessage: safeContent, success: true};
-  }
-  if (final?.startsWith('failure')) {
-    console.log('\n┏━ FINAL AGENT RESPONSE ━━━━━━━━━━━━━━━━━━━');
-    console.log(safeContent);
-    console.log('┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    return { finalMessage: safeContent, success: false};
+  const final = content.trim().replace(/^[#*_`\s]+/, '');
+  const verdict = final.match(/^(?:(?:result|final)\s*:\s*)?(success|failure)\b/i)?.[1]?.toLowerCase();
+  if (verdict === 'success' || verdict === 'failure') {
+    const success = verdict === 'success';
+    const signal = success ? 'SUCCESS' : 'FAILURE';
+    console.log(`\n╭─ 🧑‍🚀 MISSION TRANSMISSION / ${signal} ─────────────────`);
+    safeContent.split('\n').forEach(line => console.log(`│ ${line}`));
+    console.log('╰─ END TRANSMISSION ─────────────────────────────');
+    return { finalMessage: safeContent, success };
   }
   return null;
 }

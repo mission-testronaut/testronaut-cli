@@ -78,4 +78,48 @@ describe('discoverMissionFiles', () => {
     const res = await discoverMissionFiles({ cwd: tmp });
     expect(res.files).toEqual(['keep.mission.js']);
   });
+
+  it('orders configured patterns and places remaining missions at the wildcard', async () => {
+    const tmp = makeTempDir();
+    temps.push(tmp);
+    const missionsDir = path.join(tmp, 'missions');
+    fs.mkdirSync(path.join(missionsDir, 'account'), { recursive: true });
+    for (const file of ['login.mission.js', 'logout.mission.js', 'search.mission.js']) {
+      fs.writeFileSync(path.join(missionsDir, file), '// ok');
+    }
+    fs.writeFileSync(path.join(missionsDir, 'account', 'profile.mission.js'), '// ok');
+
+    writeJson(path.join(tmp, 'testronaut-config.json'), {
+      missions: {
+        include: ['**/*.mission.js'],
+        order: ['login.mission.js', 'account/**/*.mission.js', '*', 'logout.mission.js'],
+      },
+    });
+
+    const res = await discoverMissionFiles({ cwd: tmp });
+    expect(res.files).toEqual([
+      'login.mission.js',
+      'account/profile.mission.js',
+      'search.mission.js',
+      'logout.mission.js',
+    ]);
+  });
+
+  it('warns about missing exact order entries while ignoring unmatched globs', async () => {
+    const tmp = makeTempDir();
+    temps.push(tmp);
+    fs.mkdirSync(path.join(tmp, 'missions'));
+    fs.writeFileSync(path.join(tmp, 'missions', 'actual.mission.js'), '// ok');
+    writeJson(path.join(tmp, 'testronaut-config.json'), {
+      missions: {
+        order: ['missing.mission.js', 'optional/**/*.mission.js', '*'],
+      },
+    });
+
+    const res = await discoverMissionFiles({ cwd: tmp });
+    expect(res.files).toEqual(['actual.mission.js']);
+    expect(res.warnings).toEqual([
+      'Configured mission order entry was not discovered: missing.mission.js',
+    ]);
+  });
 });
