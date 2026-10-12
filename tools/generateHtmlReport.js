@@ -308,6 +308,7 @@ export function generateHtmlReport(report, outputPath) {
     /* ===== Header ===== */
     .header{ max-width:960px; margin:0 auto 16px; padding:22px 24px; position:relative; overflow:hidden; }
     .header::after{content:"";position:absolute;right:0;top:0;width:92px;height:4px;background:linear-gradient(90deg,var(--orange),var(--amber));}
+    .header-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(280px,340px);gap:22px;align-items:start;}
     .eyebrow{margin-bottom:7px;color:var(--cyan);font-size:11px;font-weight:800;letter-spacing:.18em;text-transform:uppercase;}
     h1{ margin:0 0 12px; font-size:27px; font-weight:850; color:#fff; letter-spacing:-.02em; }
     .run-meta{ color:var(--text-muted); display:grid; gap:4px; }
@@ -341,7 +342,7 @@ export function generateHtmlReport(report, outputPath) {
     .filter-empty{max-width:928px;margin:12px auto;padding:28px 16px;text-align:center;border:1px dashed var(--hairline-strong);border-radius:16px;color:var(--text-muted);}
     .filter-empty strong{display:block;color:var(--text);font-size:18px;margin-bottom:6px;}
     .mission-group.nonmatching{opacity:.45;}
-    @media(max-width:640px){.match-count{width:100%;margin-left:0}.tag-filter{padding:14px 12px}.meta{display:none}}
+    @media(max-width:760px){.header-layout{grid-template-columns:1fr}.match-count{width:100%;margin-left:0}.tag-filter{padding:14px 12px}.meta{display:none}}
 
     /* ===== Disclosure blocks ===== */
     details{ background: var(--panel); border:1px solid var(--hairline); border-radius:16px; margin:10px 0; overflow:hidden; }
@@ -420,19 +421,76 @@ export function generateHtmlReport(report, outputPath) {
     /* container width */
     .container{ max-width:960px; margin:0 auto; }
     .empty{ color: var(--text-muted); padding:12px; }
+    .analytics-cta{
+      padding:16px; background:rgba(2,6,23,.34); border:1px solid var(--hairline-strong);
+      border-radius:13px;
+      color:var(--text-muted); font-size:13px;
+    }
+    .analytics-toggle{
+      width:100%;padding:0;display:flex;align-items:center;justify-content:space-between;gap:12px;
+      color:var(--text);background:transparent;border:0;cursor:pointer;text-align:left;font:inherit;font-weight:800;
+    }
+    .analytics-toggle svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;transition:transform .18s ease;}
+    .analytics-cta.collapsed .analytics-toggle svg{transform:rotate(-90deg);}
+    .analytics-body{display:grid;gap:11px;margin-top:11px;}
+    .analytics-cta.collapsed .analytics-body{display:none;}
+    .analytics-cta code{
+      color:#bfdbfe; background:rgba(59,130,246,.12); border:1px solid rgba(96,165,250,.25);
+      border-radius:8px; padding:6px 9px; white-space:nowrap;
+    }
+    .upload-command{display:flex;align-items:stretch;min-width:0;}
+    .upload-command code{flex:1;min-width:0;overflow:auto;border-radius:8px 0 0 8px;}
+    .copy-command{
+      display:grid;place-items:center;width:36px;flex:none;cursor:pointer;color:#bfdbfe;
+      background:rgba(59,130,246,.18);border:1px solid rgba(96,165,250,.32);border-left:0;
+      border-radius:0 8px 8px 0;
+    }
+    .copy-command:hover,.copy-command.copied{color:#fff;background:rgba(59,130,246,.3);}
+    .copy-command svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;}
+    .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;}
+    .analytics-links{display:flex;gap:8px;flex-wrap:wrap;}
+    .analytics-links a{
+      color:#bfdbfe;text-decoration:none;border:1px solid rgba(96,165,250,.32);
+      background:rgba(59,130,246,.12);border-radius:999px;padding:6px 10px;font-size:12px;font-weight:750;
+    }
+    .analytics-links a:hover{background:rgba(59,130,246,.22);}
   </style>
 </head>
 <body>
   <div class="header glass">
-    <div class="eyebrow">Mission Control · Flight Report</div>
-    <h1>🧑‍🚀 <span class="gradient-text">Testronaut Report</span></h1>
-    <div class="run-meta">
-      <div class="provider-meta"><span class="provider-logo" title="${esc(provider.name)}" aria-label="${esc(provider.name)}">${provider.logo}</span><strong>${esc((reportModels.length ? reportModels : [llm.model ?? '—']).join(' + '))}</strong>${reportJevUsage.evaluations ? ` <span aria-hidden="true">+</span> <span class="provider-logo" title="Jev" aria-label="Jev">${jevLogo}</span><strong>Jev</strong>` : ''}</div>
-      <div><strong>Run ID:</strong> ${esc(runId ?? '—')}</div>
-      <div><strong>Start:</strong> ${esc(startTime ?? '—')}</div>
-      <div><strong>End:</strong> ${esc(endTime ?? '—')}</div>
-      <div><strong>Duration:</strong> ${durationSec}s</div>
-      <div><strong>CLI version:</strong> ${esc(cli.version ?? '—')}</div>
+    <div class="header-layout">
+      <div>
+        <div class="eyebrow">Mission Control · Flight Report</div>
+        <h1>🧑‍🚀 <span class="gradient-text">Testronaut Report</span></h1>
+        <div class="run-meta">
+          <div class="provider-meta"><span class="provider-logo" title="${esc(provider.name)}" aria-label="${esc(provider.name)}">${provider.logo}</span><strong>${esc((reportModels.length ? reportModels : [llm.model ?? '—']).join(' + '))}</strong>${reportJevUsage.evaluations ? ` <span aria-hidden="true">+</span> <span class="provider-logo" title="Jev" aria-label="Jev">${jevLogo}</span><strong>Jev</strong>` : ''}</div>
+          <div><strong>Run ID:</strong> ${esc(runId ?? '—')}</div>
+          <div><strong>Start:</strong> ${esc(startTime ?? '—')}</div>
+          <div><strong>End:</strong> ${esc(endTime ?? '—')}</div>
+          <div><strong>Duration:</strong> ${durationSec}s</div>
+          <div><strong>CLI version:</strong> ${esc(cli.version ?? '—')}</div>
+        </div>
+      </div>
+      <aside class="analytics-cta">
+        <button type="button" class="analytics-toggle" id="analytics-toggle" aria-expanded="true" aria-controls="analytics-body">
+          <span>Need deeper analytics?</span>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+        <div class="analytics-body" id="analytics-body">
+          <span>Upload this run for filtered and cumulative token, estimated-cost, and duration charts.</span>
+          <div class="upload-command">
+            <code id="analytics-upload-command">testronaut upload ${esc(runId ?? '')}</code>
+            <button type="button" class="copy-command" id="copy-upload-command" aria-label="Copy upload command" title="Copy upload command">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3"/></svg>
+            </button>
+            <span class="sr-only" id="copy-upload-status" aria-live="polite"></span>
+          </div>
+          <div class="analytics-links">
+            <a href="https://mission.testronaut.app/">Open Mission Control</a>
+            <a href="https://docs.testronaut.app/docs/category/reports-and-mission-control">Upload guide</a>
+          </div>
+        </div>
+      </aside>
     </div>
   </div>
 
@@ -475,6 +533,50 @@ export function generateHtmlReport(report, outputPath) {
   </div>
   <script>
   (function () {
+    var analyticsToggle = document.getElementById('analytics-toggle');
+    var analyticsBody = document.getElementById('analytics-body');
+    if (analyticsToggle && analyticsBody) {
+      analyticsToggle.addEventListener('click', function () {
+        var card = analyticsToggle.closest('.analytics-cta');
+        var expanded = analyticsToggle.getAttribute('aria-expanded') === 'true';
+        analyticsToggle.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+        analyticsBody.hidden = expanded;
+        if (card) card.classList.toggle('collapsed', expanded);
+      });
+    }
+    var copyUploadButton = document.getElementById('copy-upload-command');
+    var uploadCommand = document.getElementById('analytics-upload-command');
+    var copyUploadStatus = document.getElementById('copy-upload-status');
+    if (copyUploadButton && uploadCommand) {
+      copyUploadButton.addEventListener('click', function () {
+        var command = uploadCommand.textContent || '';
+        var copy = navigator.clipboard && window.isSecureContext
+          ? navigator.clipboard.writeText(command)
+          : new Promise(function (resolve, reject) {
+              var input = document.createElement('textarea');
+              input.value = command;
+              input.setAttribute('readonly', '');
+              input.style.position = 'fixed';
+              input.style.opacity = '0';
+              document.body.appendChild(input);
+              input.select();
+              try { document.execCommand('copy') ? resolve() : reject(new Error('Copy failed')); }
+              catch (error) { reject(error); }
+              finally { document.body.removeChild(input); }
+            });
+        copy.then(function () {
+          copyUploadButton.classList.add('copied');
+          copyUploadButton.title = 'Copied!';
+          if (copyUploadStatus) copyUploadStatus.textContent = 'Upload command copied';
+          window.setTimeout(function () {
+            copyUploadButton.classList.remove('copied');
+            copyUploadButton.title = 'Copy upload command';
+          }, 1600);
+        }).catch(function () {
+          if (copyUploadStatus) copyUploadStatus.textContent = 'Could not copy upload command';
+        });
+      });
+    }
     var selectedTags = [];
     function applyTagFilter() {
       var match = document.getElementById('tag-match');

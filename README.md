@@ -230,6 +230,10 @@ testronaut upload run_1788745106444
 testronaut upload run_1788745106444.json --no-upload-screenshots
 ```
 
+The local HTML report stays focused on inspecting one run without a service
+dependency. Upload a report to Mission Control for filterable per-mission and
+per-turn token, estimated-cost, and duration charts, including cumulative views.
+
 Chain missions together:
 ```js
 await runMissions({

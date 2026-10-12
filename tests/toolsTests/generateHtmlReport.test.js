@@ -18,6 +18,23 @@ afterEach(() => {
 });
 
 describe('generateHtmlReport', () => {
+  it('points local reports to hosted analytics for the same run', () => {
+    const report = { runId: 'run_analytics_123', missions: [] };
+    const outPath = path.join(tmpDir, 'analytics-cta.html');
+    generateHtmlReport(report, outPath);
+    const html = fs.readFileSync(outPath, 'utf8');
+    expect(html).toContain('Need deeper analytics?');
+    expect(html).toContain('filtered and cumulative token, estimated-cost, and duration charts');
+    expect(html).toContain('testronaut upload run_analytics_123');
+    expect(html).toContain('aria-label="Copy upload command"');
+    expect(html).toContain("navigator.clipboard.writeText(command)");
+    expect(html).toContain('id="analytics-toggle" aria-expanded="true"');
+    expect(html).toContain("card.classList.toggle('collapsed', expanded)");
+    expect(html).toContain('href="https://mission.testronaut.app/"');
+    expect(html).toContain('href="https://docs.testronaut.app/docs/category/reports-and-mission-control"');
+    expect(html.indexOf('<aside class="analytics-cta">')).toBeLessThan(html.indexOf('<div class="summary">'));
+  });
+
   it('renders explicit suite, mission, and turn durations', () => {
     const report = {
       runId: 'timed_run',
