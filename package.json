@@ -11,6 +11,9 @@
     "./runner/testronaut": "./runner/testronaut.js"
   },
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
