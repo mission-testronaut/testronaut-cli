@@ -21,42 +21,48 @@ function tempProject(lockfile) {
 describe('Playwright browser setup', () => {
   it('installs the browser matching the locally resolved Playwright version', async () => {
     const runCommand = vi.fn().mockResolvedValue(undefined);
+    const cliPath = '/project/node_modules/playwright/cli.js';
 
     await ensureBrowsers(
       { browser: 'chromium', withDeps: true },
-      { getVersion: () => '1.63.0', runCommand, cwd: tempProject('package-lock.json') },
+      { getInstallation: () => ({ version: '1.63.0', cliPath }), runCommand, cwd: tempProject('package-lock.json') },
     );
 
     expect(runCommand).toHaveBeenCalledOnce();
     expect(runCommand).toHaveBeenCalledWith(
-      'npx -y playwright@1.63.0 install chromium --with-deps',
+      process.execPath,
+      [cliPath, 'install', 'chromium', '--with-deps'],
       { PLAYWRIGHT_BROWSERS_PATH: '0' },
     );
   });
 
   it.each([
-    ['pnpm-lock.yaml', 'pnpm exec playwright install chromium'],
-    ['yarn.lock', 'yarn playwright install chromium'],
-    ['bun.lockb', 'bunx playwright install chromium'],
-    ['package-lock.json', 'npm exec --yes playwright@1.63.0 install chromium'],
-  ])('uses the project package manager fallback for %s', async (lockfile, fallback) => {
+    ['pnpm-lock.yaml', 'pnpm', ['exec', 'playwright', 'install', 'chromium']],
+    ['yarn.lock', 'yarn', ['playwright', 'install', 'chromium']],
+    ['bun.lockb', 'bunx', ['playwright', 'install', 'chromium']],
+    ['package-lock.json', 'npm', ['exec', '--yes', '--', 'playwright', 'install', 'chromium']],
+  ])('uses the project package manager fallback for %s', async (lockfile, command, args) => {
     const runCommand = vi.fn()
       .mockRejectedValueOnce(new Error('npx unavailable'))
       .mockResolvedValueOnce(undefined);
 
     await ensureBrowsers(
       { browser: 'chromium', withDeps: false },
-      { getVersion: () => '1.63.0', runCommand, cwd: tempProject(lockfile) },
+      {
+        getInstallation: () => ({ version: '1.63.0', cliPath: '/project/node_modules/playwright/cli.js' }),
+        runCommand,
+        cwd: tempProject(lockfile),
+      },
     );
 
-    expect(runCommand).toHaveBeenNthCalledWith(2, fallback, { PLAYWRIGHT_BROWSERS_PATH: '0' });
+    expect(runCommand).toHaveBeenNthCalledWith(2, command, args, { PLAYWRIGHT_BROWSERS_PATH: '0' });
   });
 
   it('does not invoke an installer when browser downloads are disabled', async () => {
     process.env.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = '1';
     const runCommand = vi.fn();
 
-    await ensureBrowsers({}, { getVersion: vi.fn(), runCommand, cwd: tempProject() });
+    await ensureBrowsers({}, { getInstallation: vi.fn(), runCommand, cwd: tempProject() });
 
     expect(runCommand).not.toHaveBeenCalled();
   });
