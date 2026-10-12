@@ -49,6 +49,10 @@ Includes:
 
 ## 📦 Installation
 
+Testronaut 2.x requires **Node.js 20 or newer**. This is a breaking change from
+Testronaut 1.x because the bundled Playwright runtime no longer supports Node 18.
+Check your runtime with `node --version` before upgrading.
+
 **Global install** (recommended — use `testronaut` directly):
 ```bash
 npm install -g testronaut

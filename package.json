@@ -1,6 +1,6 @@
 {
   "name": "testronaut",
-  "version": "1.12.2",
+  "version": "2.0.0",
   "main": "./runner/testronaut.js",
   "bin": {
     "testronaut": "bin/cli.js"
@@ -11,6 +11,9 @@
     "./runner/testronaut": "./runner/testronaut.js"
   },
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "benchmark:optimization": "node ./experiments/optimizationBenchmark.js",
     "benchmark:cross-provider": "node ./experiments/crossProviderBenchmark.js",
@@ -38,7 +41,7 @@
     "jiti": "^2.7.0",
     "node-fetch": "^3.3.2",
     "openai": "^6.39.0",
-    "playwright": "^1.54.1",
+    "playwright": "^1.63.0",
     "prompts": "^2.4.2"
   },
   "keywords": [

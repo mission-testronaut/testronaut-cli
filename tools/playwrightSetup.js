@@ -1,23 +1,22 @@
 import { createRequire } from 'module';
 import fs from 'fs';
 import path from 'path';
-import { promisify } from 'util';
-import { exec as execCb } from 'child_process';
-
-const exec = promisify(execCb);
+import { spawn } from 'child_process';
 
 // Resolve from the **user project** (cwd)
 const req = createRequire(path.join(process.cwd(), 'noop.js'));
 
 // Prefer 'playwright' → '@playwright/test' → 'playwright-core' from the USER PROJECT (cwd)
-function getPlaywrightVersion() {
+function getPlaywrightInstallation() {
   console.log('🔍 Detecting installed Playwright version (from project)…');
   const tryPkg = (name) => {
     try {
       const p = req.resolve(`${name}/package.json`);
-      const v = JSON.parse(fs.readFileSync(p, 'utf8')).version;
-      console.log(`   • found ${name}@${v} → ${p}`);
-      return v;
+      const pkg = JSON.parse(fs.readFileSync(p, 'utf8'));
+      const bin = typeof pkg.bin === 'string' ? pkg.bin : Object.values(pkg.bin || {})[0];
+      const cliPath = bin ? path.resolve(path.dirname(p), bin) : null;
+      console.log(`   • found ${name}@${pkg.version} → ${p}`);
+      return { version: pkg.version, cliPath };
     } catch {
       return null;
     }
@@ -26,7 +25,7 @@ function getPlaywrightVersion() {
     tryPkg('playwright') ||
     tryPkg('@playwright/test') ||
     tryPkg('playwright-core') ||
-    'latest'
+    { version: 'latest', cliPath: null }
   );
 }
 
@@ -38,33 +37,46 @@ function pkgManagerForCwd(cwd = process.cwd()) {
   return 'npm';
 }
 
-async function run(cmd, extraEnv = {}) {
-  console.log(`\n> ${cmd}`);
-  await exec(cmd, { stdio: 'inherit', env: { ...process.env, ...extraEnv } });
+async function run(command, args, extraEnv = {}) {
+  console.log(`\n> ${[command, ...args].join(' ')}`);
+  await new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      stdio: 'inherit',
+      env: { ...process.env, ...extraEnv },
+    });
+    child.once('error', reject);
+    child.once('exit', (code, signal) => {
+      if (code === 0) resolve();
+      else reject(new Error(`${command} exited with ${signal || `code ${code}`}`));
+    });
+  });
 }
 
-export async function ensureBrowsers({ browser = 'chromium', withDeps = true } = {}) {
+export async function ensureBrowsers(
+  { browser = 'chromium', withDeps = true } = {},
+  { getInstallation = getPlaywrightInstallation, runCommand = run, cwd = process.cwd() } = {},
+) {
   if (process.env.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD === '1') return;
 
-  const version = getPlaywrightVersion();
-  const withDepsFlag = withDeps ? ' --with-deps' : '';
+  const installation = getInstallation();
+  const installArgs = ['install', browser, ...(withDeps ? ['--with-deps'] : [])];
   const localCacheEnv = { PLAYWRIGHT_BROWSERS_PATH: '0' }; // project-local cache
 
-  const npxCmd = `npx -y playwright@${version} install ${browser}${withDepsFlag}`;
   try {
-    await run(npxCmd, localCacheEnv);
+    if (!installation.cliPath) throw new Error('No local Playwright CLI was resolved');
+    // Execute the CLI beside the package that will launch the browser. With
+    // PLAYWRIGHT_BROWSERS_PATH=0, running an npx-temporary CLI downloads into
+    // the temporary package instead of this project and leaves launch broken.
+    await runCommand(process.execPath, [installation.cliPath, ...installArgs], localCacheEnv);
   } catch {
-    const pm =
-      fs.existsSync(path.join(process.cwd(), 'pnpm-lock.yaml')) ? 'pnpm' :
-      fs.existsSync(path.join(process.cwd(), 'yarn.lock')) ? 'yarn' :
-      fs.existsSync(path.join(process.cwd(), 'bun.lockb')) ? 'bun' : 'npm';
+    const pm = pkgManagerForCwd(cwd);
 
-    const fallback =
-      pm === 'pnpm' ? `pnpm exec playwright install ${browser}${withDepsFlag}` :
-      pm === 'yarn' ? `yarn playwright install ${browser}${withDepsFlag}` :
-      pm === 'bun'  ? `bunx playwright install ${browser}${withDepsFlag}` :
-                      `npm exec --yes playwright@${version} install ${browser}${withDepsFlag}`;
+    const [command, args] =
+      pm === 'pnpm' ? ['pnpm', ['exec', 'playwright', ...installArgs]] :
+      pm === 'yarn' ? ['yarn', ['playwright', ...installArgs]] :
+      pm === 'bun'  ? ['bunx', ['playwright', ...installArgs]] :
+                      ['npm', ['exec', '--yes', '--', 'playwright', ...installArgs]];
 
-    await run(fallback, localCacheEnv);
+    await runCommand(command, args, localCacheEnv);
   }
 }

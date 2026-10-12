@@ -9,6 +9,10 @@
 - [ ] Treat `--json` output as a stable automation contract with documented schemas and tests for every supported command.
 - [ ] If authentication ever moves outside project config, continue reading existing `sessionToken` values and provide an opt-in migration path before deprecating legacy storage.
 
+## Browser Automation Follow-Ups
+
+- [ ] Fix `click_text` so it prioritizes exact-text actionable elements (`button`, `a`, and elements with interactive roles) instead of clicking the first container whose descendant text includes the target. Define an explicit fallback for partial matches and add regression tests covering nested containers, duplicate labels, hidden elements, and the Add, Logout, and Report failures observed in the examples run.
+
 ## Session and Reporting Follow-Ups
 
 - [ ] Evaluate a true shared browser-context mode for suites that require session storage or in-memory application state; define page reset, crash recovery, and concurrency behavior first.
