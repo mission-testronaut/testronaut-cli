@@ -43,21 +43,21 @@ async function run(cmd, extraEnv = {}) {
   await exec(cmd, { stdio: 'inherit', env: { ...process.env, ...extraEnv } });
 }
 
-export async function ensureBrowsers({ browser = 'chromium', withDeps = true } = {}) {
+export async function ensureBrowsers(
+  { browser = 'chromium', withDeps = true } = {},
+  { getVersion = getPlaywrightVersion, runCommand = run, cwd = process.cwd() } = {},
+) {
   if (process.env.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD === '1') return;
 
-  const version = getPlaywrightVersion();
+  const version = getVersion();
   const withDepsFlag = withDeps ? ' --with-deps' : '';
   const localCacheEnv = { PLAYWRIGHT_BROWSERS_PATH: '0' }; // project-local cache
 
   const npxCmd = `npx -y playwright@${version} install ${browser}${withDepsFlag}`;
   try {
-    await run(npxCmd, localCacheEnv);
+    await runCommand(npxCmd, localCacheEnv);
   } catch {
-    const pm =
-      fs.existsSync(path.join(process.cwd(), 'pnpm-lock.yaml')) ? 'pnpm' :
-      fs.existsSync(path.join(process.cwd(), 'yarn.lock')) ? 'yarn' :
-      fs.existsSync(path.join(process.cwd(), 'bun.lockb')) ? 'bun' : 'npm';
+    const pm = pkgManagerForCwd(cwd);
 
     const fallback =
       pm === 'pnpm' ? `pnpm exec playwright install ${browser}${withDepsFlag}` :
@@ -65,6 +65,6 @@ export async function ensureBrowsers({ browser = 'chromium', withDeps = true } =
       pm === 'bun'  ? `bunx playwright install ${browser}${withDepsFlag}` :
                       `npm exec --yes playwright@${version} install ${browser}${withDepsFlag}`;
 
-    await run(fallback, localCacheEnv);
+    await runCommand(fallback, localCacheEnv);
   }
 }
