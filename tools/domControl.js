@@ -37,7 +37,8 @@ export const removeNonContentTags = async ($) => {
     const $el = $(el);
     const allowedAttrs = [
       'href', 'src', 'type', 'alt', 'title',
-      'placeholder', 'name', 'id', 'class', 'aria-label', 'value',
+      'placeholder', 'name', 'id', 'class', 'value',
+      'data-testid', 'disabled', 'role', 'data-state',
       // keep key data-* attributes that help identify rows/items without bloating too much
       'data-type', 'data-id', 'data-title', 'data-parentid', 'data-order'
     ];
@@ -51,7 +52,7 @@ export const removeNonContentTags = async ($) => {
     // }
 
     for (const attr in attrs) {
-      if (!allowedAttrs.includes(attr)) {
+      if (!allowedAttrs.includes(attr) && !attr.startsWith('aria-')) {
         $el.removeAttr(attr);
       }
     }

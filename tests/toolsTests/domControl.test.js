@@ -35,12 +35,13 @@ describe('domControl helpers', () => {
           </head>
           <body data-theme="dark">
             <!-- comment -->
-            <div id="main" data-testid="main" onclick="alert('x')">
+            <div id="main" data-testid="main" role="region" data-state="open"
+                 aria-expanded="true" aria-selected="false" onclick="alert('x')">
               <iframe src="frame.html"></iframe>
               <canvas></canvas>
               <svg></svg>
               <a href="/home" rel="noopener" target="_blank">Home</a>
-              <input id="email" name="email" type="email" data-tracking="abc" />
+              <input id="email" name="email" type="email" disabled data-tracking="abc" />
             </div>
           </body>
         </html>
@@ -66,13 +67,18 @@ describe('domControl helpers', () => {
       // Whitelisted attrs preserved
       const main = $('#main');
       expect(main.attr('id')).toBe('main');
-      expect(main.attr('data-testid')).toBeUndefined();
+      expect(main.attr('data-testid')).toBe('main');
+      expect(main.attr('role')).toBe('region');
+      expect(main.attr('data-state')).toBe('open');
+      expect(main.attr('aria-expanded')).toBe('true');
+      expect(main.attr('aria-selected')).toBe('false');
       expect(main.attr('onclick')).toBeUndefined();
 
       const input = $('#email');
       expect(input.attr('id')).toBe('email');
       expect(input.attr('name')).toBe('email');
       expect(input.attr('type')).toBe('email');
+      expect(input.attr('disabled')).toBe('');
       expect(input.attr('data-tracking')).toBeUndefined();
 
       const link = $('a[href="/home"]');
