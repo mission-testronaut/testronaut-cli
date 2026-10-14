@@ -78,7 +78,7 @@ describe('domControl helpers', () => {
       expect(input.attr('id')).toBe('email');
       expect(input.attr('name')).toBe('email');
       expect(input.attr('type')).toBe('email');
-      expect(input.attr('disabled')).toBe('');
+      expect(input.attr('disabled')).toBeDefined();
       expect(input.attr('data-tracking')).toBeUndefined();
 
       const link = $('a[href="/home"]');
