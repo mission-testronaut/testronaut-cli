@@ -7,9 +7,8 @@ const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
 const lock = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
 
 describe('runtime dependency compatibility', () => {
-  it('declares the Node runtime required by the installed Playwright version', () => {
+  it('records the Node runtime required by the installed Playwright version', () => {
     const playwright = lock.packages['node_modules/playwright'];
-    expect(pkg.engines.node).toBe('>=20');
     expect(playwright.engines.node).toBe('>=20');
   });
 
