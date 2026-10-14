@@ -42,3 +42,31 @@ describe('ChromeBrowser.click_text', () => {
     expect(browser.page.getByText).toHaveBeenCalledWith('Add', { exact: true });
   });
 });
+
+describe('ChromeBrowser.check_text', () => {
+  it('reports text when at least one matching element is visible', async () => {
+    const matches = {
+      count: vi.fn().mockResolvedValue(2),
+      nth: vi.fn(index => [
+        { isVisible: vi.fn().mockResolvedValue(false) },
+        { isVisible: vi.fn().mockResolvedValue(true) },
+      ][index]),
+    };
+    const browser = Object.create(ChromeBrowser.prototype);
+    browser.page = { getByText: vi.fn().mockReturnValue(matches) };
+
+    await expect(browser.check_text({ text: 'Signed out' })).resolves.toBe('FOUND: Signed out');
+    expect(browser.page.getByText).toHaveBeenCalledWith('Signed out');
+  });
+
+  it('does not report text that only exists in hidden elements', async () => {
+    const matches = {
+      count: vi.fn().mockResolvedValue(1),
+      nth: vi.fn().mockReturnValue({ isVisible: vi.fn().mockResolvedValue(false) }),
+    };
+    const browser = Object.create(ChromeBrowser.prototype);
+    browser.page = { getByText: vi.fn().mockReturnValue(matches) };
+
+    await expect(browser.check_text({ text: 'Hidden message' })).resolves.toBe('NOT FOUND: Hidden message');
+  });
+});

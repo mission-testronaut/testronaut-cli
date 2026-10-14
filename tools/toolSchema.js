@@ -95,7 +95,7 @@ const toolsSchema = [
     type: 'function',
     function: {
       name: 'check_text',
-      description: 'Search page HTML for specific text',
+      description: 'Search the page for specific visible text',
       parameters: {
         type: 'object',
         properties: {

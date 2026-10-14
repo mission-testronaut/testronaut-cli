@@ -285,7 +285,7 @@ describe('domControl helpers', () => {
       const html = `
         <button
           id="btn"
-          class="text-sm bg-red-500 hover:bg-red-600 flex items-center btn-primary custom-class"
+          class="text-sm bg-red-500 hover:bg-red-600 disabled:opacity-50 [&amp;_svg]:size-4 flex items-center btn-primary custom-class"
         >
           Click
         </button>
@@ -301,6 +301,8 @@ describe('domControl helpers', () => {
       expect(classes).not.toContain('text-sm');
       expect(classes).not.toContain('bg-red-500');
       expect(classes).not.toContain('hover:bg-red-600');
+      expect(classes).not.toContain('disabled:opacity-50');
+      expect(classes).not.toContain('[&_svg]:size-4');
       expect(classes).not.toContain('flex');
       expect(classes).not.toContain('items-center');
 
