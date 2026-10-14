@@ -59,6 +59,7 @@ export async function runAgent(goals, missionName, maxTurns = 20, retryLimit, op
     const groundControl = createEmptyGroundControl();
 
     for (const goal of goals) {
+      const goalStartTime = Date.now();
       const telemetryStart = groundControl.telemetry.length;
       const steps = [];
       const stepsArchive = [];
@@ -114,6 +115,7 @@ export async function runAgent(goals, missionName, maxTurns = 20, retryLimit, op
             stepFile,
             startTime: now,
             endTime: now,
+            durationMs: 0,
             telemetry: [],
             launchProtocol: { id: protocol.id, status: 'reused', probe: 'passed' },
           });
@@ -259,6 +261,7 @@ Email invitation and magic links:
           steps,
           stepsArchive,
           missionName,
+          goal: userContent,
           retryLimit, 
           groundControl,
           resourceGuard: opts.resourceGuard,
@@ -288,6 +291,7 @@ Email invitation and magic links:
       }
 
       const compact = dedupeSteps(stepsArchive.length ? stepsArchive : steps);
+      const goalEndTime = Date.now();
 
       // Snapshot steps (avoid retaining references to mutable arrays)
       missionResults.push({
@@ -297,8 +301,9 @@ Email invitation and magic links:
         status: result?.success ? 'passed' : 'failed',
         steps: JSON.parse(JSON.stringify(compact)), // last 20 (by memory design)
         stepFile, // full history is in this JSONL (one step per line)
-        startTime: Date.now() - 1, // TODO: wire actual timings if needed
-        endTime: Date.now(),
+        startTime: goalStartTime,
+        endTime: goalEndTime,
+        durationMs: Math.max(0, goalEndTime - goalStartTime),
         telemetry: JSON.parse(JSON.stringify(groundControl.telemetry.slice(telemetryStart))),
         ...(protocolResult ? { launchProtocol: protocolResult } : {}),
       });

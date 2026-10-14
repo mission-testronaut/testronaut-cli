@@ -37,4 +37,21 @@ describe('tools/turnLoopUtils', () => {
       logSpy.mockRestore();
     }
   });
+
+  it('uses the mission transmission frame without changing result data', () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      expect(finalResponseHandler({ content: 'SUCCESS: Docking complete' })).toEqual({
+        finalMessage: 'SUCCESS: Docking complete',
+        success: true,
+      });
+      const printed = logSpy.mock.calls.flat().join('\n');
+      expect(printed).toContain('🧑‍🚀 MISSION TRANSMISSION / SUCCESS');
+      expect(printed).toContain('│ SUCCESS: Docking complete');
+      expect(printed).toContain('END TRANSMISSION');
+      expect(printed).not.toContain('FINAL AGENT RESPONSE');
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
 });
