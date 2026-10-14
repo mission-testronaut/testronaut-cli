@@ -19,4 +19,14 @@ describe('runtime dependency compatibility', () => {
     expect(lock.packages['node_modules/playwright'].version).toBe('1.63.0');
     expect(lock.packages['node_modules/playwright-core'].version).toBe('1.63.0');
   });
+
+  it('declares the minimum Node runtime required by Inquirer 14', () => {
+    const inquirer = lock.packages['node_modules/inquirer'];
+    expect(pkg.engines.node).toBe('>=20.17.0');
+    expect(lock.packages[''].engines.node).toBe(pkg.engines.node);
+    expect(pkg.dependencies.inquirer).toBe('^14.2.2');
+    expect(lock.packages[''].dependencies.inquirer).toBe(pkg.dependencies.inquirer);
+    expect(inquirer.version).toBe('14.2.2');
+    expect(inquirer.engines.node).toContain('^20.17.0');
+  });
 });

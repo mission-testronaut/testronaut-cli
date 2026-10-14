@@ -76,6 +76,18 @@ const CLI_VERSION = JSON.parse(
 
 const DEFAULT_API_BASE = 'https://api.testronaut.app';
 const DEV_API_BASE = 'https://staging.api.testronaut.app';
+const PLAYWRIGHT_INSTALL_PROMPT = {
+  type: 'confirm',
+  name: 'doPw',
+  message: 'Install Playwright browsers now?',
+  default: true,
+};
+const API_KEY_PROMPT = {
+  type: 'password',
+  name: 'apiKey',
+  message: 'Enter your API key:',
+  mask: '*',
+};
 
 let args = process.argv.slice(2);
 
@@ -136,6 +148,14 @@ function isDirectInvocation(argv1 = process.argv[1], moduleUrl = import.meta.url
   } catch {
     return path.resolve(argv1) === path.resolve(modulePath);
   }
+}
+
+function isPromptExitError(error) {
+  return error instanceof Error && error.name === 'ExitPromptError';
+}
+
+function formatCliError(error) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 const cliName = detectCliName();
@@ -367,6 +387,8 @@ export const __test__ = {
   parseOptimizationArgs,
   detectCliName,
   isDirectInvocation,
+  isPromptExitError,
+  formatCliError,
   resolveMissionPath,
   collectReportScreenshotNames,
   collectReportScreenshotPaths,
@@ -374,6 +396,8 @@ export const __test__ = {
   closestMissionMatch,
   resolveReportFile,
   buildEffectiveConfig,
+  PLAYWRIGHT_INSTALL_PROMPT,
+  API_KEY_PROMPT,
 };
 
 function resolveReportDir(config = {}, cwd = process.cwd()) {
@@ -893,9 +917,7 @@ if (args.includes('--init')) {
   await createWelcomeMission();
 
   const { default: inquirer } = await import('inquirer');
-  const { doPw } = await inquirer.prompt([
-    { type: 'confirm', name: 'doPw', message: 'Install Playwright browsers now?', default: true }
-  ]);
+  const { doPw } = await inquirer.prompt([PLAYWRIGHT_INSTALL_PROMPT]);
 
   if (doPw) {
     // ensure @playwright/test exists so the installer can pin to its version
@@ -1438,14 +1460,7 @@ async function handleLogin() {
 
   // If API key is not provided, prompt the user for it
   if (!apiKey) {
-    const responses = await inquirer.prompt([
-      {
-        type: 'password',
-        name: 'apiKey',
-        message: 'Enter your API key:',
-        mask: '*' 
-      }
-    ]);
+    const responses = await inquirer.prompt([API_KEY_PROMPT]);
     apiKey = responses.apiKey;
   }
 
@@ -1487,7 +1502,7 @@ async function handleLogin() {
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
     console.log('✅ Login successful! Session token saved to testronaut-config.json.');
   } catch (error) {
-    console.error('❌ Error during login:', error);
+    console.error('❌ Error during login:', formatCliError(error));
     process.exit(1);
   }
 }
@@ -1845,5 +1860,14 @@ async function serveLatestReport() {
 }
 
 if (isDirectInvocation()) {
-  await main();
+  try {
+    await main();
+  } catch (error) {
+    if (isPromptExitError(error)) {
+      console.error('Prompt cancelled.');
+      process.exitCode = 130;
+    } else {
+      throw error;
+    }
+  }
 }
