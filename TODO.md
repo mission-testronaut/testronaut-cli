@@ -11,7 +11,7 @@
 
 ## Browser Automation Follow-Ups
 
-- [ ] Fix `click_text` so it prioritizes exact-text actionable elements (`button`, `a`, and elements with interactive roles) instead of clicking the first container whose descendant text includes the target. Define an explicit fallback for partial matches and add regression tests covering nested containers, duplicate labels, hidden elements, and the Add, Logout, and Report failures observed in the examples run.
+- [x] Make `click_text` match exact text, prefer the innermost visible element, and fail quickly instead of clicking an ancestor or partial match.
 
 ## Session and Reporting Follow-Ups
 
