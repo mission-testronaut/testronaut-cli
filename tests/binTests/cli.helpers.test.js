@@ -22,6 +22,40 @@ describe('cli helpers', () => {
     expect(__test__.DEFAULT_API_BASE).toBe('https://api.testronaut.app');
   });
 
+  it('keeps interactive prompt contracts compatible with Inquirer 14', () => {
+    expect(__test__.PLAYWRIGHT_INSTALL_PROMPT).toEqual({
+      type: 'confirm',
+      name: 'doPw',
+      message: 'Install Playwright browsers now?',
+      default: true,
+    });
+    expect(__test__.API_KEY_PROMPT).toEqual({
+      type: 'password',
+      name: 'apiKey',
+      message: 'Enter your API key:',
+      mask: '*',
+    });
+  });
+
+  it('recognizes Inquirer prompt cancellation without swallowing other failures', () => {
+    const cancelled = new Error('User force closed the prompt with SIGINT');
+    cancelled.name = 'ExitPromptError';
+
+    expect(__test__.isPromptExitError(cancelled)).toBe(true);
+    expect(__test__.isPromptExitError(new Error('network failed'))).toBe(false);
+    expect(__test__.isPromptExitError({ name: 'ExitPromptError' })).toBe(false);
+  });
+
+  it('formats CLI errors without printing stack traces', () => {
+    const error = new Error('login 401 Unauthorized: {"error":"Invalid API key"}');
+
+    expect(__test__.formatCliError(error)).toBe(
+      'login 401 Unauthorized: {"error":"Invalid API key"}',
+    );
+    expect(__test__.formatCliError(error)).not.toContain(' at ');
+    expect(__test__.formatCliError('request failed')).toBe('request failed');
+  });
+
   it('guessMimeType returns expected types', () => {
     const { guessMimeType } = __test__;
     expect(guessMimeType('file.html')).toContain('text/html');
