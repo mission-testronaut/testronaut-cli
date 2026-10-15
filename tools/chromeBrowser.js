@@ -1135,8 +1135,14 @@ export class ChromeBrowser {
 
   
   async check_text({ text }) {
-    const html = await this.page.content();
-    return html.includes(text) ? `FOUND: ${text}` : `NOT FOUND: ${text}`;
+    const matches = this.page.getByText(text);
+    const count = await matches.count();
+    for (let index = 0; index < count; index++) {
+      if (await matches.nth(index).isVisible().catch(() => false)) {
+        return `FOUND: ${text}`;
+      }
+    }
+    return `NOT FOUND: ${text}`;
   }
 
   async click_text({ text, timeout = 3000 }) {
