@@ -12,6 +12,7 @@
 ## Browser Automation Follow-Ups
 
 - [x] Make `click_text` match exact text, prefer the innermost visible element, and fail quickly instead of clicking an ancestor or partial match.
+- [ ] Replace framework/vendor-specific DOM class stripping with a framework-agnostic classifier that removes generated hashes, styling utilities, variants, and arbitrary selectors while preserving semantic component classes. Reconsider broad prefix rules such as `/^cl-/`, cap retained class count and length, and add representative fixtures for Tailwind, MUI, Ant Design, Chakra, Clerk, CSS Modules, and CSS-in-JS.
 
 ## Session and Reporting Follow-Ups
 
