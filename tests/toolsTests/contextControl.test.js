@@ -27,8 +27,19 @@ import {
   createEmptyGroundControl,
   applyGroundControlUpdate,
   recordGroundTelemetry,
+  recordRecovery,
   summarizeGroundControlForPrompt
 } from '../../tools/contextControl.js';
+
+describe('recordRecovery', () => {
+  it('normalizes and records structured recovery evidence', () => {
+    const groundControl = createEmptyGroundControl();
+    expect(recordRecovery(groundControl, { action: ' Reload ', reason: 'Message missing', evidence: 'Appeared later' }, { turn: 3, screenshot: './screenshots/recovery.png' })).toEqual({
+      turn: 3, action: 'reload', reason: 'Message missing', evidence: 'Appeared later', screenshot: './screenshots/recovery.png',
+    });
+    expect(groundControl.recoveries).toHaveLength(1);
+  });
+});
 
 describe('sanitizeHeavyToolHistory', () => {
   it('stubs older get_dom tool messages but keeps the latest N intact', () => {

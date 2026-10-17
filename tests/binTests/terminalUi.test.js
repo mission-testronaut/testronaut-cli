@@ -17,12 +17,13 @@ describe('terminal UI', () => {
     ui.banner({ version: '1.2.3', provider: 'openai', model: 'gpt-test', session: 'isolated' });
     ui.phase('launch', 'login.mission.js');
     ui.mission(true, 'login.mission.js', ['smoke']);
-    ui.summary({ totalMissions: 1, passed: 1, failed: 0, durationMs: 1234, reportPath: 'reports/run.html' });
+    ui.summary({ totalMissions: 2, passed: 1, recovered: 1, failed: 0, durationMs: 1234, reportPath: 'reports/run.html' });
 
     expect(target.read()).toContain('🧑‍🚀 TESTRONAUT  /  MISSION RUNNER');
     expect(target.read()).toContain('LAUNCH    login.mission.js');
     expect(target.read()).toContain('#smoke');
     expect(target.read()).toContain('MISSION COMPLETE');
+    expect(target.read()).toContain('1 recovered');
     expect(target.read()).toContain('Duration: 1.23s');
     expect(target.read()).not.toContain('\u001b[');
   });

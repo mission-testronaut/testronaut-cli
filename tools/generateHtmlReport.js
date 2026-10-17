@@ -43,6 +43,7 @@ export function generateHtmlReport(report, outputPath) {
     .replace(/"/g, '&quot;');
   const badge = (status) =>
     status === 'passed' ? '✅ Passed' :
+    status === 'recovered' ? '⚠️ Passed after recovery' :
     status === 'failed' ? '❌ Failed' : (status || '—');
   const providerKey = String(llm.provider ?? '').trim().toLowerCase() === 'claude'
     ? 'anthropic'
@@ -160,7 +161,13 @@ export function generateHtmlReport(report, outputPath) {
     const type = String(m.submissionType || 'mission').toLowerCase();
     const typeLabel = (type === 'premission' || type === 'postmission') ? type : 'mission';
     const prettyTitle = `${esc(m.missionName || 'Mission')} — ${typeLabel}${m.submissionName ? `: ${esc(m.submissionName)}` : ''}`;
-    const statusClass = m.status === 'failed' ? 'bad' : (m.status === 'passed' ? 'ok' : '');
+    const statusClass = m.status === 'failed' ? 'bad' : (m.status === 'recovered' ? 'warn' : (m.status === 'passed' ? 'ok' : ''));
+    const recoveries = Array.isArray(m.recoveries) ? m.recoveries : [];
+    const recoveryItems = recoveries.length ? `
+      <div class="recoveries">
+        <h4>Recoveries</h4>
+        ${recoveries.map(recovery => `<div class="recovery"><strong>Turn ${esc(Number(recovery.turn ?? 0) + 1)} · ${esc(recovery.action)}</strong><span>${esc(recovery.reason)}</span>${recovery.evidence ? `<span>${esc(recovery.evidence)}</span>` : ''}${recovery.screenshot ? `<img src="${esc(recovery.screenshot)}" alt="Recovery evidence">` : ''}</div>`).join('')}
+      </div>` : '';
 
     return `
       <details class="mission-submission">
@@ -173,6 +180,7 @@ export function generateHtmlReport(report, outputPath) {
           </span>
         </summary>
         <div class="steps">
+          ${recoveryItems}
           ${stepItems || '<div class="empty">No steps recorded.</div>'}
         </div>
       </details>
@@ -186,7 +194,9 @@ export function generateHtmlReport(report, outputPath) {
     return acc;
   }, {});
 
-  const groupStatus = (subs) => subs.some(s => s.status === 'failed') ? 'failed' : 'passed';
+  const groupStatus = (subs) => subs.some(s => s.status === 'failed')
+    ? 'failed'
+    : subs.some(s => s.status === 'recovered') ? 'recovered' : 'passed';
 
   const missionGroupBlock = (missionName, subs) => {
     const status = groupStatus(subs);
@@ -213,7 +223,7 @@ export function generateHtmlReport(report, outputPath) {
         <summary>
           <span class="name">${esc(missionName)}</span>
           <span class="mission-tags">${tags.map(tag => `<span class="tag-small" style="${tagStyle(tag)}">${esc(tag)}</span>`).join('')}</span>
-          <span class="status ${status === 'failed' ? 'bad' : 'ok'}">${badge(status)}</span>
+          <span class="status ${status === 'failed' ? 'bad' : status === 'recovered' ? 'warn' : 'ok'}">${badge(status)}</span>
           <span class="meta">${sourceFiles.length ? `${sourceFiles.map(esc).join(', ')} • ` : ''}submissions: ${subs.length} • steps: ${totalSteps} • duration: ${groupDur}s • ${esc(tokenMeta(groupModelUsage, groupJevUsage))}</span>
           <span class="toolbar">
             <button class="btn-mini toggle" data-scope="mission" aria-label="Expand">▼</button>
@@ -234,9 +244,10 @@ export function generateHtmlReport(report, outputPath) {
     const st = groupStatus(grouped[name]);
     acc.total += 1;
     acc.passed += st === 'passed' ? 1 : 0;
+    acc.recovered += st === 'recovered' ? 1 : 0;
     acc.failed += st === 'failed' ? 1 : 0;
     return acc;
-  }, { total: 0, passed: 0, failed: 0 });
+  }, { total: 0, passed: 0, recovered: 0, failed: 0 });
 
   const html = `<!DOCTYPE html>
 <html>
@@ -379,9 +390,14 @@ export function generateHtmlReport(report, outputPath) {
     .name{ flex:1; }
     .status.ok{ color: var(--ok); font-weight:700; }
     .status.bad{ color: var(--bad); font-weight:700; }
+    .status.warn{ color: var(--amber); font-weight:700; }
     .meta{ color: var(--text-muted); font-size:12px; }
 
     .steps{ padding: 0 12px 12px; }
+    .recoveries{ margin:12px 0; padding:12px; border:1px solid rgba(251,191,36,.4); border-radius:12px; background:rgba(251,191,36,.1); }
+    .recoveries h4{ margin:0 0 8px; color:var(--amber); }
+    .recovery{ display:grid; gap:4px; margin-top:8px; color:var(--text-muted); }
+    .recovery strong{ color:var(--text); }
     .step summary{
       background: rgba(255,255,255,.04);
       border:1px solid var(--hairline);
@@ -497,6 +513,7 @@ export function generateHtmlReport(report, outputPath) {
   <div class="summary">
     <div class="pill">Missions: ${esc(summary.totalMissions ?? totals.total)}</div>
     <div class="pill ok">Passed: ${esc(summary.passed ?? totals.passed)}</div>
+    <div class="pill warn">Recovered: ${esc(summary.recovered ?? totals.recovered)}</div>
     <div class="pill bad">Failed: ${esc(summary.failed ?? totals.failed)}</div>
     ${optimization?.configured ? `<div class="pill">Optimization: ${esc(optimization.objective)} (${esc(optimization.mode)})</div>` : ''}
     ${Object.entries(reportModelUsage.byModel).length > 1

@@ -641,6 +641,13 @@ export class ChromeBrowser {
     return `navigated to ${this.page.url()}`;
   }
 
+  async reload() {
+    await this.page.reload({ timeout: 30_000, waitUntil: 'domcontentloaded' });
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+    try { await this._waitLoaderGone(); } catch {}
+    return `reloaded ${this.page.url()}`;
+  }
+
   async probe({ url, selector, text, timeout = 5000 } = {}) {
     if (url) {
       await this.page.goto(url, { timeout: 30_000, waitUntil: 'domcontentloaded' });
@@ -1445,6 +1452,7 @@ export class ChromeBrowser {
 
 export const CHROME_TOOL_MAP = {
   navigate: (b, args) => b.navigate(args),
+  reload: (b) => b.reload(),
   fill: (b, args) => b.fill(args),
   click: (b, args) => b.click(args),
   get_dom: (b, args, agentMemory) => b.get_dom(args, agentMemory),

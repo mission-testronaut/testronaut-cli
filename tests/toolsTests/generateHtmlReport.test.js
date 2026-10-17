@@ -18,6 +18,17 @@ afterEach(() => {
 });
 
 describe('generateHtmlReport', () => {
+  it('renders recovered status and recovery evidence', () => {
+    const outPath = path.join(tmpDir, 'recovered.html');
+    generateHtmlReport({ summary: { passed: 0, recovered: 1, failed: 0 }, missions: [{
+      missionName: 'Chat', status: 'recovered', recoveries: [{ turn: 1, action: 'reload', reason: 'message missing', screenshot: './screenshots/recovery.png' }], steps: [],
+    }] }, outPath);
+    const html = fs.readFileSync(outPath, 'utf8');
+    expect(html).toContain('Passed after recovery');
+    expect(html).toContain('Recovered: 1');
+    expect(html).toContain('message missing');
+    expect(html).toContain('./screenshots/recovery.png');
+  });
   it('points local reports to hosted analytics for the same run', () => {
     const report = { runId: 'run_analytics_123', missions: [] };
     const outPath = path.join(tmpDir, 'analytics-cta.html');

@@ -100,10 +100,10 @@ describe('cli helpers', () => {
     const { collectReportScreenshotNames, collectReportScreenshotPaths } = __test__;
     const report = { missions: [
       { steps: [{ screenshotPath: './screenshots/one.png' }, { screenshotPath: './screenshots/two.jpg' }] },
-      { steps: [{ screenshotPath: './screenshots/one.png' }, { events: [] }] },
+      { steps: [{ screenshotPath: './screenshots/one.png' }, { events: [] }], recoveries: [{ screenshot: './screenshots/recovery.png' }] },
     ] };
-    expect(collectReportScreenshotNames(report)).toEqual(['one.png', 'two.jpg']);
-    expect(collectReportScreenshotPaths(report)).toEqual(['screenshots/one.png', 'screenshots/two.jpg']);
+    expect(collectReportScreenshotNames(report)).toEqual(['one.png', 'two.jpg', 'recovery.png']);
+    expect(collectReportScreenshotPaths(report)).toEqual(['screenshots/one.png', 'screenshots/two.jpg', 'screenshots/recovery.png']);
   });
 
   it('preserves run-specific screenshot paths', () => {
