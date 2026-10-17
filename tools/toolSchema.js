@@ -29,6 +29,14 @@ const toolsSchema = [
   {
     type: 'function',
     function: {
+      name: 'reload',
+      description: 'Reload the current page. When reload is used to recover from an unexpected state, also call record_recovery with action "reload".',
+      parameters: { type: 'object', properties: {}, additionalProperties: false },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'fill',
       description: 'Fill in a field by CSS selector',
       parameters: {
@@ -525,6 +533,24 @@ const toolsSchema = [
           }
         },
         additionalProperties: false
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'record_recovery',
+      description: 'Record a deviation from the normal user journey that was needed to continue, such as reloading, resending, or dismissing an unexpected dialog.',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', description: 'Short stable action name, for example "reload", "resend", or "dismiss_dialog".' },
+          reason: { type: 'string', description: 'Why the recovery was necessary and what was observed before it.' },
+          evidence: { type: 'string', description: 'Optional short supporting observation.' },
+          screenshot: { type: 'boolean', description: 'Capture and attach a screenshot at the time the recovery is recorded.' },
+        },
+        required: ['action', 'reason'],
+        additionalProperties: false,
       }
     }
   },

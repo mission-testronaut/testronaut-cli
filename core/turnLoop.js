@@ -59,6 +59,7 @@ import {
   createEmptyGroundControl,
   applyGroundControlUpdate,
   recordGroundTelemetry,
+  recordRecovery,
  } from '../tools/contextControl.js';
 
 // ─────────────────────────────────────────────
@@ -159,6 +160,7 @@ const TURN_RETRY_BASE_DELAY_MS = 500;
 const FIRE_AND_FORGET_TOOLS = new Set([
   'screenshot',
   'click',
+  'reload',
   'click_text',
   // 'expand_menu',
   'fill',
@@ -170,6 +172,7 @@ const FIRE_AND_FORGET_TOOLS = new Set([
   'request_human_input',
   'set_ground_control_state',
   'record_mission_telemetry',
+  'record_recovery',
 ]);
 
 function currentBrowserUrl(browser) {
@@ -630,6 +633,14 @@ export const turnLoop = async (
           } else if (fnName === 'record_mission_telemetry') {
             const recorded = recordGroundTelemetry(groundControl, args, { turn });
             result = { ok: true, recorded };
+          } else if (fnName === 'record_recovery') {
+            let screenshot = null;
+            if (args.screenshot && process.env.TESTRONAUT_SCREENSHOTS !== '0') {
+              const screenshotResult = await CHROME_TOOL_MAP.screenshot(browser, {}, agentMemory);
+              screenshot = String(screenshotResult || '').match(/(?:\.\/)?screenshots\/[^\s]+/)?.[0] || null;
+            }
+            const recorded = recordRecovery(groundControl, args, { turn, screenshot });
+            result = { ok: true, recorded };
           } else {
             const toolHandler = CHROME_TOOL_MAP[fnName];
             if (typeof toolHandler !== 'function') throw new Error(`Unknown tool: ${fnName}`);
@@ -973,7 +984,7 @@ export const turnLoop = async (
         // model functionCall to immediately follow user content or a
         // functionResponse; inserting it before `msg` would create adjacent,
         // reversed model function-call turns.
-        if (!errorMessage && ['click_text', 'click', 'expand_menu'].includes(fnName)) {
+        if (!errorMessage && ['click_text', 'click', 'expand_menu', 'reload'].includes(fnName)) {
           domRefreshSource = fnName;
         }
       }

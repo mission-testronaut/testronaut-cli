@@ -67,6 +67,18 @@ describe('cli/testronaut.runMissions (with enforceTurnBudget)', () => {
     log.mockRestore();
   });
 
+  it('uses project recovery policy unless the mission overrides it', async () => {
+    loadConfig.mockResolvedValue({ maxTurns: 20, recovery: { permitted: ['reload'] } });
+    enforceTurnBudget.mockReturnValue({ effectiveMax: 20, limits: {}, notes: [] });
+    runAgent.mockResolvedValue([{ steps: [{ result: 'SUCCESS' }], status: 'passed' }]);
+
+    await runMissions({ mission: 'Check dashboard' }, 'Configured recovery');
+    expect(runAgent.mock.calls[0][4].recovery).toEqual({ permitted: ['reload'] });
+
+    await runMissions({ mission: 'Check dashboard', recovery: { permitted: [] } }, 'No recovery');
+    expect(runAgent.mock.calls[1][4].recovery).toEqual({ permitted: [] });
+  });
+
   it('unwraps launch protocols while preserving preMission authoring', async () => {
     loadConfig.mockResolvedValue({ maxTurns: 20 });
     enforceTurnBudget.mockReturnValue({
