@@ -50,7 +50,7 @@ const formatListLimit = (v) => v === Infinity ? 'all' : v;
  * @param {{ preMission?: any|any[], mission?: any|any[], postMission?: any|any[] }} params
  * @param {string} missionName
  */
-export async function runMissions({ preMission, mission, postMission, tags = [] }, missionName) {
+export async function runMissions({ preMission, mission, postMission, tags = [], recovery }, missionName) {
   // 1) Config and turn budget (with guardrails)
   const cfg = await loadConfig();
   const { effectiveMax, limits, notes } = enforceTurnBudget(cfg);
@@ -61,6 +61,7 @@ export async function runMissions({ preMission, mission, postMission, tags = [] 
   const automaticDomLimitInfo = getAutomaticDomLimit(cfg);
   const resourceGuard = getResourceGuardConfig(cfg);
   const humanInput = getHumanInputConfig(cfg);
+  const recoveryPolicy = recovery ?? cfg?.recovery;
   const debugEnabled = isDebugEnabled();
   const missionTags = normalizeTags([
     ...normalizeTags(tags),
@@ -226,6 +227,7 @@ export async function runMissions({ preMission, mission, postMission, tags = [] 
       debug: debugEnabled,
       resourceGuard,
       humanInput,
+      recovery: recoveryPolicy,
     }
   );
   if (!success) {

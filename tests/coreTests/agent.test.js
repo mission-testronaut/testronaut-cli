@@ -119,6 +119,24 @@ describe('core/agent.runAgent', () => {
     expect(result.telemetry).toEqual([{ kind: 'note', text: 'durable observation' }]);
   });
 
+  it('marks a successful goal recovered and enforces permitted actions', async () => {
+    turnLoop.mockImplementationOnce(async (browser, messages, maxTurns, ct, rc, cs, ctx) => {
+      ctx.groundControl.recoveries.push({ turn: 2, action: 'reload', reason: 'message was missing' });
+      return { success: true };
+    });
+    const [recovered] = await runAgent([{ goal: 'Observe' }], 'Recovery', 3, 2, { recovery: { permitted: ['reload'] } });
+    expect(recovered.status).toBe('recovered');
+    expect(recovered.recoveries).toEqual([{ turn: 2, action: 'reload', reason: 'message was missing' }]);
+
+    turnLoop.mockImplementationOnce(async (browser, messages, maxTurns, ct, rc, cs, ctx) => {
+      ctx.groundControl.recoveries.push({ turn: 1, action: 'resend', reason: 'submission disappeared' });
+      return { success: true };
+    });
+    const [failed] = await runAgent([{ goal: 'Observe' }], 'Recovery', 3, 2, { recovery: { permitted: ['reload'] } });
+    expect(failed.status).toBe('failed');
+    expect(failed.recoveryPolicyViolation).toEqual(['resend']);
+  });
+
   it('reuses a completed launch protocol after a passing shared-auth probe', async () => {
     process.env.TESTRONAUT_SESSION_MODE = 'shared-auth';
     const probeSpy = vi.spyOn(ChromeBrowser.prototype, 'probe').mockResolvedValue({

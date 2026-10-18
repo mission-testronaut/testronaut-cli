@@ -6,6 +6,17 @@ describe('tools/toolSchema', () => {
     expect(toolsSchema.map(tool => tool.function.name)).not.toContain('get_dom_chunk');
   });
 
+  it('exposes structured recovery recording', () => {
+    const entry = toolsSchema.find(tool => tool.function.name === 'record_recovery');
+    expect(entry.function.parameters.required).toEqual(['action', 'reason']);
+    expect(entry.function.parameters.properties).toHaveProperty('screenshot');
+  });
+
+  it('exposes reload as a first-class browser action', () => {
+    const entry = toolsSchema.find(tool => tool.function.name === 'reload');
+    expect(entry.function.parameters).toEqual({ type: 'object', properties: {}, additionalProperties: false });
+  });
+
   it('allows get_dom calls to be scoped by selector', () => {
     const entry = toolsSchema.find(tool => tool.function.name === 'get_dom');
     expect(entry.function.parameters.properties.selector.type).toBe('string');
