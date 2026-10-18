@@ -1147,21 +1147,24 @@ export class ChromeBrowser {
     return html.includes(text) ? `FOUND: ${text}` : `NOT FOUND: ${text}`;
   }
 
-  async click_text({ text }) {
+  async click_text({ text, timeout = 3000 }) {
     console.log("attempting to click text with normal click:", text);
 
-    const elements = await this.page.$$('button, a, span, div, li, p'); // expand as needed
-    for (const el of elements) {
-      const innerText = await el.innerText().catch(() => '');
-      if (innerText.includes(text)) {
-        await el.scrollIntoViewIfNeeded().catch(() => {});
-        await el.click();
-        await this.page.waitForTimeout(5000);
-        return `clicked text "${text}"`;
-        
-      }
+    // Playwright's exact text engine normalizes whitespace and resolves to the
+    // innermost matching elements, avoiding ancestor containers that merely
+    // contain the requested label.
+    const matches = this.page.getByText(text, { exact: true });
+    const count = await matches.count();
+    for (let index = 0; index < count; index++) {
+      const match = matches.nth(index);
+      if (!await match.isVisible().catch(() => false)) continue;
+
+      await match.scrollIntoViewIfNeeded().catch(() => {});
+      await match.click({ timeout });
+      await this.page.waitForTimeout(500);
+      return `clicked text "${text}"`;
     }
-    throw new Error(`Element with text "${text}" not found`);
+    throw new Error(`Exact visible text "${text}" not found`);
   }
 
   async click_text_xpath({ text, delayMs = 1000 }) {
