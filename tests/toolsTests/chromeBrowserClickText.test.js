@@ -69,4 +69,44 @@ describe('ChromeBrowser.check_text', () => {
 
     await expect(browser.check_text({ text: 'Hidden message' })).resolves.toBe('NOT FOUND: Hidden message');
   });
+
+  it('reports the iframe containing a visible match', async () => {
+    const noMatches = { count: vi.fn().mockResolvedValue(0) };
+    const frameMatches = {
+      count: vi.fn().mockResolvedValue(1),
+      nth: vi.fn().mockReturnValue({ isVisible: vi.fn().mockResolvedValue(true) }),
+    };
+    const mainFrame = { getByText: vi.fn().mockReturnValue(noMatches) };
+    const childFrame = {
+      getByText: vi.fn().mockReturnValue(frameMatches),
+      name: vi.fn().mockReturnValue(''),
+      frameElement: vi.fn().mockResolvedValue({ getAttribute: vi.fn().mockResolvedValue('webviewer-1') }),
+      url: vi.fn().mockReturnValue('https://example.test/viewer'),
+    };
+    const browser = Object.create(ChromeBrowser.prototype);
+    browser.page = {
+      mainFrame: vi.fn().mockReturnValue(mainFrame),
+      frames: vi.fn().mockReturnValue([mainFrame, childFrame]),
+    };
+
+    await expect(browser.check_text({ text: 'Quarterly report' }))
+      .resolves.toBe('FOUND in frame webviewer-1: Quarterly report');
+  });
+});
+
+describe('ChromeBrowser iframe interaction targeting', () => {
+  it('builds an explicit frame-qualified click locator', () => {
+    const locator = { first: vi.fn().mockReturnThis() };
+    const frameContext = { locator: vi.fn().mockReturnValue(locator) };
+    const browser = Object.create(ChromeBrowser.prototype);
+    browser.page = { frameLocator: vi.fn().mockReturnValue(frameContext) };
+
+    const [make] = browser._buildClickCandidates({
+      frame: 'iframe#webviewer-1', selector: 'button[aria-label="Settings"]', searchAllFrames: true,
+    });
+
+    expect(make()).toBe(locator);
+    expect(browser.page.frameLocator).toHaveBeenCalledWith('iframe#webviewer-1');
+    expect(frameContext.locator).toHaveBeenCalledWith('button[aria-label="Settings"]');
+  });
 });

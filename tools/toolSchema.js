@@ -44,6 +44,7 @@ const toolsSchema = [
         properties: {
           selector: { type: 'string' },
           text: { type: 'string' },
+          frame: { type: 'string', description: 'Optional CSS selector for the containing iframe.' },
         },
         required: ['selector', 'text'],
       },
@@ -58,6 +59,7 @@ const toolsSchema = [
         type: 'object',
         properties: {
           selector: { type: 'string' },
+          frame: { type: 'string', description: 'Optional CSS selector for the containing iframe.' },
           waitFor: {
             type: 'string',
             enum: ['load', 'domcontentloaded', 'networkidle'],
@@ -108,6 +110,11 @@ const toolsSchema = [
         type: 'object',
         properties: {
           text: { type: 'string' },
+          searchAllFrames: {
+            type: 'boolean',
+            default: true,
+            description: 'Search iframe documents as well as the main document.',
+          },
         },
         required: ['text'],
       },

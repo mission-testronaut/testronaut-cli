@@ -21,6 +21,14 @@ describe('tools/toolSchema', () => {
     const entry = toolsSchema.find(tool => tool.function.name === 'get_dom');
     expect(entry.function.parameters.properties.selector.type).toBe('string');
   });
+  it('exposes iframe targeting and iframe text search', () => {
+    const fill = toolsSchema.find(tool => tool.function.name === 'fill');
+    const click = toolsSchema.find(tool => tool.function.name === 'click');
+    const checkText = toolsSchema.find(tool => tool.function.name === 'check_text');
+    expect(fill.function.parameters.properties.frame.type).toBe('string');
+    expect(click.function.parameters.properties.frame.type).toBe('string');
+    expect(checkText.function.parameters.properties.searchAllFrames.default).toBe(true);
+  });
   it('includes resource_progress tool with empty params', () => {
     const entry = toolsSchema.find(t => t.function?.name === 'resource_progress');
     expect(entry?.type).toBe('function');
