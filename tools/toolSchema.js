@@ -78,6 +78,27 @@ const toolsSchema = [
   {
     type: 'function',
     function: {
+      name: 'press_key',
+      description: 'Press a keyboard key or shortcut, optionally focusing an element by CSS selector first',
+      parameters: {
+        type: 'object',
+        properties: {
+          key: {
+            type: 'string',
+            description: 'Playwright key or shortcut, such as Enter, Escape, Control+B, or Meta+B',
+          },
+          selector: {
+            type: 'string',
+            description: 'Optional CSS selector of the element to focus before pressing the key',
+          },
+        },
+        required: ['key'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'get_dom',
       description: 'Return trimmed HTML from the current page',
       parameters: {
