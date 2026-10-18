@@ -180,8 +180,13 @@ export class ChromeBrowser {
   }
 
   // Build candidate locator MAKERS (Page|Frame-aware)
-  _buildClickCandidates({ selector, text, role, attrs, scope, searchAllFrames }) {
-    const frames = searchAllFrames ? this._allFrames({ includeMain: true }) : [this.page.mainFrame()];
+  _interactionContexts(frame, searchAllFrames) {
+    if (frame) return [this.page.frameLocator(frame)];
+    return searchAllFrames ? this._allFrames({ includeMain: true }) : [this.page.mainFrame()];
+  }
+
+  _buildClickCandidates({ selector, text, role, attrs, scope, searchAllFrames, frame }) {
+    const frames = this._interactionContexts(frame, searchAllFrames);
     const makers = [];
     const add = (fn) => fn && makers.push(fn);
 
@@ -211,8 +216,9 @@ export class ChromeBrowser {
       }
     }
 
-    const seen = new Set();
-    return makers.filter(fn => { const k = fn.toString(); if (seen.has(k)) return false; seen.add(k); return true; });
+    // Do not de-duplicate by function source: closures for different frames have
+    // identical source text but resolve against different documents.
+    return makers;
   }
 
 
@@ -459,8 +465,8 @@ export class ChromeBrowser {
   }
 
   // Build candidates for text entry (Page|Frame-aware)
-  _buildFillCandidates({ selector, placeholder, role = 'textbox', attrs, scope, searchAllFrames }) {
-    const frames = searchAllFrames ? this._allFrames({ includeMain: true }) : [this.page.mainFrame()];
+  _buildFillCandidates({ selector, placeholder, role = 'textbox', attrs, scope, searchAllFrames, frame }) {
+    const frames = this._interactionContexts(frame, searchAllFrames);
     const makers = [];
     const add = (fn) => fn && makers.push(fn);
 
@@ -499,9 +505,9 @@ export class ChromeBrowser {
       }
     }
 
-    // de-dup
-    const seen = new Set();
-    return makers.filter(fn => { const k = fn.toString(); if (seen.has(k)) return false; seen.add(k); return true; });
+    // Do not de-duplicate by function source: closures for different frames have
+    // identical source text but resolve against different documents.
+    return makers;
   }
 
 
@@ -714,6 +720,7 @@ export class ChromeBrowser {
   async fill({
     selector,
     text,
+    frame,
     placeholder,          // string | RegExp
     role = 'textbox',     // generic default
     attrs,
@@ -729,9 +736,9 @@ export class ChromeBrowser {
 
     const makeCandidates = () => {
       if (strategy === 'strict') {
-        return this._buildFillCandidates({ selector, scope, searchAllFrames });
+        return this._buildFillCandidates({ selector, scope, searchAllFrames, frame });
       }
-      return this._buildFillCandidates({ selector, placeholder, role, attrs, scope, searchAllFrames });
+      return this._buildFillCandidates({ selector, placeholder, role, attrs, scope, searchAllFrames, frame });
     };
 
     return this._withRetries(async () => {
@@ -778,7 +785,7 @@ export class ChromeBrowser {
    * @param {number}          [opts.delayMs=200]       // micro settle
    */
   async click({
-    selector, text, role, attrs, scope,
+    selector, text, role, attrs, scope, frame,
     searchAllFrames = true,
     strategy = 'auto',
     waitFor,   
@@ -794,8 +801,8 @@ export class ChromeBrowser {
 
     // Build your candidates the way you already do (generic/hint-driven)
     const makers = (strategy === 'strict')
-      ? this._buildClickCandidates({ selector, scope, searchAllFrames })
-      : this._buildClickCandidates({ selector, text, role, attrs, scope, searchAllFrames });
+      ? this._buildClickCandidates({ selector, scope, searchAllFrames, frame })
+      : this._buildClickCandidates({ selector, text, role, attrs, scope, searchAllFrames, frame });
 
     // choose & click (same as your generic version)
     let chosen = null;
@@ -1014,8 +1021,56 @@ export class ChromeBrowser {
     // Fallback to empty string if still nothing (keeps caller logic simple)
     if (!html) html = '';
 
+    // page.content() only serializes iframe elements, not their documents. Build a
+    // read-only clone that embeds accessible frame documents so selectors and the
+    // global output limit apply to the complete snapshot.
+    try {
+      html = await this.page.evaluate(() => {
+        const serializeDocument = (doc) => {
+          const clone = doc.documentElement.cloneNode(true);
+          const sourceFrames = Array.from(doc.querySelectorAll('iframe'));
+          const clonedFrames = Array.from(clone.querySelectorAll('iframe'));
+
+          sourceFrames.forEach((sourceFrame, index) => {
+            const clonedFrame = clonedFrames[index];
+            if (!clonedFrame) return;
+            // iframe is a raw-text element in HTML parsers. Use a temporary
+            // custom element so Cheerio parses the embedded controls as markup.
+            const serializedFrame = doc.createElement('testronaut-frame');
+            for (const attribute of Array.from(clonedFrame.attributes)) {
+              serializedFrame.setAttribute(attribute.name, attribute.value);
+            }
+            clonedFrame.replaceWith(serializedFrame);
+            const label = sourceFrame.id || sourceFrame.name || sourceFrame.getAttribute('src') || `frame-${index + 1}`;
+            serializedFrame.setAttribute('data-testronaut-frame', label);
+            try {
+              const childDocument = sourceFrame.contentDocument;
+              if (!childDocument?.documentElement) throw new Error('inaccessible');
+              serializedFrame.setAttribute('data-testronaut-frame-status', 'same-origin');
+              serializedFrame.innerHTML = serializeDocument(childDocument);
+            } catch {
+              serializedFrame.setAttribute('data-testronaut-frame-status', 'cross-origin');
+              serializedFrame.textContent = '[cross-origin frame, content not accessible]';
+            }
+          });
+
+          return clone.outerHTML;
+        };
+        return serializeDocument(document);
+      });
+    } catch {
+      // Preserve the main-document snapshot if serialization races a navigation.
+    }
+
     // --- 4) Optional DOM reduction/cleanup (your existing steps) ---
     let $ = cheerio.load(html);
+
+    // Restore the public marker shape after the HTML parser has materialized
+    // the temporary element's descendants.
+    $('testronaut-frame').each((_, element) => {
+      element.name = 'iframe';
+      element.tagName = 'iframe';
+    });
 
     if (selector) {
       let selection;
@@ -1141,12 +1196,27 @@ export class ChromeBrowser {
   }
 
   
-  async check_text({ text }) {
-    const matches = this.page.getByText(text);
-    const count = await matches.count();
-    for (let index = 0; index < count; index++) {
-      if (await matches.nth(index).isVisible().catch(() => false)) {
-        return `FOUND: ${text}`;
+  async check_text({ text, searchAllFrames = true }) {
+    const mainFrame = this.page.mainFrame?.();
+    const frames = searchAllFrames && this.page.frames
+      ? [mainFrame, ...this.page.frames().filter(frame => frame !== mainFrame)].filter(Boolean)
+      : [mainFrame || this.page];
+
+    for (const frame of frames) {
+      const matches = frame.getByText(text);
+      const count = await matches.count();
+      for (let index = 0; index < count; index++) {
+        if (!await matches.nth(index).isVisible().catch(() => false)) continue;
+        if (frame === mainFrame || frame === this.page) return `FOUND: ${text}`;
+
+        let label = frame.name?.() || '';
+        if (!label) {
+          label = await frame.frameElement?.()
+            .then(element => element.getAttribute('id'))
+            .catch(() => '') || '';
+        }
+        label ||= frame.url?.() || 'unnamed';
+        return `FOUND in frame ${label}: ${text}`;
       }
     }
     return `NOT FOUND: ${text}`;
