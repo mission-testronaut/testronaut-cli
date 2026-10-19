@@ -21,6 +21,12 @@ describe('tools/toolSchema', () => {
     const entry = toolsSchema.find(tool => tool.function.name === 'get_dom');
     expect(entry.function.parameters.properties.selector.type).toBe('string');
   });
+  it('includes press_key with a required key and optional selector', () => {
+    const entry = toolsSchema.find(tool => tool.function.name === 'press_key');
+    expect(entry?.function.parameters.required).toEqual(['key']);
+    expect(entry.function.parameters.properties.key.type).toBe('string');
+    expect(entry.function.parameters.properties.selector.type).toBe('string');
+  });
   it('exposes iframe targeting and iframe text search', () => {
     const fill = toolsSchema.find(tool => tool.function.name === 'fill');
     const click = toolsSchema.find(tool => tool.function.name === 'click');

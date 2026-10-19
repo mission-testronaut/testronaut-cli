@@ -771,6 +771,18 @@ export class ChromeBrowser {
     }, { attempts: 3, baseMs: 250 });
   }
 
+  async press_key({ key, selector }) {
+    if (selector) {
+      const target = this.page.locator(selector).first();
+      await target.focus({ timeout: 3000 });
+    }
+
+    await this.page.keyboard.press(key);
+    return selector
+      ? `pressed ${key} after focusing ${selector}`
+      : `pressed ${key}`;
+  }
+
 
 
   /**
@@ -1525,6 +1537,7 @@ export const CHROME_TOOL_MAP = {
   reload: (b) => b.reload(),
   fill: (b, args) => b.fill(args),
   click: (b, args) => b.click(args),
+  press_key: (b, args) => b.press_key(args),
   get_dom: (b, args, agentMemory) => b.get_dom(args, agentMemory),
   check_text: (b, args) => b.check_text(args),
   click_text: async (browser, args, agentMemory) => {
