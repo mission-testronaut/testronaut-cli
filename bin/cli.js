@@ -1168,12 +1168,32 @@ if (!jsonOutput) {
 
 const runFile = async (filePath) => {
   const modulePath = resolveMissionPath(filePath, { cwd: process.cwd(), missionsRoot });
+  const missionFileStartTime = Date.now();
+  const reportFailure = error => {
+    const missionFileEndTime = Date.now();
+    const message = error?.message || String(error);
+    allResults.push({
+      file: path.relative(process.cwd(), modulePath) || path.basename(modulePath),
+      result: {
+        missionName: path.basename(filePath).replace(/\.mission\.(?:js|ts)$/i, ''),
+        submissionType: 'mission',
+        submissionName: path.basename(filePath),
+        status: 'failed',
+        error: message,
+        steps: [],
+      },
+      startTime: missionFileStartTime,
+      endTime: missionFileEndTime,
+      durationMs: Math.max(0, missionFileEndTime - missionFileStartTime),
+    });
+    return false;
+  };
   try {
     if (!fs.existsSync(modulePath)) {
       const suggestion = closestMissionMatch(filePath, discoveredMissions);
       console.error(`❌ Mission file not found: ${filePath}`);
       if (suggestion) console.error(`   Did you mean "${suggestion}"?`);
-      return false;
+      return reportFailure(new Error(`Mission file not found: ${filePath}`));
     }
     const missionsModule = await loadMissionModule(modulePath);
 
@@ -1184,12 +1204,11 @@ const runFile = async (filePath) => {
 
     if (typeof missionsModule.executeMission === 'function') {
       if (!jsonOutput) terminalUi.phase('launch', path.relative(process.cwd(), modulePath) || filePath);
-      const missionFileStartTime = Date.now();
       const result = await missionsModule.executeMission();
       const missionFileEndTime = Date.now();
       if (result == null) {
         console.error(`❌ Mission did not return a result: ${filePath}`);
-        return false;
+        return reportFailure(new Error(`Mission did not return a result: ${filePath}`));
       }
       allResults.push({
         file: path.relative(process.cwd(), modulePath) || path.basename(modulePath),
@@ -1202,11 +1221,12 @@ const runFile = async (filePath) => {
       return !missionResults.some(item => item?.status === 'failed' || (strictRecovery && item?.status === 'recovered'));
     }
     console.error(`❌ Mission does not export executeMission(): ${filePath}`);
+    return reportFailure(new Error(`Mission does not export executeMission(): ${filePath}`));
   } catch (err) {
     console.error(`❌ Error running mission: ${filePath}`);
     console.error(`   ${err?.message || err}`);
+    return reportFailure(err);
   }
-  return false;
 };
 
 if (args.length > 0) {

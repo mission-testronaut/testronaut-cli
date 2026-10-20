@@ -116,4 +116,16 @@ describe('CLI inspection commands', () => {
     expect(result.status).toBe(0);
     expect(JSON.parse(result.stdout).session).toEqual({ mode: 'shared-auth' });
   });
+
+  it('records a thrown mission as failed instead of omitting it', () => {
+    const result = run(makeProject(), ['missions/login.mission.js', '--json', '--quiet']);
+    expect(result.status).toBe(1);
+    const report = JSON.parse(result.stdout);
+    expect(report.summary).toMatchObject({ totalMissions: 1, passed: 0, failed: 1 });
+    expect(report.missions[0]).toMatchObject({
+      file: 'missions/login.mission.js',
+      status: 'failed',
+      error: 'must not execute',
+    });
+  });
 });
