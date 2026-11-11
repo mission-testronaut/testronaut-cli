@@ -176,7 +176,7 @@ describe('generateHtmlReport', () => {
           event: 'javascript_dialog',
           type: 'prompt',
           message: 'Name the suspicious crewmate:',
-          defaultValue: 'Red',
+          defaultValueProvided: true,
           inputProvided: true,
           action: 'accept',
           matched: true,

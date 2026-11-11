@@ -163,7 +163,9 @@ export class ChromeBrowser {
       event: 'javascript_dialog',
       type,
       message,
-      defaultValue: dialog.defaultValue(),
+      // Prompt defaults can contain user or application secrets. Reports only
+      // need to know whether one existed, never its raw value.
+      defaultValueProvided: Boolean(dialog.defaultValue()),
       pageUrl: page?.url?.() || null,
       appearedAt: new Date(now).toISOString(),
       ruleId: rule?.id || null,

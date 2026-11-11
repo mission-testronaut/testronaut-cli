@@ -140,7 +140,7 @@ export function generateHtmlReport(report, outputPath) {
           <div class="dialog-window">
             <div class="dialog-title"><span class="dialog-icon">!</span><strong>Browser-native ${esc(type)}</strong></div>
             <div class="dialog-message">${esc(dialog.message || '(browser supplied no message)')}</div>
-            ${type === 'prompt' ? `<div class="dialog-input">${dialog.inputProvided ? '•••••••• · input provided' : esc(dialog.defaultValue || 'No input provided')}</div>` : ''}
+            ${type === 'prompt' ? `<div class="dialog-input">${dialog.inputProvided ? '•••••••• · input provided' : dialog.defaultValueProvided ? '•••••••• · default value present' : 'No input provided'}</div>` : ''}
             <div class="dialog-actions">
               <span class="dialog-button ${accepted ? 'chosen' : ''}">${esc(acceptLabel)}</span>
               <span class="dialog-button ${!accepted ? 'chosen' : ''}">${esc(dismissLabel)}</span>

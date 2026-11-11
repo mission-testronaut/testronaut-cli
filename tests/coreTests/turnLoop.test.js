@@ -187,7 +187,7 @@ describe('turnLoop', () => {
       event: 'javascript_dialog',
       type: 'confirm',
       message: 'Emergency meeting! Attend?',
-      defaultValue: '',
+      defaultValueProvided: false,
       pageUrl: 'https://example.test/dashboard',
       matched: true,
       expected: true,
