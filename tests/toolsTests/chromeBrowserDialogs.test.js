@@ -50,6 +50,8 @@ describe('ChromeBrowser JavaScript dialogs', () => {
       matched: true,
       outcome: action,
     });
+    expect(event).not.toHaveProperty('defaultValue');
+    expect(event.defaultValueProvided).toBe(Boolean(input));
   });
 
   it('dismisses and reports an unexpected dialog while retaining a nonmatching rule', async () => {
