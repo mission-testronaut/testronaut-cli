@@ -59,6 +59,9 @@ export class ChromeBrowser {
     this.debugEnabled = !!options.debug;
     this._domLimitLogged = false;
     this.storageStatePath = options.storageStatePath;
+    this.dialogRules = [];
+    this.dialogEvents = [];
+    this._dialogRuleSequence = 0;
 
     const defaultResourceGuard = {
       enabled: true,
@@ -98,6 +101,13 @@ export class ChromeBrowser {
     this.currentId = id;
     this.page = page;
 
+    // Playwright blocks the action that opened a JavaScript dialog until the
+    // dialog is handled. Keep this listener synchronous and always resolve the
+    // dialog so an unexpected alert can never hang a mission.
+    page.on('dialog', dialog => {
+      void this._handleDialog(dialog, page);
+    });
+
     page.on('close', () => {
       // remove from registry
       this.pages = this.pages.filter(p => p.id !== id);
@@ -113,6 +123,115 @@ export class ChromeBrowser {
     });
 
     return id;
+  }
+
+  _expireDialogRules(now = Date.now()) {
+    const active = [];
+    for (const rule of this.dialogRules) {
+      if (rule.expiresAt > now) {
+        active.push(rule);
+        continue;
+      }
+      this.dialogEvents.push({
+        event: 'dialog_rule_expired',
+        ruleId: rule.id,
+        expectedType: rule.type,
+        expectedMessage: rule.message,
+        messageIncludes: rule.messageIncludes,
+        action: rule.action,
+        armedAt: new Date(rule.armedAt).toISOString(),
+        expiredAt: new Date(rule.expiresAt).toISOString(),
+        outcome: 'timeout',
+      });
+    }
+    this.dialogRules = active;
+  }
+
+  async _handleDialog(dialog, page) {
+    const now = Date.now();
+    this._expireDialogRules(now);
+    const type = dialog.type();
+    const message = dialog.message();
+    const matchingIndex = this.dialogRules.findIndex(rule =>
+      rule.type === type
+      && (rule.message === undefined || rule.message === message)
+      && (rule.messageIncludes === undefined || message.includes(rule.messageIncludes))
+    );
+    const rule = matchingIndex >= 0 ? this.dialogRules.splice(matchingIndex, 1)[0] : null;
+    const action = rule?.action || 'dismiss';
+    const record = {
+      event: 'javascript_dialog',
+      type,
+      message,
+      defaultValue: dialog.defaultValue(),
+      pageUrl: page?.url?.() || null,
+      appearedAt: new Date(now).toISOString(),
+      ruleId: rule?.id || null,
+      matched: Boolean(rule),
+      expected: Boolean(rule),
+      action,
+      inputProvided: rule?.input !== undefined,
+      outcome: 'pending',
+    };
+
+    try {
+      if (action === 'accept') await dialog.accept(rule?.input);
+      else await dialog.dismiss();
+      record.outcome = rule ? action : 'unexpected_dialog_dismissed';
+    } catch (error) {
+      record.outcome = 'response_failed';
+      record.error = error?.message || String(error);
+      // A second response can fail if the page closed. Never mask that fact.
+    }
+    record.respondedAt = new Date().toISOString();
+    this.dialogEvents.push(record);
+  }
+
+  prepare_dialog_response({
+    action,
+    type,
+    message,
+    messageIncludes,
+    input,
+    timeoutMs = 10_000,
+  } = {}) {
+    const supportedTypes = new Set(['alert', 'confirm', 'prompt', 'beforeunload']);
+    if (!supportedTypes.has(type)) throw new Error(`Unsupported dialog type: ${type || '(missing)'}`);
+    if (!['accept', 'dismiss'].includes(action)) throw new Error('Dialog action must be "accept" or "dismiss".');
+    if (message !== undefined && messageIncludes !== undefined) {
+      throw new Error('Use either message or messageIncludes, not both.');
+    }
+    if (input !== undefined && (type !== 'prompt' || action !== 'accept')) {
+      throw new Error('Dialog input is only supported when accepting a prompt.');
+    }
+    const boundedTimeout = Math.min(30_000, Math.max(250, Number(timeoutMs) || 10_000));
+    const armedAt = Date.now();
+    const rule = {
+      id: `dialog_${++this._dialogRuleSequence}`,
+      action,
+      type,
+      message,
+      messageIncludes,
+      input,
+      armedAt,
+      expiresAt: armedAt + boundedTimeout,
+    };
+    this.dialogRules.push(rule);
+    return {
+      armed: true,
+      ruleId: rule.id,
+      action,
+      type,
+      message,
+      messageIncludes,
+      inputProvided: input !== undefined,
+      timeoutMs: boundedTimeout,
+    };
+  }
+
+  drainDialogEvents() {
+    this._expireDialogRules();
+    return this.dialogEvents.splice(0);
   }
 
   _switchTo(target) {
@@ -1538,6 +1657,7 @@ export const CHROME_TOOL_MAP = {
   fill: (b, args) => b.fill(args),
   click: (b, args) => b.click(args),
   press_key: (b, args) => b.press_key(args),
+  prepare_dialog_response: (b, args) => b.prepare_dialog_response(args),
   get_dom: (b, args, agentMemory) => b.get_dom(args, agentMemory),
   check_text: (b, args) => b.check_text(args),
   click_text: async (browser, args, agentMemory) => {
