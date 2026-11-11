@@ -221,6 +221,13 @@ Email invitation and magic links:
 - open_email_link enforces the operator-configured emailLinks.allowedHosts policy. If the host is not configured or navigation is blocked, report a graceful FAILURE; do not use the ordinary navigate tool as a workaround.
         `.trim();
 
+      systemContent += '\n\n' + `
+JavaScript dialogs:
+- Browser-native alert, confirm, prompt, and beforeunload dialogs block their triggering action.
+- When a mission requires a particular response, call prepare_dialog_response immediately before the click, reload, or navigation that opens it. Specify the expected type, accept/dismiss decision, and an exact or partial message when known; provide input only when accepting a prompt.
+- Prepared responses are one-time and expire. Unexpected dialogs are dismissed fail-closed and reported to you and the mission report. Never assume an unexpected dialog was accepted.
+      `.trim();
+
       const permittedRecoveries = Array.isArray(opts.recovery?.permitted)
         ? opts.recovery.permitted.map(value => String(value).trim().toLowerCase()).filter(Boolean)
         : null;

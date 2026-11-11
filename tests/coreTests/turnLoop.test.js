@@ -182,6 +182,56 @@ describe('turnLoop', () => {
     expect(shared.chromeToolSpies.get_dom).not.toHaveBeenCalled();
   });
 
+  it('reports browser-native dialog appearance and response to the model and mission step', async () => {
+    const dialog = {
+      event: 'javascript_dialog',
+      type: 'confirm',
+      message: 'Emergency meeting! Attend?',
+      defaultValueProvided: false,
+      pageUrl: 'https://example.test/dashboard',
+      matched: true,
+      expected: true,
+      action: 'accept',
+      outcome: 'accept',
+    };
+    browser.drainDialogEvents = vi.fn()
+      .mockReturnValueOnce([dialog])
+      .mockReturnValue([]);
+    shared.chatMock
+      .mockResolvedValueOnce({
+        message: {
+          role: 'assistant',
+          content: '',
+          tool_calls: [{
+            id: 'dialog_click',
+            type: 'function',
+            function: { name: 'click_text', arguments: '{"text":"Request attendance"}' },
+          }],
+        },
+        usage: { total_tokens: 10 },
+        headers: {},
+      })
+      .mockResolvedValueOnce({
+        message: { role: 'assistant', content: 'FINAL: success' },
+        usage: { total_tokens: 5 },
+        headers: {},
+      });
+
+    const result = await turnLoop(browser, baseMessages(), 2, 0, 0, {}, {
+      steps: [],
+      missionName: 'dialogs',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.steps[0].dialogs).toEqual([dialog]);
+    expect(result.steps[0].events).toContain(
+      '💬 expected confirm dialog: "Emergency meeting! Attend?" → accept',
+    );
+    const secondRequest = shared.chatMock.mock.calls[1][0].messages;
+    const response = secondRequest.find(message => message.tool_call_id === 'dialog_click');
+    expect(JSON.parse(response.content).dialogs).toEqual([dialog]);
+  });
+
   it('uses one tool-free closure turn after the working-turn budget is exhausted', async () => {
     shared.chatMock
       .mockResolvedValueOnce({

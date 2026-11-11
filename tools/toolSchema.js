@@ -99,6 +99,26 @@ const toolsSchema = [
   {
     type: 'function',
     function: {
+      name: 'prepare_dialog_response',
+      description: 'Arm a one-time response for the next matching JavaScript alert, confirm, prompt, or beforeunload dialog. Call immediately before the action that opens it. Unexpected dialogs are dismissed and reported.',
+      parameters: {
+        type: 'object',
+        properties: {
+          type: { type: 'string', enum: ['alert', 'confirm', 'prompt', 'beforeunload'] },
+          action: { type: 'string', enum: ['accept', 'dismiss'] },
+          message: { type: 'string', description: 'Optional exact message match.' },
+          messageIncludes: { type: 'string', description: 'Optional substring message match. Cannot be combined with message.' },
+          input: { type: 'string', description: 'Prompt text; valid only when accepting a prompt.' },
+          timeoutMs: { type: 'number', default: 10000, minimum: 250, maximum: 30000 },
+        },
+        required: ['type', 'action'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'get_dom',
       description: 'Return trimmed HTML from the current page',
       parameters: {

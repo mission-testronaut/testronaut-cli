@@ -165,6 +165,36 @@ describe('generateHtmlReport', () => {
     expect(html).not.toContain('<strong>LLM:</strong>');
   });
 
+  it('renders native dialog evidence as a clearly labeled report visualization', () => {
+    const outPath = path.join(tmpDir, 'dialogs.html');
+    generateHtmlReport({ missions: [{
+      missionName: 'Dialogs', status: 'passed', steps: [{
+        turn: 0,
+        result: '✅ Passed',
+        events: ['dialog handled'],
+        dialogs: [{
+          event: 'javascript_dialog',
+          type: 'prompt',
+          message: 'Name the suspicious crewmate:',
+          defaultValueProvided: true,
+          inputProvided: true,
+          action: 'accept',
+          matched: true,
+          outcome: 'accept',
+          pageUrl: 'https://example.test/dashboard',
+        }],
+      }],
+    }] }, outPath);
+
+    const html = fs.readFileSync(outPath, 'utf8');
+    expect(html).toContain('Report visualization · not a literal browser screenshot');
+    expect(html).toContain('Browser-native prompt');
+    expect(html).toContain('Name the suspicious crewmate:');
+    expect(html).toContain('•••••••• · input provided');
+    expect(html).toContain('dialog-button chosen">Accept');
+    expect(html).not.toContain('>Red</div>');
+  });
+
   it('renders run, mission, and step Jev token spend', () => {
     const steps = [{
       turn: 0,
