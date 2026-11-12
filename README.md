@@ -622,6 +622,20 @@ Each includes:
 - Screenshots
 - Pass/Fail summaries
 
+### Status language
+
+Turn and tool statuses describe different layers of a run:
+
+- `🛰️ Engaged` means a tool invocation ran without a structured operation verdict. It does not mean the goal was achieved.
+- `✅ Action confirmed` and `⚠️ Action unconfirmed` reflect an explicit structured tool outcome such as `ok` or `passed`.
+- `🚀 Progressing` marks an intermediate turn. Intermediate turns are not pass/fail verdicts.
+- `🔄 Replotting course` and `⚠️ Navigation issue` identify retries and tool/action problems.
+- `✅ Mission accomplished · evidence recorded` means the successful verdict is supported by recorded browser observations, screenshots, matched dialogs, or assertion results.
+- `✅ Mission accomplished · independently verified` means a separate verifier such as the Jev completion gate confirmed the outcome.
+- `⚠️ Completion reported · limited evidence` means the model declared success without enough supporting evidence in the trace. `❌ Mission incomplete` is the final failure outcome. Reports retain the machine-readable `passed`, `recovered`, and `failed` mission statuses for compatibility.
+
+For example, clicking **Create Work Package** can be an engaged or confirmed action while the mission remains **Progressing**. Creation should only be described as confirmed after evidence shows that the work package exists.
+
 ---
 
 ## 🧪 Under the Hood
