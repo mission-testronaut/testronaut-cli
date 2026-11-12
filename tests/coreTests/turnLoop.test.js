@@ -345,7 +345,8 @@ describe('turnLoop', () => {
       });
 
       expect(result.success).toBe(true);
-      expect(result.steps[0].result).toBe('⚠️ Completion reported · limited evidence');
+      expect(result.steps[0].result).toBe('✅ Mission accomplished · evidence recorded');
+      expect(result.evidenceRecorded).toBe(true);
       expect(result.steps[0].jevShadow).toMatchObject({
         status: 'ok',
         model: 'jev-test',

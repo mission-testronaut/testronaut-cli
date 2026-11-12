@@ -237,6 +237,12 @@ export async function runMissions({ preMission, mission, postMission, tags = [],
 
   for (const result of success) {
     result.tags = result.submissionType === 'mission' ? missionTags : [];
+    const terminalResult = result.steps?.at(-1)?.result || '';
+    // Preserve compatibility with older/custom agents that communicate the
+    // terminal verdict through step text but return an inconsistent status.
+    if (/\bfailure\b|mission incomplete/i.test(terminalResult)) {
+      result.status = 'failed';
+    }
   }
 
   const failed = success.some(result => result.status === 'failed');
