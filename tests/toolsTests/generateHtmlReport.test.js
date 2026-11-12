@@ -18,6 +18,28 @@ afterEach(() => {
 });
 
 describe('generateHtmlReport', () => {
+  it('distinguishes evidence-backed completion from limited-evidence reports', () => {
+    const outPath = path.join(tmpDir, 'verification-levels.html');
+    generateHtmlReport({ missions: [{
+      missionName: 'Work package',
+      status: 'passed',
+      verification: 'limited_evidence',
+      steps: [{ turn: 0, result: '⚠️ Completion reported · limited evidence' }],
+    }, {
+      missionName: 'Dialogs',
+      status: 'passed',
+      verification: 'evidence_recorded',
+      steps: [{ turn: 0, result: '✅ Mission accomplished · evidence recorded' }],
+    }] }, outPath);
+
+    const html = fs.readFileSync(outPath, 'utf8');
+    expect(html).toContain('⚠️ Passed · limited evidence');
+    expect(html).toContain('⚠️ Completion reported · limited evidence');
+    expect(html).toContain('✅ Passed · evidence recorded');
+    expect(html).toContain('✅ Mission accomplished · evidence recorded');
+    expect(html).toContain('step-result warn');
+  });
+
   it('renders recovered status and recovery evidence', () => {
     const outPath = path.join(tmpDir, 'recovered.html');
     generateHtmlReport({ summary: { passed: 0, recovered: 1, failed: 0 }, missions: [{
@@ -55,7 +77,7 @@ describe('generateHtmlReport', () => {
         submissionType: 'mission',
         status: 'passed',
         durationMs: 2500,
-        steps: [{ turn: 0, result: '✅ Mission Success', durationMs: 1250 }],
+        steps: [{ turn: 0, result: '✅ Mission accomplished', durationMs: 1250 }],
       }],
     };
     const outPath = path.join(tmpDir, 'timed.html');
@@ -85,7 +107,7 @@ describe('generateHtmlReport', () => {
               retryAttempt: 2,
               retryLimit: 5,
               events: ['did something'],
-              result: '⚠️ Turn Issues',
+              result: '⚠️ Navigation issue',
               summary: 'Do thing',
               tokensUsed: 10,
               totalTokensUsed: 20,
@@ -108,7 +130,7 @@ describe('generateHtmlReport', () => {
     expect(html).toContain('--cyan:#79d7df');
     expect(html).toContain('Mission A');
     expect(html).toContain('Turn 1 (re-attempt 1/5)');
-    expect(html).toContain('⚠️ Turn Issues');
+    expect(html).toContain('⚠️ Navigation issue');
     expect(html).toContain('data-tag="smoke"');
     expect(html).toContain('data-tags="smoke"');
     expect(html).toContain('CLI version:</strong> 1.7.0');
@@ -137,7 +159,7 @@ describe('generateHtmlReport', () => {
               turn: 0,
               retryAttempt: 1,
               events: ['<script>alert(1)</script>'],
-              result: '✅ Passed',
+              result: '🚀 Progressing',
               summary: '<b>bold</b>',
             },
           ],
@@ -170,7 +192,7 @@ describe('generateHtmlReport', () => {
     generateHtmlReport({ missions: [{
       missionName: 'Dialogs', status: 'passed', steps: [{
         turn: 0,
-        result: '✅ Passed',
+        result: '🚀 Progressing',
         events: ['dialog handled'],
         dialogs: [{
           event: 'javascript_dialog',
@@ -198,7 +220,7 @@ describe('generateHtmlReport', () => {
   it('renders run, mission, and step Jev token spend', () => {
     const steps = [{
       turn: 0,
-      result: '✅ Mission Success (Jev gate)',
+      result: '✅ Mission accomplished (Jev verified)',
       tokensUsed: 500,
       inputTokens: 450,
       outputTokens: 50,
@@ -248,8 +270,8 @@ describe('generateHtmlReport', () => {
       optimization: { configured: true, objective: 'cost', mode: 'live' },
       missions: [{
         missionName: 'Routed Mission', status: 'passed', steps: [
-          { turn: 0, model: 'gpt-5.6-terra', tokensUsed: 100, inputTokens: 90, outputTokens: 10, result: '✅ Passed' },
-          { turn: 1, model: 'gpt-5.6-luna', tokensUsed: 40, inputTokens: 35, outputTokens: 5, result: '✅ Passed', modelRouting: { applied: true } },
+          { turn: 0, model: 'gpt-5.6-terra', tokensUsed: 100, inputTokens: 90, outputTokens: 10, result: '🚀 Progressing' },
+          { turn: 1, model: 'gpt-5.6-luna', tokensUsed: 40, inputTokens: 35, outputTokens: 5, result: '🚀 Progressing', modelRouting: { applied: true } },
         ],
       }],
     }, outPath);

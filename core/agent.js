@@ -99,7 +99,7 @@ export async function runAgent(goals, missionName, maxTurns = 20, retryLimit, op
           const step = {
             turn: 0,
             events: [`📡 Launch protocol probe passed: ${protocol.id}`],
-            result: '✅ Mission Success',
+            result: '✅ Mission accomplished',
             summary: `Reused launch protocol ${protocol.id}`,
             missionName,
             tokensUsed: 0,
@@ -117,6 +117,7 @@ export async function runAgent(goals, missionName, maxTurns = 20, retryLimit, op
             startTime: now,
             endTime: now,
             durationMs: 0,
+            verification: 'verified',
             telemetry: [],
             launchProtocol: { id: protocol.id, status: 'reused', probe: 'passed' },
           });
@@ -321,6 +322,10 @@ JavaScript dialogs:
         submissionType: goal.submissionType || goal.label,
         submissionName: goal.submissionName || null,
         status: succeeded ? (recoveries.length ? 'recovered' : 'passed') : 'failed',
+        verification: succeeded
+          ? (result?.completedBy === 'jev_gate' ? 'verified' : result?.evidenceRecorded ? 'evidence_recorded' : 'limited_evidence')
+          : 'failed',
+        ...(result?.evidenceSources?.length ? { evidenceSources: result.evidenceSources } : {}),
         steps: JSON.parse(JSON.stringify(compact)), // last 20 (by memory design)
         stepFile, // full history is in this JSONL (one step per line)
         startTime: goalStartTime,
@@ -342,7 +347,10 @@ JavaScript dialogs:
       }
     }
 
-    console.log('✅ All goals completed successfully.\n');
+    const limitedEvidence = missionResults.some(mission => mission.verification === 'limited_evidence');
+    console.log(limitedEvidence
+      ? '⚠️ Completion reported · limited evidence.\n'
+      : '✅ Mission accomplished.\n');
     return missionResults;
   } finally {
     await browser.close();

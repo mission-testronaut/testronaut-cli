@@ -41,7 +41,10 @@ export function generateHtmlReport(report, outputPath) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
-  const badge = (status) =>
+  const badge = (status, verification) =>
+    status === 'passed' && verification === 'verified' ? '✅ Passed · independently verified' :
+    status === 'passed' && verification === 'evidence_recorded' ? '✅ Passed · evidence recorded' :
+    status === 'passed' && verification === 'limited_evidence' ? '⚠️ Passed · limited evidence' :
     status === 'passed' ? '✅ Passed' :
     status === 'recovered' ? '⚠️ Passed after recovery' :
     status === 'failed' ? '❌ Failed' : (status || '—');
@@ -105,10 +108,14 @@ export function generateHtmlReport(report, outputPath) {
     const stepItems = steps.map((step, idx) => {
       const events = Array.isArray(step.events) ? step.events : [];
       const dialogs = Array.isArray(step.dialogs) ? step.dialogs : [];
-      const ok = /✅|Passed|Mission Success/i.test(step.result || '');
+      const ok = /Mission accomplished|Mission Success|Action confirmed/i.test(step.result || '');
+      const progressing = /Progressing|Replotting course|Awaiting mission verdict|^✅ Passed$/i.test(step.result || '');
+      const reported = /Completion reported|limited evidence/i.test(step.result || '');
       const resultRaw = step.result || '—';
-      const resultTooltip = resultRaw.includes('⚠️ Turn Issues')
+      const resultTooltip = /Navigation issue|Turn Issues/.test(resultRaw)
         ? 'Turn had tool/action issues (e.g., selector/timeouts). It may not indicate a product bug.'
+        : progressing
+          ? 'Intermediate activity only; this does not indicate mission completion.'
         : '';
       const retryAttempt = step.retryAttempt || 1; // includes initial
       const retryLimit = step.retryLimit; // number of retries allowed (excludes initial)
@@ -175,12 +182,12 @@ export function generateHtmlReport(report, outputPath) {
         : '';
 
       return `
-        <details class="step" ${ok ? '' : 'open'}>
+        <details class="step" ${ok || progressing || reported ? '' : 'open'}>
           <summary>
             <span class="turn">${step.isClosureTurn ? 'Closure' : `Turn ${esc((step.turn ?? idx) + 1)}`}${esc(attemptLabel)}${stepDuration}</span>
             ${humanInput}
             ${planSpan}
-            <span class="step-result ${ok ? 'ok' : 'bad'}" ${resultTooltip ? `title="${esc(resultTooltip)}"` : ''}>${esc(resultRaw)}</span>
+            <span class="step-result ${ok ? 'ok' : reported ? 'warn' : progressing ? '' : 'bad'}" ${resultTooltip ? `title="${esc(resultTooltip)}"` : ''}>${esc(resultRaw)}</span>
             <span class="tokens">${esc(step.model || llm.model || 'Model')} tokens: ${esc(step.tokensUsed ?? '—')} (${esc(step.inputTokens ?? '—')} in / ${esc(step.outputTokens ?? '—')} out)${routeLabel}${stepJev}</span>
           </summary>
           ${dialogCards ? `<div class="dialog-evidence">${dialogCards}</div>` : ''}
@@ -193,7 +200,7 @@ export function generateHtmlReport(report, outputPath) {
     const type = String(m.submissionType || 'mission').toLowerCase();
     const typeLabel = (type === 'premission' || type === 'postmission') ? type : 'mission';
     const prettyTitle = `${esc(m.missionName || 'Mission')} — ${typeLabel}${m.submissionName ? `: ${esc(m.submissionName)}` : ''}`;
-    const statusClass = m.status === 'failed' ? 'bad' : (m.status === 'recovered' ? 'warn' : (m.status === 'passed' ? 'ok' : ''));
+    const statusClass = m.status === 'failed' ? 'bad' : (m.status === 'recovered' || m.verification === 'limited_evidence' ? 'warn' : (m.status === 'passed' ? 'ok' : ''));
     const recoveries = Array.isArray(m.recoveries) ? m.recoveries : [];
     const recoveryItems = recoveries.length ? `
       <div class="recoveries">
@@ -205,7 +212,7 @@ export function generateHtmlReport(report, outputPath) {
       <details class="mission-submission">
         <summary>
           <span class="name">${prettyTitle}</span>
-          <span class="status ${statusClass}">${badge(m.status)}</span>
+          <span class="status ${statusClass}">${badge(m.status, m.verification)}</span>
           <span class="meta">steps: ${steps.length} • duration: ${mDurationSec}s • ${esc(tokenMeta(missionModelUsage, missionJevUsage))}</span>
           <span class="toolbar">
             <button class="btn-mini toggle" data-scope="submission" aria-label="Expand">▼</button>
@@ -232,6 +239,15 @@ export function generateHtmlReport(report, outputPath) {
 
   const missionGroupBlock = (missionName, subs) => {
     const status = groupStatus(subs);
+    const verification = status === 'passed'
+      ? subs.some(s => s.verification === 'limited_evidence')
+        ? 'limited_evidence'
+        : subs.every(s => s.verification === 'verified')
+          ? 'verified'
+          : subs.some(s => s.verification === 'evidence_recorded')
+            ? 'evidence_recorded'
+            : undefined
+      : undefined;
     const totalSteps = subs.reduce((n, s) => n + (Array.isArray(s.steps) ? s.steps.length : 0), 0);
     const startTimes = subs.map(s => s.startTime || 0).filter(Boolean);
     const endTimes = subs.map(s => s.endTime || 0).filter(Boolean);
@@ -255,7 +271,7 @@ export function generateHtmlReport(report, outputPath) {
         <summary>
           <span class="name">${esc(missionName)}</span>
           <span class="mission-tags">${tags.map(tag => `<span class="tag-small" style="${tagStyle(tag)}">${esc(tag)}</span>`).join('')}</span>
-          <span class="status ${status === 'failed' ? 'bad' : status === 'recovered' ? 'warn' : 'ok'}">${badge(status)}</span>
+          <span class="status ${status === 'failed' ? 'bad' : status === 'recovered' || verification === 'limited_evidence' ? 'warn' : 'ok'}">${badge(status, verification)}</span>
           <span class="meta">${sourceFiles.length ? `${sourceFiles.map(esc).join(', ')} • ` : ''}submissions: ${subs.length} • steps: ${totalSteps} • duration: ${groupDur}s • ${esc(tokenMeta(groupModelUsage, groupJevUsage))}</span>
           <span class="toolbar">
             <button class="btn-mini toggle" data-scope="mission" aria-label="Expand">▼</button>
@@ -448,6 +464,7 @@ export function generateHtmlReport(report, outputPath) {
       white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
     }
     .step-result.ok{ color: var(--ok); font-weight:700; }
+    .step-result.warn{ color: var(--amber); font-weight:700; }
     .step-result.bad{ color: var(--bad); font-weight:700; }
     .tokens{ color: var(--text-muted); font-size:12px; margin-left:auto; font-variant-numeric: tabular-nums; }
 

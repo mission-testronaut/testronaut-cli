@@ -189,6 +189,27 @@ async function captureBrowserEvidence(browser, html, previous) {
   return mergeBrowserControlState(evidence, states);
 }
 
+function collectMissionEvidenceSources(recordedSteps, agentMemory) {
+  const sources = new Set();
+  if (agentMemory?.browserEvidence) sources.add('browser_state');
+
+  for (const recordedStep of recordedSteps) {
+    if (recordedStep?.screenshotPath) sources.add('screenshot');
+    if (recordedStep?.dialogs?.some(dialog => dialog?.matched && dialog?.expected)) {
+      sources.add('matched_dialog');
+    }
+    const events = Array.isArray(recordedStep?.events) ? recordedStep.events : [];
+    if (events.some(event => /\[model\] → (?:get_dom|check_text|probe)\b/.test(event))) {
+      sources.add('browser_observation');
+    }
+    if (events.some(event => /\[tool \] ← FOUND:/.test(event))) {
+      sources.add('assertion_result');
+    }
+  }
+
+  return [...sources];
+}
+
 /**
  * Utility: format byte counts into human-readable strings.
  * Used when reporting upload/download events in mission logs.
@@ -402,7 +423,7 @@ export const turnLoop = async (
 
     step.jevGate = { triggered: true, ...gate };
     step.events.push(`🔬 Jev completion gate triggered at ${Math.round(gate.threshold * 100)}% threshold`);
-    step.result = '✅ Mission Success (Jev gate)';
+    step.result = '✅ Mission accomplished (Jev verified)';
     recordStep(step);
     const finalMessage = 'SUCCESS: Jev completion gate found sufficient browser evidence.';
     return { success: true, finalMessage, steps: stepsArchive, completedBy: 'jev_gate' };
@@ -837,7 +858,21 @@ export const turnLoop = async (
           // non-JSON results ignored
         }
 
-        let toolStatusLabel = errorMessage ? '❌ Failed' : '✅ Success';
+        // A tool returning without throwing only proves that its invocation ran.
+        // It does not prove that the requested operation or mission goal succeeded.
+        let toolStatusLabel = errorMessage ? '❌ System fault' : '🛰️ Engaged';
+        if (!errorMessage) {
+          try {
+            const parsed = JSON.parse(result);
+            const operationOutcome = typeof parsed?.ok === 'boolean'
+              ? parsed.ok
+              : (typeof parsed?.passed === 'boolean' ? parsed.passed : null);
+            if (operationOutcome === true) toolStatusLabel = '✅ Action confirmed';
+            if (operationOutcome === false) toolStatusLabel = '⚠️ Action unconfirmed';
+          } catch {
+            // Strings and other unstructured results remain transport-level "Engaged".
+          }
+        }
         if (fnName === 'get_mfa_code' && !errorMessage) {
           try {
             const parsed = JSON.parse(result);
@@ -1029,7 +1064,7 @@ export const turnLoop = async (
         if (gatedResult) return gatedResult;
       }
       if (hadToolIssues && turnRetries < retryLimitClamped) {
-        step.result = '⏳ Retrying turn';
+        step.result = '🔄 Replotting course';
         const retryNumber = attempt - 1;
         step.events.push(`🔁 Re-attempt ${retryNumber}/${retryLimitClamped} after tool issues`);
         recordStep(step);
@@ -1043,7 +1078,7 @@ export const turnLoop = async (
 
       // reset retries after a clean turn or after exhausting retries
       turnRetries = 0;
-      step.result = hadToolIssues ? '⚠️ Turn Issues' : '✅ Passed';
+      step.result = hadToolIssues ? '⚠️ Navigation issue' : '🚀 Progressing';
       recordStep(step);
       continue;
     }
@@ -1073,10 +1108,15 @@ export const turnLoop = async (
       }
       await recordJevShadow(step, msg, 'final_response');
       step.events.push(finalResponse.finalMessage);
-      step.result = finalResponse.success ? '✅ Mission Success' : '❌ Mission Failure';
+      const evidenceSources = collectMissionEvidenceSources([...stepsArchive, step], agentMemory);
+      const evidenceRecorded = finalResponse.success && evidenceSources.length > 0;
+      step.result = finalResponse.success
+        ? evidenceRecorded ? '✅ Mission accomplished · evidence recorded' : '⚠️ Completion reported · limited evidence'
+        : '❌ Mission incomplete';
+      if (finalResponse.success) step.verification = { level: evidenceRecorded ? 'evidence_recorded' : 'limited_evidence', sources: evidenceSources };
       recordStep(step);
       turnRetries = 0;
-      return { success: finalResponse.success, finalMessage: finalResponse.finalMessage, steps: stepsArchive };
+      return { success: finalResponse.success, finalMessage: finalResponse.finalMessage, steps: stepsArchive, evidenceRecorded, evidenceSources };
     }
 
     // ─────────────────────────────────────────────
@@ -1104,7 +1144,7 @@ export const turnLoop = async (
     retryAttempt: 1,
     retryLimit: 0,
     events: ['⏱️ Working-turn budget exhausted; requesting final mission verdict.'],
-    result: '🟡 Awaiting Closure',
+    result: '📡 Awaiting mission verdict',
     missionName,
     provider: PROVIDER_ID,
     model: MODEL_ID,
@@ -1128,13 +1168,20 @@ export const turnLoop = async (
     const finalResponse = finalResponseHandler(msg);
     if (finalResponse) {
       closureStep.events.push(finalResponse.finalMessage);
-      closureStep.result = finalResponse.success ? '✅ Mission Success' : '❌ Mission Failure';
+      const evidenceSources = collectMissionEvidenceSources([...stepsArchive, closureStep], agentMemory);
+      const evidenceRecorded = finalResponse.success && evidenceSources.length > 0;
+      closureStep.result = finalResponse.success
+        ? evidenceRecorded ? '✅ Mission accomplished · evidence recorded' : '⚠️ Completion reported · limited evidence'
+        : '❌ Mission incomplete';
+      if (finalResponse.success) closureStep.verification = { level: evidenceRecorded ? 'evidence_recorded' : 'limited_evidence', sources: evidenceSources };
       recordStep(closureStep);
       return {
         success: finalResponse.success,
         finalMessage: finalResponse.finalMessage,
         steps: stepsArchive,
         completedBy: 'budget_closure',
+        evidenceRecorded,
+        evidenceSources,
       };
     }
     closureStep.events.push('FAILURE: The closure response did not provide an explicit SUCCESS or FAILURE verdict.');
@@ -1142,7 +1189,7 @@ export const turnLoop = async (
     closureStep.events.push(`FAILURE: Unable to obtain the closure verdict: ${error?.message || error}`);
   }
 
-  closureStep.result = '❌ Mission Failure';
+  closureStep.result = '❌ Mission incomplete';
   recordStep(closureStep);
   return {
     success: false,
