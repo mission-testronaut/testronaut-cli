@@ -104,6 +104,7 @@ export function generateHtmlReport(report, outputPath) {
     const missionModelUsage = summarizeModelTokens(steps);
     const stepItems = steps.map((step, idx) => {
       const events = Array.isArray(step.events) ? step.events : [];
+      const dialogs = Array.isArray(step.dialogs) ? step.dialogs : [];
       const ok = /✅|Passed|Mission Success/i.test(step.result || '');
       const resultRaw = step.result || '—';
       const resultTooltip = resultRaw.includes('⚠️ Turn Issues')
@@ -122,6 +123,36 @@ export function generateHtmlReport(report, outputPath) {
       const imgTag = step.screenshotPath
         ? `<img src="${esc(step.screenshotPath)}" alt="screenshot turn ${esc(step.turn ?? idx)}">`
         : '';
+      const dialogCards = dialogs.map(dialog => {
+        if (dialog.event === 'dialog_rule_expired') {
+          return `<article class="dialog-card dialog-timeout">
+            <div class="dialog-card-label">Report visualization · response timeout</div>
+            <strong>${esc(dialog.expectedType || 'dialog')} rule expired</strong>
+            <span>No matching dialog appeared before ${esc(dialog.ruleId || 'the prepared response')} expired.</span>
+          </article>`;
+        }
+        const type = String(dialog.type || 'dialog');
+        const accepted = dialog.action === 'accept';
+        const acceptLabel = type === 'beforeunload' ? 'Leave' : 'Accept';
+        const dismissLabel = type === 'beforeunload' ? 'Stay' : 'Dismiss';
+        return `<article class="dialog-card ${dialog.matched ? 'dialog-expected' : 'dialog-unexpected'}">
+          <div class="dialog-card-label">Report visualization · not a literal browser screenshot</div>
+          <div class="dialog-window">
+            <div class="dialog-title"><span class="dialog-icon">!</span><strong>Browser-native ${esc(type)}</strong></div>
+            <div class="dialog-message">${esc(dialog.message || '(browser supplied no message)')}</div>
+            ${type === 'prompt' ? `<div class="dialog-input">${dialog.inputProvided ? '•••••••• · input provided' : dialog.defaultValueProvided ? '•••••••• · default value present' : 'No input provided'}</div>` : ''}
+            <div class="dialog-actions">
+              <span class="dialog-button ${accepted ? 'chosen' : ''}">${esc(acceptLabel)}</span>
+              <span class="dialog-button ${!accepted ? 'chosen' : ''}">${esc(dismissLabel)}</span>
+            </div>
+          </div>
+          <div class="dialog-meta">
+            <span>${dialog.matched ? '✓ Expected response matched' : '⚠ Unexpected dialog; fail-closed response'}</span>
+            <span>Outcome: ${esc(dialog.outcome || 'unknown')}</span>
+            ${dialog.pageUrl ? `<span>Page: ${esc(dialog.pageUrl)}</span>` : ''}
+          </div>
+        </article>`;
+      }).join('');
       const stepJev = step.jevShadow?.status === 'ok'
         ? ` • Jev: ${formatTokens(step.jevShadow.usage?.input_tokens)} in / ${formatTokens(step.jevShadow.usage?.output_tokens)} out`
         : step.jevShadow
@@ -152,6 +183,7 @@ export function generateHtmlReport(report, outputPath) {
             <span class="step-result ${ok ? 'ok' : 'bad'}" ${resultTooltip ? `title="${esc(resultTooltip)}"` : ''}>${esc(resultRaw)}</span>
             <span class="tokens">${esc(step.model || llm.model || 'Model')} tokens: ${esc(step.tokensUsed ?? '—')} (${esc(step.inputTokens ?? '—')} in / ${esc(step.outputTokens ?? '—')} out)${routeLabel}${stepJev}</span>
           </summary>
+          ${dialogCards ? `<div class="dialog-evidence">${dialogCards}</div>` : ''}
           <pre class="events">${esc(events.join('\n')) || '(no events)'}</pre>
           ${imgTag}
         </details>
@@ -427,6 +459,27 @@ export function generateHtmlReport(report, outputPath) {
       max-height:320px; overflow:auto; white-space:pre-wrap;
       border: 1px solid var(--hairline-strong);
     }
+
+    .dialog-evidence{display:grid;gap:12px;margin:12px 0 0;}
+    .dialog-card{
+      display:grid;gap:10px;padding:12px;border:1px solid rgba(96,165,250,.34);
+      border-radius:12px;background:linear-gradient(145deg,rgba(15,23,42,.96),rgba(30,41,59,.92));
+    }
+    .dialog-card.dialog-unexpected,.dialog-card.dialog-timeout{border-color:rgba(251,191,36,.48);}
+    .dialog-card-label{font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#93c5fd;}
+    .dialog-window{
+      width:min(100%,520px);margin:auto;padding:18px;border-radius:13px;color:#e5e7eb;
+      background:#343540;border:1px solid rgba(255,255,255,.14);box-shadow:0 18px 40px rgba(0,0,0,.35);
+    }
+    .dialog-title{display:flex;align-items:center;gap:9px;font-size:14px;}
+    .dialog-icon{display:grid;place-items:center;width:22px;height:22px;border-radius:50%;background:#f59e0b;color:#111827;font-weight:900;}
+    .dialog-message{padding:18px 0;font-size:15px;line-height:1.45;white-space:pre-wrap;}
+    .dialog-input{padding:9px 11px;border:2px solid #22d3ee;border-radius:8px;background:#171821;color:#cbd5e1;font:12px ui-monospace,monospace;}
+    .dialog-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:16px;}
+    .dialog-button{padding:7px 15px;border-radius:8px;background:#454753;border:1px solid rgba(255,255,255,.13);font-size:12px;font-weight:750;}
+    .dialog-button.chosen{color:#07111e;background:#22d3ee;border-color:#67e8f9;box-shadow:0 0 0 2px rgba(34,211,238,.18);}
+    .dialog-meta{display:flex;gap:8px;flex-wrap:wrap;color:var(--text-muted);font-size:11px;}
+    .dialog-meta span{padding:4px 7px;border:1px solid var(--hairline);border-radius:999px;background:rgba(255,255,255,.035);}
 
     img{
       display:block; max-width:100%;

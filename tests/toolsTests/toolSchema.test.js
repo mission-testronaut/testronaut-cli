@@ -27,6 +27,14 @@ describe('tools/toolSchema', () => {
     expect(entry.function.parameters.properties.key.type).toBe('string');
     expect(entry.function.parameters.properties.selector.type).toBe('string');
   });
+  it('includes a scoped one-shot JavaScript dialog response tool', () => {
+    const entry = toolsSchema.find(tool => tool.function.name === 'prepare_dialog_response');
+    expect(entry?.function.parameters.required).toEqual(['type', 'action']);
+    expect(entry.function.parameters.properties.type.enum)
+      .toEqual(['alert', 'confirm', 'prompt', 'beforeunload']);
+    expect(entry.function.parameters.properties.action.enum).toEqual(['accept', 'dismiss']);
+    expect(entry.function.parameters.properties.input.type).toBe('string');
+  });
   it('exposes iframe targeting and iframe text search', () => {
     const fill = toolsSchema.find(tool => tool.function.name === 'fill');
     const click = toolsSchema.find(tool => tool.function.name === 'click');

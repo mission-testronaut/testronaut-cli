@@ -653,6 +653,24 @@ export const turnLoop = async (
           hadToolIssues = true;
         }
 
+        const dialogEvents = browser?.drainDialogEvents?.() || [];
+        if (dialogEvents.length) {
+          step.dialogs = step.dialogs || [];
+          step.dialogs.push(...dialogEvents);
+          for (const dialogEvent of dialogEvents) {
+            if (dialogEvent.event === 'dialog_rule_expired') {
+              step.events.push(`⏱️ Dialog response ${dialogEvent.ruleId} expired before a matching ${dialogEvent.expectedType} appeared.`);
+            } else {
+              const expectation = dialogEvent.matched ? 'expected' : 'unexpected';
+              step.events.push(`💬 ${expectation} ${dialogEvent.type} dialog: ${JSON.stringify(dialogEvent.message)} → ${dialogEvent.outcome}`);
+            }
+          }
+          result = JSON.stringify({
+            result: (() => { try { return JSON.parse(result); } catch { return result; } })(),
+            dialogs: dialogEvents,
+          });
+        }
+
         if (fnName === 'request_human_input') {
           step.humanInput = step.humanInput || {};
           step.humanInput.requested = true;
@@ -936,7 +954,9 @@ export const turnLoop = async (
         //   bloating context with large payloads (file JSON, etc.).
         // - For semantic tools (get_dom, check_text, etc.), send full result.
         let contentForModel;
-        if (FIRE_AND_FORGET_TOOLS.has(fnName)) {
+        if (dialogEvents.length) {
+          contentForModel = result;
+        } else if (FIRE_AND_FORGET_TOOLS.has(fnName)) {
           contentForModel = errorMessage || 'OK';
         } else {
           contentForModel = result;
