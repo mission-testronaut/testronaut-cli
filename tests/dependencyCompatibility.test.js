@@ -38,4 +38,16 @@ describe('runtime dependency compatibility', () => {
     expect(undici.engines.node).toBe('>=20.18.1');
     expect(pkg.engines.node).toBe(undici.engines.node);
   });
+
+  it('keeps Vitest on a patched Vite and Rolldown toolchain', () => {
+    const vitest = lock.packages['node_modules/vitest'];
+    const vite = lock.packages['node_modules/vite'];
+    const rolldown = lock.packages['node_modules/rolldown'];
+
+    expect(vitest.dependencies.vite).toContain('^8.0.0');
+    expect(vite.version).toBe('8.3.8');
+    expect(vite.dev).toBe(true);
+    expect(rolldown.version).toBe('1.2.19');
+    expect(rolldown.dev).toBe(true);
+  });
 });
