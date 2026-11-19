@@ -41,9 +41,15 @@ describe('runtime dependency compatibility', () => {
 
   it('keeps Vitest on a patched Vite and Rolldown toolchain', () => {
     const vitest = lock.packages['node_modules/vitest'];
+    const mocker = lock.packages['node_modules/@vitest/mocker'];
     const vite = lock.packages['node_modules/vite'];
     const rolldown = lock.packages['node_modules/rolldown'];
 
+    expect(pkg.devDependencies.vitest).toBe('^4.1.11');
+    expect(lock.packages[''].devDependencies.vitest).toBe(pkg.devDependencies.vitest);
+    expect(vitest.version).toBe('4.1.12');
+    expect(mocker.version).toBe(vitest.version);
+    expect(vitest.dependencies['@vitest/mocker']).toBe(vitest.version);
     expect(vitest.dependencies.vite).toContain('^8.0.0');
     expect(vite.version).toBe('8.3.8');
     expect(vite.dev).toBe(true);
