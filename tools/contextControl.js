@@ -140,7 +140,25 @@ export function createEmptyGroundControl() {
       stayWithinBaseUrl: null, // if true, avoid leaving app.baseUrl unless told to
     },
     telemetry: [],             // array of { kind, text, status, ts, turn? }
+    recoveries: [],            // array of { turn, action, reason, evidence?, screenshot? }
   };
+}
+
+export function recordRecovery(groundControl, entry, meta = {}) {
+  if (!groundControl) throw new Error('recordRecovery called without Ground Control state');
+  groundControl.recoveries ||= [];
+  const action = String(entry?.action || '').trim().toLowerCase();
+  const reason = String(entry?.reason || '').trim();
+  if (!action || !reason) return null;
+  const recovery = {
+    turn: meta.turn,
+    action,
+    reason,
+    ...(entry?.evidence ? { evidence: String(entry.evidence).trim() } : {}),
+    ...(meta.screenshot ? { screenshot: meta.screenshot } : {}),
+  };
+  groundControl.recoveries.push(recovery);
+  return recovery;
 }
 
 /**

@@ -29,6 +29,14 @@ const toolsSchema = [
   {
     type: 'function',
     function: {
+      name: 'reload',
+      description: 'Reload the current page. When reload is used to recover from an unexpected state, also call record_recovery with action "reload".',
+      parameters: { type: 'object', properties: {}, additionalProperties: false },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'fill',
       description: 'Fill in a field by CSS selector',
       parameters: {
@@ -36,6 +44,7 @@ const toolsSchema = [
         properties: {
           selector: { type: 'string' },
           text: { type: 'string' },
+          frame: { type: 'string', description: 'Optional CSS selector for the containing iframe.' },
         },
         required: ['selector', 'text'],
       },
@@ -50,6 +59,7 @@ const toolsSchema = [
         type: 'object',
         properties: {
           selector: { type: 'string' },
+          frame: { type: 'string', description: 'Optional CSS selector for the containing iframe.' },
           waitFor: {
             type: 'string',
             enum: ['load', 'domcontentloaded', 'networkidle'],
@@ -62,6 +72,47 @@ const toolsSchema = [
           },
         },
         required: ['selector'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'press_key',
+      description: 'Press a keyboard key or shortcut, optionally focusing an element by CSS selector first',
+      parameters: {
+        type: 'object',
+        properties: {
+          key: {
+            type: 'string',
+            description: 'Playwright key or shortcut, such as Enter, Escape, Control+B, or Meta+B',
+          },
+          selector: {
+            type: 'string',
+            description: 'Optional CSS selector of the element to focus before pressing the key',
+          },
+        },
+        required: ['key'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'prepare_dialog_response',
+      description: 'Arm a one-time response for the next matching JavaScript alert, confirm, prompt, or beforeunload dialog. Call immediately before the action that opens it. Unexpected dialogs are dismissed and reported.',
+      parameters: {
+        type: 'object',
+        properties: {
+          type: { type: 'string', enum: ['alert', 'confirm', 'prompt', 'beforeunload'] },
+          action: { type: 'string', enum: ['accept', 'dismiss'] },
+          message: { type: 'string', description: 'Optional exact message match.' },
+          messageIncludes: { type: 'string', description: 'Optional substring message match. Cannot be combined with message.' },
+          input: { type: 'string', description: 'Prompt text; valid only when accepting a prompt.' },
+          timeoutMs: { type: 'number', default: 10000, minimum: 250, maximum: 30000 },
+        },
+        required: ['type', 'action'],
+        additionalProperties: false,
       },
     },
   },
@@ -100,6 +151,11 @@ const toolsSchema = [
         type: 'object',
         properties: {
           text: { type: 'string' },
+          searchAllFrames: {
+            type: 'boolean',
+            default: true,
+            description: 'Search iframe documents as well as the main document.',
+          },
         },
         required: ['text'],
       },
@@ -525,6 +581,24 @@ const toolsSchema = [
           }
         },
         additionalProperties: false
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'record_recovery',
+      description: 'Record a deviation from the normal user journey that was needed to continue, such as reloading, resending, or dismissing an unexpected dialog.',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', description: 'Short stable action name, for example "reload", "resend", or "dismiss_dialog".' },
+          reason: { type: 'string', description: 'Why the recovery was necessary and what was observed before it.' },
+          evidence: { type: 'string', description: 'Optional short supporting observation.' },
+          screenshot: { type: 'boolean', description: 'Capture and attach a screenshot at the time the recovery is recorded.' },
+        },
+        required: ['action', 'reason'],
+        additionalProperties: false,
       }
     }
   },

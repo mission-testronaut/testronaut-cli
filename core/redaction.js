@@ -153,6 +153,10 @@ export function redactArgs(fnName, args = {}, { showLength = true } = {}) {
     return out;
   }
 
+  if (fnName === 'prepare_dialog_response' && 'input' in out) {
+    out.input = maskPreview(out.input, showLength);
+  }
+
   // Mask direct props with sensitive-looking keys
   for (const k of Object.keys(out || {})) {
     if (hasSensitiveHint(k)) {

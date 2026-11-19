@@ -6,6 +6,7 @@ const ANSI = {
   cyan: '\u001b[38;5;81m',
   teal: '\u001b[38;5;43m',
   red: '\u001b[38;5;203m',
+  amber: '\u001b[38;5;214m',
   cream: '\u001b[38;5;230m',
 };
 
@@ -44,13 +45,13 @@ export function createTerminalUi({
       const tagText = tags.length ? paint(ANSI.dim, `  ${tags.map(tag => `#${tag}`).join(' ')}`) : '';
       write(`   ${marker} ${file}${tagText}`);
     },
-    summary({ totalMissions = 0, passed = 0, failed = 0, durationMs, reportPath }) {
-      const status = failed === 0
+    summary({ totalMissions = 0, passed = 0, recovered = 0, failed = 0, strictRecovery = false, durationMs, reportPath }) {
+      const status = failed === 0 && !(strictRecovery && recovered > 0)
         ? paint(`${ANSI.bold}${ANSI.teal}`, 'MISSION COMPLETE')
         : paint(`${ANSI.bold}${ANSI.red}`, 'MISSION NEEDS REVIEW');
       write('');
       write(`${label('COMPLETE')}${status}`);
-      write(`   ${paint(ANSI.teal, `${passed} passed`)}  ${paint(failed ? ANSI.red : ANSI.dim, `${failed} failed`)}  ${paint(ANSI.dim, `${totalMissions} total`)}`);
+      write(`   ${paint(ANSI.teal, `${passed} passed`)}  ${paint(recovered ? ANSI.amber : ANSI.dim, `${recovered} recovered`)}  ${paint(failed ? ANSI.red : ANSI.dim, `${failed} failed`)}  ${paint(ANSI.dim, `${totalMissions} total`)}`);
       const duration = formatDuration(durationMs);
       if (duration) write(paint(ANSI.dim, `   Duration: ${duration}`));
       if (reportPath) write(paint(ANSI.dim, `   Report: ${reportPath}`));

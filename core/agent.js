@@ -37,8 +37,8 @@ import { hasCompletedLaunchProtocol, markLaunchProtocolCompleted } from './launc
  * @param {string} missionName
  * @param {number} [maxTurns=20] - upper bound for turnLoop per goal
  * @param {number} [retryLimit]
- * @param {{ domListLimit?: number|typeof Infinity, automaticDomLimit?: number, storageStatePath?: string, debug?: boolean, resourceGuard?: { enabled:boolean, hrefIncludes:string[], dataTypes:string[] }, humanInput?: { enabled:boolean, timeoutSeconds:number } }} [opts]
- * @returns {Promise<Array<{missionName:string, submissionType:string, submissionName:string|null, status:'passed'|'failed', steps:any[], startTime:number, endTime:number}>>}
+ * @param {{ domListLimit?: number|typeof Infinity, automaticDomLimit?: number, storageStatePath?: string, debug?: boolean, resourceGuard?: { enabled:boolean, hrefIncludes:string[], dataTypes:string[] }, humanInput?: { enabled:boolean, timeoutSeconds:number }, recovery?: { permitted?: string[] } }} [opts]
+ * @returns {Promise<Array<{missionName:string, submissionType:string, submissionName:string|null, status:'passed'|'recovered'|'failed', steps:any[], startTime:number, endTime:number}>>}
  */
 export async function runAgent(goals, missionName, maxTurns = 20, retryLimit, opts = {}) {
   const browser = new ChromeBrowser({
@@ -61,6 +61,7 @@ export async function runAgent(goals, missionName, maxTurns = 20, retryLimit, op
     for (const goal of goals) {
       const goalStartTime = Date.now();
       const telemetryStart = groundControl.telemetry.length;
+      const recoveryStart = groundControl.recoveries.length;
       const steps = [];
       const stepsArchive = [];
       // Unique-ish JSONL file for this mission’s steps
@@ -98,7 +99,7 @@ export async function runAgent(goals, missionName, maxTurns = 20, retryLimit, op
           const step = {
             turn: 0,
             events: [`📡 Launch protocol probe passed: ${protocol.id}`],
-            result: '✅ Mission Success',
+            result: '✅ Mission accomplished',
             summary: `Reused launch protocol ${protocol.id}`,
             missionName,
             tokensUsed: 0,
@@ -116,6 +117,7 @@ export async function runAgent(goals, missionName, maxTurns = 20, retryLimit, op
             startTime: now,
             endTime: now,
             durationMs: 0,
+            verification: 'verified',
             telemetry: [],
             launchProtocol: { id: protocol.id, status: 'reused', probe: 'passed' },
           });
@@ -220,6 +222,22 @@ Email invitation and magic links:
 - open_email_link enforces the operator-configured emailLinks.allowedHosts policy. If the host is not configured or navigation is blocked, report a graceful FAILURE; do not use the ordinary navigate tool as a workaround.
         `.trim();
 
+      systemContent += '\n\n' + `
+JavaScript dialogs:
+- Browser-native alert, confirm, prompt, and beforeunload dialogs block their triggering action.
+- When a mission requires a particular response, call prepare_dialog_response immediately before the click, reload, or navigation that opens it. Specify the expected type, accept/dismiss decision, and an exact or partial message when known; provide input only when accepting a prompt.
+- Prepared responses are one-time and expire. Unexpected dialogs are dismissed fail-closed and reported to you and the mission report. Never assume an unexpected dialog was accepted.
+      `.trim();
+
+      const permittedRecoveries = Array.isArray(opts.recovery?.permitted)
+        ? opts.recovery.permitted.map(value => String(value).trim().toLowerCase()).filter(Boolean)
+        : null;
+      systemContent += `\n\nRecovery reporting:\n- Call record_recovery before or immediately after taking an action a normal user would not know to take in order to continue.\n- Ordinary mission steps and retries of selectors are not recoveries.\n- ${permittedRecoveries === null
+        ? 'This mission has not restricted recovery actions.'
+        : permittedRecoveries.length
+          ? `Only these recovery actions are permitted: ${permittedRecoveries.join(', ')}.`
+          : 'No recovery actions are permitted; recording one will fail the mission.'}`;
+
       if (opts.humanInput?.enabled !== false) {
         systemContent +=
           '\n' +
@@ -294,31 +312,45 @@ Email invitation and magic links:
       const goalEndTime = Date.now();
 
       // Snapshot steps (avoid retaining references to mutable arrays)
+      const recoveries = JSON.parse(JSON.stringify((groundControl.recoveries || []).slice(recoveryStart)));
+      const disallowedRecoveries = permittedRecoveries === null
+        ? []
+        : recoveries.filter(recovery => !permittedRecoveries.includes(recovery.action));
+      const succeeded = Boolean(result?.success) && disallowedRecoveries.length === 0;
       missionResults.push({
         missionName,
         submissionType: goal.submissionType || goal.label,
         submissionName: goal.submissionName || null,
-        status: result?.success ? 'passed' : 'failed',
+        status: succeeded ? (recoveries.length ? 'recovered' : 'passed') : 'failed',
+        verification: succeeded
+          ? (result?.completedBy === 'jev_gate' ? 'verified' : result?.evidenceRecorded ? 'evidence_recorded' : 'limited_evidence')
+          : 'failed',
+        ...(result?.evidenceSources?.length ? { evidenceSources: result.evidenceSources } : {}),
         steps: JSON.parse(JSON.stringify(compact)), // last 20 (by memory design)
         stepFile, // full history is in this JSONL (one step per line)
         startTime: goalStartTime,
         endTime: goalEndTime,
         durationMs: Math.max(0, goalEndTime - goalStartTime),
         telemetry: JSON.parse(JSON.stringify(groundControl.telemetry.slice(telemetryStart))),
+        recoveries,
+        ...(disallowedRecoveries.length ? { recoveryPolicyViolation: disallowedRecoveries.map(item => item.action) } : {}),
         ...(protocolResult ? { launchProtocol: protocolResult } : {}),
       });
 
-      if (protocol && result?.success) {
+      if (protocol && succeeded) {
         markLaunchProtocolCompleted(protocol.id);
       }
 
-      if (!result?.success) {
+      if (!succeeded) {
         console.log('🛑 Agent stopped due to failed goal.\n');
         return missionResults;
       }
     }
 
-    console.log('✅ All goals completed successfully.\n');
+    const limitedEvidence = missionResults.some(mission => mission.verification === 'limited_evidence');
+    console.log(limitedEvidence
+      ? '⚠️ Completion reported · limited evidence.\n'
+      : '✅ Mission accomplished.\n');
     return missionResults;
   } finally {
     await browser.close();

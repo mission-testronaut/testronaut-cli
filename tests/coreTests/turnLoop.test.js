@@ -176,10 +176,61 @@ describe('turnLoop', () => {
     const step = result.steps[0];
     expect(step.tokensUsed).toBe(42);
     expect(step.summary).toContain('plan:FINAL: success');
-    expect(step.result).toMatch(/✅|Success/);
+    expect(step.result).toBe('⚠️ Completion reported · limited evidence');
+    expect(result.evidenceRecorded).toBe(false);
 
     expect(shared.chromeToolSpies.click_text).not.toHaveBeenCalled();
     expect(shared.chromeToolSpies.get_dom).not.toHaveBeenCalled();
+  });
+
+  it('reports browser-native dialog appearance and response to the model and mission step', async () => {
+    const dialog = {
+      event: 'javascript_dialog',
+      type: 'confirm',
+      message: 'Emergency meeting! Attend?',
+      defaultValueProvided: false,
+      pageUrl: 'https://example.test/dashboard',
+      matched: true,
+      expected: true,
+      action: 'accept',
+      outcome: 'accept',
+    };
+    browser.drainDialogEvents = vi.fn()
+      .mockReturnValueOnce([dialog])
+      .mockReturnValue([]);
+    shared.chatMock
+      .mockResolvedValueOnce({
+        message: {
+          role: 'assistant',
+          content: '',
+          tool_calls: [{
+            id: 'dialog_click',
+            type: 'function',
+            function: { name: 'click_text', arguments: '{"text":"Request attendance"}' },
+          }],
+        },
+        usage: { total_tokens: 10 },
+        headers: {},
+      })
+      .mockResolvedValueOnce({
+        message: { role: 'assistant', content: 'FINAL: success' },
+        usage: { total_tokens: 5 },
+        headers: {},
+      });
+
+    const result = await turnLoop(browser, baseMessages(), 2, 0, 0, {}, {
+      steps: [],
+      missionName: 'dialogs',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.steps[0].dialogs).toEqual([dialog]);
+    expect(result.steps[0].events).toContain(
+      '💬 expected confirm dialog: "Emergency meeting! Attend?" → accept',
+    );
+    const secondRequest = shared.chatMock.mock.calls[1][0].messages;
+    const response = secondRequest.find(message => message.tool_call_id === 'dialog_click');
+    expect(JSON.parse(response.content).dialogs).toEqual([dialog]);
   });
 
   it('uses one tool-free closure turn after the working-turn budget is exhausted', async () => {
@@ -205,9 +256,41 @@ describe('turnLoop', () => {
     expect(shared.chatMock.mock.calls[1][0].messages.at(-1).content).toContain('working-turn budget is exhausted');
     expect(result.steps.at(-1)).toMatchObject({
       isClosureTurn: true,
-      result: '❌ Mission Failure',
+      result: '❌ Mission incomplete',
       tokensUsed: 4,
     });
+  });
+
+  it('does not report mission success when a tool succeeds but the goal remains unfulfilled', async () => {
+    shared.chatMock
+      .mockResolvedValueOnce({
+        message: {
+          role: 'assistant',
+          content: '',
+          tool_calls: [{
+            id: 'create_work_package',
+            type: 'function',
+            function: { name: 'click_text', arguments: JSON.stringify({ text: 'Create Work Package' }) },
+          }],
+        },
+        usage: { total_tokens: 10 },
+      })
+      .mockResolvedValueOnce({
+        message: { role: 'assistant', content: 'FINAL: FAILURE: work package creation was not verified' },
+        usage: { total_tokens: 4 },
+      });
+
+    const result = await turnLoop(browser, baseMessages(), 1, 0, 0, {}, {
+      steps: [], missionName: 'work-package',
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.steps[0].result).toBe('🚀 Progressing');
+    expect(result.steps[0].events).toContain(
+      '[tool ] ← click_text result: ✅ Action confirmed',
+    );
+    expect(result.steps.at(-1).result).toBe('❌ Mission incomplete');
+    expect(result.steps.map(step => step.result)).not.toContain('✅ Mission accomplished');
   });
 
   it('records elapsed milliseconds for normal and closure turns', async () => {
@@ -262,7 +345,8 @@ describe('turnLoop', () => {
       });
 
       expect(result.success).toBe(true);
-      expect(result.steps[0].result).toMatch(/Success/);
+      expect(result.steps[0].result).toBe('✅ Mission accomplished · evidence recorded');
+      expect(result.evidenceRecorded).toBe(true);
       expect(result.steps[0].jevShadow).toMatchObject({
         status: 'ok',
         model: 'jev-test',
@@ -454,7 +538,7 @@ describe('turnLoop', () => {
       expect(shared.chatMock).toHaveBeenCalledTimes(1);
       expect(shared.chromeToolSpies.screenshot).toHaveBeenCalledTimes(1);
       expect(result.steps[0]).toMatchObject({
-        result: '✅ Mission Success (Jev gate)',
+        result: '✅ Mission accomplished (Jev verified)',
         screenshotPath: './screenshots/jev-gate.png',
         jevGate: { triggered: true, candidate: true, threshold: 0.8 },
       });
@@ -552,7 +636,7 @@ describe('turnLoop', () => {
     expect(res.steps.length).toBe(2);
 
     const step1 = res.steps[0];
-    expect(step1.result).toBe('✅ Passed');
+    expect(step1.result).toBe('🚀 Progressing');
     expect(shared.chromeToolSpies.click_text).toHaveBeenCalledTimes(1);
     expect(shared.chromeToolSpies.get_dom).toHaveBeenCalled();
     expect(shared.chromeToolSpies.get_dom).toHaveBeenCalledWith(
@@ -578,7 +662,8 @@ describe('turnLoop', () => {
       .toEqual({ limit: 15000, exclude: true });
 
     const step2 = res.steps[1];
-    expect(step2.result).toMatch(/Success/);
+    expect(step2.result).toBe('✅ Mission accomplished · evidence recorded');
+    expect(res.evidenceSources).toContain('browser_state');
   });
 
   it('handles Ground Control state locally without dispatching it as a browser tool', async () => {
@@ -603,7 +688,7 @@ describe('turnLoop', () => {
     expect(res.success).toBe(true);
     expect(ctx.groundControl.app.baseUrl).toBe('https://example.com');
     expect(ctx.groundControl.session.loggedIn).toBe(false);
-    expect(res.steps[0].events).toContain('[tool ] ← set_ground_control_state result: ✅ Success');
+    expect(res.steps[0].events).toContain('[tool ] ← set_ground_control_state result: ✅ Action confirmed');
   });
 
   it('retries a turn on tool error before marking issues', async () => {
@@ -653,9 +738,9 @@ describe('turnLoop', () => {
 
     expect(res.success).toBe(true);
     expect(res.steps.length).toBe(3);
-    expect(res.steps[0].result).toBe('⏳ Retrying turn');
-    expect(res.steps[1].result).toBe('✅ Passed');
-    expect(res.steps[2].result).toMatch(/Success/);
+    expect(res.steps[0].result).toBe('🔄 Replotting course');
+    expect(res.steps[1].result).toBe('🚀 Progressing');
+    expect(res.steps[2].result).toBe('✅ Mission accomplished · evidence recorded');
   });
 
   it('logs unavailable MFA lookups without marking the tool as a success', async () => {
@@ -704,7 +789,7 @@ describe('turnLoop', () => {
     expect(res.steps[0].events).toContain('🔐 MFA list endpoint status: available');
     expect(res.steps[0].events).toContain('🔐 MFA API response keys: nickname, message');
     expect(res.steps[0].events.join('\n')).not.toContain(
-      '[tool ] ← get_mfa_code result: ✅ Success'
+      '[tool ] ← get_mfa_code result: 🛰️ Engaged'
     );
   });
 

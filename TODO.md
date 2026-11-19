@@ -12,6 +12,7 @@
 ## Browser Automation Follow-Ups
 
 - [x] Make `click_text` match exact text, prefer the innermost visible element, and fail quickly instead of clicking an ancestor or partial match.
+- [ ] Complete `press_key` turn-loop integration: classify it as fire-and-forget, automatically inject the updated DOM after successful key presses, and test that Enter/Escape state changes are available to the next reasoning turn without an explicit `get_dom` call.
 - [ ] Replace framework/vendor-specific DOM class stripping with a framework-agnostic classifier that removes generated hashes, styling utilities, variants, and arbitrary selectors while preserving semantic component classes. Reconsider broad prefix rules such as `/^cl-/`, cap retained class count and length, and add representative fixtures for Tailwind, MUI, Ant Design, Chakra, Clerk, CSS Modules, and CSS-in-JS.
 
 ## Session and Reporting Follow-Ups
@@ -27,8 +28,17 @@
 
 ## Optimization and Rate-Limit Follow-Ups
 
+- [ ] Reduce redundant screenshot capture in focused missions without weakening evidence: clarify or enforce when starting, transition, and final screenshots materially differ, and measure the effect on turns, tokens, and report usefulness.
 - [ ] Run a history-informed model-routing benchmark before expanding cross-provider routing. Give Jev versioned, per-model/per-mission-class reliability, token, latency, and price observations from prior runs; require a configurable reliability floor; compare against the best fixed-model-plus-guardrails control with blocked repetitions; keep selection at the mission boundary; record the evidence and reason for every choice; and define cold-start, stale-data, low-confidence, and provider-failure fallbacks. Do not retry a failed mission on another provider in the benchmark because that would confound routing quality with retry recovery.
 - [ ] Add an opt-in CLI/config policy that reroutes an imminent throttled LLM request to a compatible model as an alternative to the default backoff behavior. Keep backoff as the default; use observed TPM/RPM headroom and projected request tokens; constrain failover to explicitly configured provider/model families; preserve tool/history compatibility; prevent routing loops; fall back safely when the alternate model is unavailable; and record the original model, routed model, trigger, token usage, latency, and outcome in reports.
+
+## OpenAI Provider Follow-Ups
+
+- [ ] Migrate the OpenAI adapter from Chat Completions to the Responses API in a dedicated change. Preserve Testronaut's provider-neutral message and tool-call contract, add response-ID/reasoning-state handling, normalize usage and raw headers, and cover multi-turn tool continuation with unit and API smoke tests. Once migrated, remove the GPT-5.6 Chat Completions compatibility override that sets `reasoning_effort` to `none` for function-tool requests.
+- [ ] Add active context budgeting after its behavior is designed and tested. Use model context/output metadata to reserve response and reasoning capacity, then apply explicit history compaction or summarization rules. Do not silently truncate mission instructions, current DOM state, or unmatched tool calls.
+- [ ] Learn effective OpenAI TPM/RPM limits from successful response headers and rate-limit errors. Prefer observed project/model limits over inferring a named account tier; retain the environment override and conservative startup values.
+- [ ] Persist provider-observed rate limits in a separate, expiring local cache keyed by provider, API project/account, endpoint/region, model, and traffic type. Never rewrite user config or infer a named usage tier from a TPM value; expose configured, cached, and live sources distinctly and discard stale observations.
+- [ ] After dynamic rate limits are established, make DOM injection quota-aware. Budget DOM tokens against both remaining TPM and the model context window, preserve mission instructions and actionable controls, and fall back to semantic sections plus on-demand DOM chunks instead of silent truncation.
 
 ## Automated MFA Follow-Ups
 

@@ -59,6 +59,9 @@ export class ChromeBrowser {
     this.debugEnabled = !!options.debug;
     this._domLimitLogged = false;
     this.storageStatePath = options.storageStatePath;
+    this.dialogRules = [];
+    this.dialogEvents = [];
+    this._dialogRuleSequence = 0;
 
     const defaultResourceGuard = {
       enabled: true,
@@ -98,6 +101,13 @@ export class ChromeBrowser {
     this.currentId = id;
     this.page = page;
 
+    // Playwright blocks the action that opened a JavaScript dialog until the
+    // dialog is handled. Keep this listener synchronous and always resolve the
+    // dialog so an unexpected alert can never hang a mission.
+    page.on('dialog', dialog => {
+      void this._handleDialog(dialog, page);
+    });
+
     page.on('close', () => {
       // remove from registry
       this.pages = this.pages.filter(p => p.id !== id);
@@ -113,6 +123,117 @@ export class ChromeBrowser {
     });
 
     return id;
+  }
+
+  _expireDialogRules(now = Date.now()) {
+    const active = [];
+    for (const rule of this.dialogRules) {
+      if (rule.expiresAt > now) {
+        active.push(rule);
+        continue;
+      }
+      this.dialogEvents.push({
+        event: 'dialog_rule_expired',
+        ruleId: rule.id,
+        expectedType: rule.type,
+        expectedMessage: rule.message,
+        messageIncludes: rule.messageIncludes,
+        action: rule.action,
+        armedAt: new Date(rule.armedAt).toISOString(),
+        expiredAt: new Date(rule.expiresAt).toISOString(),
+        outcome: 'timeout',
+      });
+    }
+    this.dialogRules = active;
+  }
+
+  async _handleDialog(dialog, page) {
+    const now = Date.now();
+    this._expireDialogRules(now);
+    const type = dialog.type();
+    const message = dialog.message();
+    const matchingIndex = this.dialogRules.findIndex(rule =>
+      rule.type === type
+      && (rule.message === undefined || rule.message === message)
+      && (rule.messageIncludes === undefined || message.includes(rule.messageIncludes))
+    );
+    const rule = matchingIndex >= 0 ? this.dialogRules.splice(matchingIndex, 1)[0] : null;
+    const action = rule?.action || 'dismiss';
+    const record = {
+      event: 'javascript_dialog',
+      type,
+      message,
+      // Prompt defaults can contain user or application secrets. Reports only
+      // need to know whether one existed, never its raw value.
+      defaultValueProvided: Boolean(dialog.defaultValue()),
+      pageUrl: page?.url?.() || null,
+      appearedAt: new Date(now).toISOString(),
+      ruleId: rule?.id || null,
+      matched: Boolean(rule),
+      expected: Boolean(rule),
+      action,
+      inputProvided: rule?.input !== undefined,
+      outcome: 'pending',
+    };
+
+    try {
+      if (action === 'accept') await dialog.accept(rule?.input);
+      else await dialog.dismiss();
+      record.outcome = rule ? action : 'unexpected_dialog_dismissed';
+    } catch (error) {
+      record.outcome = 'response_failed';
+      record.error = error?.message || String(error);
+      // A second response can fail if the page closed. Never mask that fact.
+    }
+    record.respondedAt = new Date().toISOString();
+    this.dialogEvents.push(record);
+  }
+
+  prepare_dialog_response({
+    action,
+    type,
+    message,
+    messageIncludes,
+    input,
+    timeoutMs = 10_000,
+  } = {}) {
+    const supportedTypes = new Set(['alert', 'confirm', 'prompt', 'beforeunload']);
+    if (!supportedTypes.has(type)) throw new Error(`Unsupported dialog type: ${type || '(missing)'}`);
+    if (!['accept', 'dismiss'].includes(action)) throw new Error('Dialog action must be "accept" or "dismiss".');
+    if (message !== undefined && messageIncludes !== undefined) {
+      throw new Error('Use either message or messageIncludes, not both.');
+    }
+    if (input !== undefined && (type !== 'prompt' || action !== 'accept')) {
+      throw new Error('Dialog input is only supported when accepting a prompt.');
+    }
+    const boundedTimeout = Math.min(30_000, Math.max(250, Number(timeoutMs) || 10_000));
+    const armedAt = Date.now();
+    const rule = {
+      id: `dialog_${++this._dialogRuleSequence}`,
+      action,
+      type,
+      message,
+      messageIncludes,
+      input,
+      armedAt,
+      expiresAt: armedAt + boundedTimeout,
+    };
+    this.dialogRules.push(rule);
+    return {
+      armed: true,
+      ruleId: rule.id,
+      action,
+      type,
+      message,
+      messageIncludes,
+      inputProvided: input !== undefined,
+      timeoutMs: boundedTimeout,
+    };
+  }
+
+  drainDialogEvents() {
+    this._expireDialogRules();
+    return this.dialogEvents.splice(0);
   }
 
   _switchTo(target) {
@@ -180,8 +301,13 @@ export class ChromeBrowser {
   }
 
   // Build candidate locator MAKERS (Page|Frame-aware)
-  _buildClickCandidates({ selector, text, role, attrs, scope, searchAllFrames }) {
-    const frames = searchAllFrames ? this._allFrames({ includeMain: true }) : [this.page.mainFrame()];
+  _interactionContexts(frame, searchAllFrames) {
+    if (frame) return [this.page.frameLocator(frame)];
+    return searchAllFrames ? this._allFrames({ includeMain: true }) : [this.page.mainFrame()];
+  }
+
+  _buildClickCandidates({ selector, text, role, attrs, scope, searchAllFrames, frame }) {
+    const frames = this._interactionContexts(frame, searchAllFrames);
     const makers = [];
     const add = (fn) => fn && makers.push(fn);
 
@@ -211,8 +337,9 @@ export class ChromeBrowser {
       }
     }
 
-    const seen = new Set();
-    return makers.filter(fn => { const k = fn.toString(); if (seen.has(k)) return false; seen.add(k); return true; });
+    // Do not de-duplicate by function source: closures for different frames have
+    // identical source text but resolve against different documents.
+    return makers;
   }
 
 
@@ -459,8 +586,8 @@ export class ChromeBrowser {
   }
 
   // Build candidates for text entry (Page|Frame-aware)
-  _buildFillCandidates({ selector, placeholder, role = 'textbox', attrs, scope, searchAllFrames }) {
-    const frames = searchAllFrames ? this._allFrames({ includeMain: true }) : [this.page.mainFrame()];
+  _buildFillCandidates({ selector, placeholder, role = 'textbox', attrs, scope, searchAllFrames, frame }) {
+    const frames = this._interactionContexts(frame, searchAllFrames);
     const makers = [];
     const add = (fn) => fn && makers.push(fn);
 
@@ -499,9 +626,9 @@ export class ChromeBrowser {
       }
     }
 
-    // de-dup
-    const seen = new Set();
-    return makers.filter(fn => { const k = fn.toString(); if (seen.has(k)) return false; seen.add(k); return true; });
+    // Do not de-duplicate by function source: closures for different frames have
+    // identical source text but resolve against different documents.
+    return makers;
   }
 
 
@@ -641,6 +768,13 @@ export class ChromeBrowser {
     return `navigated to ${this.page.url()}`;
   }
 
+  async reload() {
+    await this.page.reload({ timeout: 30_000, waitUntil: 'domcontentloaded' });
+    await this.page.waitForLoadState('domcontentloaded').catch(() => {});
+    try { await this._waitLoaderGone(); } catch {}
+    return `reloaded ${this.page.url()}`;
+  }
+
   async probe({ url, selector, text, timeout = 5000 } = {}) {
     if (url) {
       await this.page.goto(url, { timeout: 30_000, waitUntil: 'domcontentloaded' });
@@ -707,6 +841,7 @@ export class ChromeBrowser {
   async fill({
     selector,
     text,
+    frame,
     placeholder,          // string | RegExp
     role = 'textbox',     // generic default
     attrs,
@@ -722,9 +857,9 @@ export class ChromeBrowser {
 
     const makeCandidates = () => {
       if (strategy === 'strict') {
-        return this._buildFillCandidates({ selector, scope, searchAllFrames });
+        return this._buildFillCandidates({ selector, scope, searchAllFrames, frame });
       }
-      return this._buildFillCandidates({ selector, placeholder, role, attrs, scope, searchAllFrames });
+      return this._buildFillCandidates({ selector, placeholder, role, attrs, scope, searchAllFrames, frame });
     };
 
     return this._withRetries(async () => {
@@ -757,6 +892,18 @@ export class ChromeBrowser {
     }, { attempts: 3, baseMs: 250 });
   }
 
+  async press_key({ key, selector }) {
+    if (selector) {
+      const target = this.page.locator(selector).first();
+      await target.focus({ timeout: 3000 });
+    }
+
+    await this.page.keyboard.press(key);
+    return selector
+      ? `pressed ${key} after focusing ${selector}`
+      : `pressed ${key}`;
+  }
+
 
 
   /**
@@ -771,7 +918,7 @@ export class ChromeBrowser {
    * @param {number}          [opts.delayMs=200]       // micro settle
    */
   async click({
-    selector, text, role, attrs, scope,
+    selector, text, role, attrs, scope, frame,
     searchAllFrames = true,
     strategy = 'auto',
     waitFor,   
@@ -787,8 +934,8 @@ export class ChromeBrowser {
 
     // Build your candidates the way you already do (generic/hint-driven)
     const makers = (strategy === 'strict')
-      ? this._buildClickCandidates({ selector, scope, searchAllFrames })
-      : this._buildClickCandidates({ selector, text, role, attrs, scope, searchAllFrames });
+      ? this._buildClickCandidates({ selector, scope, searchAllFrames, frame })
+      : this._buildClickCandidates({ selector, text, role, attrs, scope, searchAllFrames, frame });
 
     // choose & click (same as your generic version)
     let chosen = null;
@@ -1007,8 +1154,56 @@ export class ChromeBrowser {
     // Fallback to empty string if still nothing (keeps caller logic simple)
     if (!html) html = '';
 
+    // page.content() only serializes iframe elements, not their documents. Build a
+    // read-only clone that embeds accessible frame documents so selectors and the
+    // global output limit apply to the complete snapshot.
+    try {
+      html = await this.page.evaluate(() => {
+        const serializeDocument = (doc) => {
+          const clone = doc.documentElement.cloneNode(true);
+          const sourceFrames = Array.from(doc.querySelectorAll('iframe'));
+          const clonedFrames = Array.from(clone.querySelectorAll('iframe'));
+
+          sourceFrames.forEach((sourceFrame, index) => {
+            const clonedFrame = clonedFrames[index];
+            if (!clonedFrame) return;
+            // iframe is a raw-text element in HTML parsers. Use a temporary
+            // custom element so Cheerio parses the embedded controls as markup.
+            const serializedFrame = doc.createElement('testronaut-frame');
+            for (const attribute of Array.from(clonedFrame.attributes)) {
+              serializedFrame.setAttribute(attribute.name, attribute.value);
+            }
+            clonedFrame.replaceWith(serializedFrame);
+            const label = sourceFrame.id || sourceFrame.name || sourceFrame.getAttribute('src') || `frame-${index + 1}`;
+            serializedFrame.setAttribute('data-testronaut-frame', label);
+            try {
+              const childDocument = sourceFrame.contentDocument;
+              if (!childDocument?.documentElement) throw new Error('inaccessible');
+              serializedFrame.setAttribute('data-testronaut-frame-status', 'same-origin');
+              serializedFrame.innerHTML = serializeDocument(childDocument);
+            } catch {
+              serializedFrame.setAttribute('data-testronaut-frame-status', 'cross-origin');
+              serializedFrame.textContent = '[cross-origin frame, content not accessible]';
+            }
+          });
+
+          return clone.outerHTML;
+        };
+        return serializeDocument(document);
+      });
+    } catch {
+      // Preserve the main-document snapshot if serialization races a navigation.
+    }
+
     // --- 4) Optional DOM reduction/cleanup (your existing steps) ---
     let $ = cheerio.load(html);
+
+    // Restore the public marker shape after the HTML parser has materialized
+    // the temporary element's descendants.
+    $('testronaut-frame').each((_, element) => {
+      element.name = 'iframe';
+      element.tagName = 'iframe';
+    });
 
     if (selector) {
       let selection;
@@ -1134,12 +1329,27 @@ export class ChromeBrowser {
   }
 
   
-  async check_text({ text }) {
-    const matches = this.page.getByText(text);
-    const count = await matches.count();
-    for (let index = 0; index < count; index++) {
-      if (await matches.nth(index).isVisible().catch(() => false)) {
-        return `FOUND: ${text}`;
+  async check_text({ text, searchAllFrames = true }) {
+    const mainFrame = this.page.mainFrame?.();
+    const frames = searchAllFrames && this.page.frames
+      ? [mainFrame, ...this.page.frames().filter(frame => frame !== mainFrame)].filter(Boolean)
+      : [mainFrame || this.page];
+
+    for (const frame of frames) {
+      const matches = frame.getByText(text);
+      const count = await matches.count();
+      for (let index = 0; index < count; index++) {
+        if (!await matches.nth(index).isVisible().catch(() => false)) continue;
+        if (frame === mainFrame || frame === this.page) return `FOUND: ${text}`;
+
+        let label = frame.name?.() || '';
+        if (!label) {
+          label = await frame.frameElement?.()
+            .then(element => element.getAttribute('id'))
+            .catch(() => '') || '';
+        }
+        label ||= frame.url?.() || 'unnamed';
+        return `FOUND in frame ${label}: ${text}`;
       }
     }
     return `NOT FOUND: ${text}`;
@@ -1445,8 +1655,11 @@ export class ChromeBrowser {
 
 export const CHROME_TOOL_MAP = {
   navigate: (b, args) => b.navigate(args),
+  reload: (b) => b.reload(),
   fill: (b, args) => b.fill(args),
   click: (b, args) => b.click(args),
+  press_key: (b, args) => b.press_key(args),
+  prepare_dialog_response: (b, args) => b.prepare_dialog_response(args),
   get_dom: (b, args, agentMemory) => b.get_dom(args, agentMemory),
   check_text: (b, args) => b.check_text(args),
   click_text: async (browser, args, agentMemory) => {

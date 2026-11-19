@@ -6,9 +6,42 @@ describe('tools/toolSchema', () => {
     expect(toolsSchema.map(tool => tool.function.name)).not.toContain('get_dom_chunk');
   });
 
+  it('exposes structured recovery recording', () => {
+    const entry = toolsSchema.find(tool => tool.function.name === 'record_recovery');
+    expect(entry.function.parameters.required).toEqual(['action', 'reason']);
+    expect(entry.function.parameters.properties).toHaveProperty('screenshot');
+  });
+
+  it('exposes reload as a first-class browser action', () => {
+    const entry = toolsSchema.find(tool => tool.function.name === 'reload');
+    expect(entry.function.parameters).toEqual({ type: 'object', properties: {}, additionalProperties: false });
+  });
+
   it('allows get_dom calls to be scoped by selector', () => {
     const entry = toolsSchema.find(tool => tool.function.name === 'get_dom');
     expect(entry.function.parameters.properties.selector.type).toBe('string');
+  });
+  it('includes press_key with a required key and optional selector', () => {
+    const entry = toolsSchema.find(tool => tool.function.name === 'press_key');
+    expect(entry?.function.parameters.required).toEqual(['key']);
+    expect(entry.function.parameters.properties.key.type).toBe('string');
+    expect(entry.function.parameters.properties.selector.type).toBe('string');
+  });
+  it('includes a scoped one-shot JavaScript dialog response tool', () => {
+    const entry = toolsSchema.find(tool => tool.function.name === 'prepare_dialog_response');
+    expect(entry?.function.parameters.required).toEqual(['type', 'action']);
+    expect(entry.function.parameters.properties.type.enum)
+      .toEqual(['alert', 'confirm', 'prompt', 'beforeunload']);
+    expect(entry.function.parameters.properties.action.enum).toEqual(['accept', 'dismiss']);
+    expect(entry.function.parameters.properties.input.type).toBe('string');
+  });
+  it('exposes iframe targeting and iframe text search', () => {
+    const fill = toolsSchema.find(tool => tool.function.name === 'fill');
+    const click = toolsSchema.find(tool => tool.function.name === 'click');
+    const checkText = toolsSchema.find(tool => tool.function.name === 'check_text');
+    expect(fill.function.parameters.properties.frame.type).toBe('string');
+    expect(click.function.parameters.properties.frame.type).toBe('string');
+    expect(checkText.function.parameters.properties.searchAllFrames.default).toBe(true);
   });
   it('includes resource_progress tool with empty params', () => {
     const entry = toolsSchema.find(t => t.function?.name === 'resource_progress');

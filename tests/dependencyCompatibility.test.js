@@ -21,11 +21,53 @@ describe('runtime dependency compatibility', () => {
 
   it('declares the minimum Node runtime required by Inquirer 14', () => {
     const inquirer = lock.packages['node_modules/inquirer'];
-    expect(pkg.engines.node).toBe('>=20.17.0');
+    expect(pkg.engines.node).toBe('>=20.18.1');
     expect(lock.packages[''].engines.node).toBe(pkg.engines.node);
     expect(pkg.dependencies.inquirer).toBe('^14.2.2');
     expect(lock.packages[''].dependencies.inquirer).toBe(pkg.dependencies.inquirer);
     expect(inquirer.version).toBe('14.2.2');
     expect(inquirer.engines.node).toContain('^20.17.0');
+  });
+
+  it('pins the patched Undici release and its minimum Node runtime', () => {
+    const cheerio = lock.packages['node_modules/cheerio'];
+    const undici = lock.packages['node_modules/undici'];
+
+    expect(cheerio.dependencies.undici).toBe('^7.19.0');
+    expect(undici.version).toBe('7.30.2');
+    expect(undici.engines.node).toBe('>=20.18.1');
+    expect(pkg.engines.node).toBe(undici.engines.node);
+  });
+
+  it('keeps Vitest on a patched Vite and Rolldown toolchain', () => {
+    const vitest = lock.packages['node_modules/vitest'];
+    const mocker = lock.packages['node_modules/@vitest/mocker'];
+    const vite = lock.packages['node_modules/vite'];
+    const rolldown = lock.packages['node_modules/rolldown'];
+
+    expect(pkg.devDependencies.vitest).toBe('^4.1.11');
+    expect(lock.packages[''].devDependencies.vitest).toBe(pkg.devDependencies.vitest);
+    expect(vitest.version).toBe('4.1.12');
+    expect(mocker.version).toBe(vitest.version);
+    expect(vitest.dependencies['@vitest/mocker']).toBe(vitest.version);
+    expect(vitest.dependencies.vite).toContain('^8.0.0');
+    expect(vite.version).toBe('8.3.8');
+    expect(vite.dev).toBe(true);
+    expect(rolldown.version).toBe('1.2.19');
+    expect(rolldown.dev).toBe(true);
+  });
+});
+
+describe('development dependency compatibility', () => {
+  it('uses the reviewed fast-uri release through the Periapsis AJV toolchain', () => {
+    const periapsis = lock.packages['node_modules/periapsis'];
+    const ajv = lock.packages['node_modules/ajv'];
+    const fastUri = lock.packages['node_modules/fast-uri'];
+
+    expect(pkg.devDependencies.periapsis).toBe('^2.1.2');
+    expect(periapsis.dependencies.ajv).toBe('^8.17.1');
+    expect(ajv.dependencies['fast-uri']).toBe('^3.0.1');
+    expect(fastUri.version).toBe('3.1.9');
+    expect(fastUri.dev).toBe(true);
   });
 });

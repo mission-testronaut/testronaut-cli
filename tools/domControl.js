@@ -7,7 +7,7 @@
  *   normalize, and compress HTML so it’s cheaper and clearer for LLMs.
  *
  * Responsibilities:
- *   - Remove non-content tags (scripts, styles, iframes, etc.) and noisy attributes.
+ *   - Remove non-content tags (scripts, styles, etc.) and noisy attributes.
  *   - Collapse overly long lists/sections into truncated markers.
  *   - Reduce repeated div blocks to a representative sample.
  *   - Strip obfuscated/utility CSS classes that don’t help reasoning.
@@ -23,7 +23,8 @@
 
 /**
  * Remove tags and attributes that are unlikely to help LLM reasoning.
- * - Strips: script, style, meta, link, noscript, iframe, canvas, svg
+ * - Strips: script, style, meta, link, noscript, canvas, svg
+ * - Keeps iframe shells and any same-origin content injected by get_dom.
  * - Keeps only a safe whitelist of attributes on remaining elements.
  * - Removes HTML comments.
  *
@@ -31,7 +32,7 @@
  * @returns {$} same Cheerio instance for chaining
  */
 export const removeNonContentTags = async ($) => {
-  $('script, style, meta, link, noscript, iframe, canvas, svg').remove();
+  $('script, style, meta, link, noscript, canvas, svg').remove();
   
   $('*').each((_, el) => {
     const $el = $(el);
@@ -39,6 +40,7 @@ export const removeNonContentTags = async ($) => {
       'href', 'src', 'type', 'alt', 'title',
       'placeholder', 'name', 'id', 'class', 'value',
       'data-testid', 'disabled', 'role', 'data-state',
+      'data-testronaut-frame', 'data-testronaut-frame-status',
       // keep key data-* attributes that help identify rows/items without bloating too much
       'data-type', 'data-id', 'data-title', 'data-parentid', 'data-order'
     ];

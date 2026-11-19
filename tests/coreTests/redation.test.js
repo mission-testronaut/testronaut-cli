@@ -83,6 +83,15 @@ describe('redaction utilities', () => {
       expect(redacted.value).toBe('•••••• (6)');
       expect(redacted.code).toBe('•••••• (6)');
     });
+
+    it('masks prompt input prepared for a JavaScript dialog', () => {
+      const redacted = redactArgs('prepare_dialog_response', {
+        type: 'prompt', action: 'accept', input: 'private answer', message: 'Name?',
+      });
+      expect(redacted).toEqual({
+        type: 'prompt', action: 'accept', input: '•••••• (14)', message: 'Name?',
+      });
+    });
   });
 
   describe('redactPasswordInText', () => {

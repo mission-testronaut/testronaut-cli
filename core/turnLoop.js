@@ -59,6 +59,7 @@ import {
   createEmptyGroundControl,
   applyGroundControlUpdate,
   recordGroundTelemetry,
+  recordRecovery,
  } from '../tools/contextControl.js';
 
 // ─────────────────────────────────────────────
@@ -159,6 +160,7 @@ const TURN_RETRY_BASE_DELAY_MS = 500;
 const FIRE_AND_FORGET_TOOLS = new Set([
   'screenshot',
   'click',
+  'reload',
   'click_text',
   // 'expand_menu',
   'fill',
@@ -170,6 +172,7 @@ const FIRE_AND_FORGET_TOOLS = new Set([
   'request_human_input',
   'set_ground_control_state',
   'record_mission_telemetry',
+  'record_recovery',
 ]);
 
 function currentBrowserUrl(browser) {
@@ -184,6 +187,27 @@ async function captureBrowserEvidence(browser, html, previous) {
   });
   const states = await collectBrowserControlState(browser);
   return mergeBrowserControlState(evidence, states);
+}
+
+function collectMissionEvidenceSources(recordedSteps, agentMemory) {
+  const sources = new Set();
+  if (agentMemory?.browserEvidence) sources.add('browser_state');
+
+  for (const recordedStep of recordedSteps) {
+    if (recordedStep?.screenshotPath) sources.add('screenshot');
+    if (recordedStep?.dialogs?.some(dialog => dialog?.matched && dialog?.expected)) {
+      sources.add('matched_dialog');
+    }
+    const events = Array.isArray(recordedStep?.events) ? recordedStep.events : [];
+    if (events.some(event => /\[model\] → (?:get_dom|check_text|probe)\b/.test(event))) {
+      sources.add('browser_observation');
+    }
+    if (events.some(event => /\[tool \] ← FOUND:/.test(event))) {
+      sources.add('assertion_result');
+    }
+  }
+
+  return [...sources];
 }
 
 /**
@@ -399,7 +423,7 @@ export const turnLoop = async (
 
     step.jevGate = { triggered: true, ...gate };
     step.events.push(`🔬 Jev completion gate triggered at ${Math.round(gate.threshold * 100)}% threshold`);
-    step.result = '✅ Mission Success (Jev gate)';
+    step.result = '✅ Mission accomplished (Jev verified)';
     recordStep(step);
     const finalMessage = 'SUCCESS: Jev completion gate found sufficient browser evidence.';
     return { success: true, finalMessage, steps: stepsArchive, completedBy: 'jev_gate' };
@@ -630,6 +654,14 @@ export const turnLoop = async (
           } else if (fnName === 'record_mission_telemetry') {
             const recorded = recordGroundTelemetry(groundControl, args, { turn });
             result = { ok: true, recorded };
+          } else if (fnName === 'record_recovery') {
+            let screenshot = null;
+            if (args.screenshot && process.env.TESTRONAUT_SCREENSHOTS !== '0') {
+              const screenshotResult = await CHROME_TOOL_MAP.screenshot(browser, {}, agentMemory);
+              screenshot = String(screenshotResult || '').match(/(?:\.\/)?screenshots\/[^\s]+/)?.[0] || null;
+            }
+            const recorded = recordRecovery(groundControl, args, { turn, screenshot });
+            result = { ok: true, recorded };
           } else {
             const toolHandler = CHROME_TOOL_MAP[fnName];
             if (typeof toolHandler !== 'function') throw new Error(`Unknown tool: ${fnName}`);
@@ -640,6 +672,24 @@ export const turnLoop = async (
           errorMessage = `ERROR: ${e.message}`;
           result = errorMessage;
           hadToolIssues = true;
+        }
+
+        const dialogEvents = browser?.drainDialogEvents?.() || [];
+        if (dialogEvents.length) {
+          step.dialogs = step.dialogs || [];
+          step.dialogs.push(...dialogEvents);
+          for (const dialogEvent of dialogEvents) {
+            if (dialogEvent.event === 'dialog_rule_expired') {
+              step.events.push(`⏱️ Dialog response ${dialogEvent.ruleId} expired before a matching ${dialogEvent.expectedType} appeared.`);
+            } else {
+              const expectation = dialogEvent.matched ? 'expected' : 'unexpected';
+              step.events.push(`💬 ${expectation} ${dialogEvent.type} dialog: ${JSON.stringify(dialogEvent.message)} → ${dialogEvent.outcome}`);
+            }
+          }
+          result = JSON.stringify({
+            result: (() => { try { return JSON.parse(result); } catch { return result; } })(),
+            dialogs: dialogEvents,
+          });
         }
 
         if (fnName === 'request_human_input') {
@@ -808,7 +858,21 @@ export const turnLoop = async (
           // non-JSON results ignored
         }
 
-        let toolStatusLabel = errorMessage ? '❌ Failed' : '✅ Success';
+        // A tool returning without throwing only proves that its invocation ran.
+        // It does not prove that the requested operation or mission goal succeeded.
+        let toolStatusLabel = errorMessage ? '❌ System fault' : '🛰️ Engaged';
+        if (!errorMessage) {
+          try {
+            const parsed = JSON.parse(result);
+            const operationOutcome = typeof parsed?.ok === 'boolean'
+              ? parsed.ok
+              : (typeof parsed?.passed === 'boolean' ? parsed.passed : null);
+            if (operationOutcome === true) toolStatusLabel = '✅ Action confirmed';
+            if (operationOutcome === false) toolStatusLabel = '⚠️ Action unconfirmed';
+          } catch {
+            // Strings and other unstructured results remain transport-level "Engaged".
+          }
+        }
         if (fnName === 'get_mfa_code' && !errorMessage) {
           try {
             const parsed = JSON.parse(result);
@@ -925,7 +989,9 @@ export const turnLoop = async (
         //   bloating context with large payloads (file JSON, etc.).
         // - For semantic tools (get_dom, check_text, etc.), send full result.
         let contentForModel;
-        if (FIRE_AND_FORGET_TOOLS.has(fnName)) {
+        if (dialogEvents.length) {
+          contentForModel = result;
+        } else if (FIRE_AND_FORGET_TOOLS.has(fnName)) {
           contentForModel = errorMessage || 'OK';
         } else {
           contentForModel = result;
@@ -973,7 +1039,7 @@ export const turnLoop = async (
         // model functionCall to immediately follow user content or a
         // functionResponse; inserting it before `msg` would create adjacent,
         // reversed model function-call turns.
-        if (!errorMessage && ['click_text', 'click', 'expand_menu'].includes(fnName)) {
+        if (!errorMessage && ['click_text', 'click', 'expand_menu', 'reload'].includes(fnName)) {
           domRefreshSource = fnName;
         }
       }
@@ -998,7 +1064,7 @@ export const turnLoop = async (
         if (gatedResult) return gatedResult;
       }
       if (hadToolIssues && turnRetries < retryLimitClamped) {
-        step.result = '⏳ Retrying turn';
+        step.result = '🔄 Replotting course';
         const retryNumber = attempt - 1;
         step.events.push(`🔁 Re-attempt ${retryNumber}/${retryLimitClamped} after tool issues`);
         recordStep(step);
@@ -1012,7 +1078,7 @@ export const turnLoop = async (
 
       // reset retries after a clean turn or after exhausting retries
       turnRetries = 0;
-      step.result = hadToolIssues ? '⚠️ Turn Issues' : '✅ Passed';
+      step.result = hadToolIssues ? '⚠️ Navigation issue' : '🚀 Progressing';
       recordStep(step);
       continue;
     }
@@ -1042,10 +1108,15 @@ export const turnLoop = async (
       }
       await recordJevShadow(step, msg, 'final_response');
       step.events.push(finalResponse.finalMessage);
-      step.result = finalResponse.success ? '✅ Mission Success' : '❌ Mission Failure';
+      const evidenceSources = collectMissionEvidenceSources([...stepsArchive, step], agentMemory);
+      const evidenceRecorded = finalResponse.success && evidenceSources.length > 0;
+      step.result = finalResponse.success
+        ? evidenceRecorded ? '✅ Mission accomplished · evidence recorded' : '⚠️ Completion reported · limited evidence'
+        : '❌ Mission incomplete';
+      if (finalResponse.success) step.verification = { level: evidenceRecorded ? 'evidence_recorded' : 'limited_evidence', sources: evidenceSources };
       recordStep(step);
       turnRetries = 0;
-      return { success: finalResponse.success, finalMessage: finalResponse.finalMessage, steps: stepsArchive };
+      return { success: finalResponse.success, finalMessage: finalResponse.finalMessage, steps: stepsArchive, evidenceRecorded, evidenceSources };
     }
 
     // ─────────────────────────────────────────────
@@ -1073,7 +1144,7 @@ export const turnLoop = async (
     retryAttempt: 1,
     retryLimit: 0,
     events: ['⏱️ Working-turn budget exhausted; requesting final mission verdict.'],
-    result: '🟡 Awaiting Closure',
+    result: '📡 Awaiting mission verdict',
     missionName,
     provider: PROVIDER_ID,
     model: MODEL_ID,
@@ -1097,13 +1168,20 @@ export const turnLoop = async (
     const finalResponse = finalResponseHandler(msg);
     if (finalResponse) {
       closureStep.events.push(finalResponse.finalMessage);
-      closureStep.result = finalResponse.success ? '✅ Mission Success' : '❌ Mission Failure';
+      const evidenceSources = collectMissionEvidenceSources([...stepsArchive, closureStep], agentMemory);
+      const evidenceRecorded = finalResponse.success && evidenceSources.length > 0;
+      closureStep.result = finalResponse.success
+        ? evidenceRecorded ? '✅ Mission accomplished · evidence recorded' : '⚠️ Completion reported · limited evidence'
+        : '❌ Mission incomplete';
+      if (finalResponse.success) closureStep.verification = { level: evidenceRecorded ? 'evidence_recorded' : 'limited_evidence', sources: evidenceSources };
       recordStep(closureStep);
       return {
         success: finalResponse.success,
         finalMessage: finalResponse.finalMessage,
         steps: stepsArchive,
         completedBy: 'budget_closure',
+        evidenceRecorded,
+        evidenceSources,
       };
     }
     closureStep.events.push('FAILURE: The closure response did not provide an explicit SUCCESS or FAILURE verdict.');
@@ -1111,7 +1189,7 @@ export const turnLoop = async (
     closureStep.events.push(`FAILURE: Unable to obtain the closure verdict: ${error?.message || error}`);
   }
 
-  closureStep.result = '❌ Mission Failure';
+  closureStep.result = '❌ Mission incomplete';
   recordStep(closureStep);
   return {
     success: false,

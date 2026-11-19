@@ -50,7 +50,7 @@ const formatListLimit = (v) => v === Infinity ? 'all' : v;
  * @param {{ preMission?: any|any[], mission?: any|any[], postMission?: any|any[] }} params
  * @param {string} missionName
  */
-export async function runMissions({ preMission, mission, postMission, tags = [] }, missionName) {
+export async function runMissions({ preMission, mission, postMission, tags = [], recovery }, missionName) {
   // 1) Config and turn budget (with guardrails)
   const cfg = await loadConfig();
   const { effectiveMax, limits, notes } = enforceTurnBudget(cfg);
@@ -61,6 +61,7 @@ export async function runMissions({ preMission, mission, postMission, tags = [] 
   const automaticDomLimitInfo = getAutomaticDomLimit(cfg);
   const resourceGuard = getResourceGuardConfig(cfg);
   const humanInput = getHumanInputConfig(cfg);
+  const recoveryPolicy = recovery ?? cfg?.recovery;
   const debugEnabled = isDebugEnabled();
   const missionTags = normalizeTags([
     ...normalizeTags(tags),
@@ -226,6 +227,7 @@ export async function runMissions({ preMission, mission, postMission, tags = [] 
       debug: debugEnabled,
       resourceGuard,
       humanInput,
+      recovery: recoveryPolicy,
     }
   );
   if (!success) {
@@ -235,13 +237,26 @@ export async function runMissions({ preMission, mission, postMission, tags = [] 
 
   for (const result of success) {
     result.tags = result.submissionType === 'mission' ? missionTags : [];
+    const terminalResult = result.steps?.at(-1)?.result || '';
+    // Preserve compatibility with older/custom agents that communicate the
+    // terminal verdict through step text but return an inconsistent status.
+    if (/\bfailure\b|mission incomplete/i.test(terminalResult)) {
+      result.status = 'failed';
+    }
   }
 
-  const missionStatus = success[0].steps[success[0].steps.length - 1].result;
-  if (missionStatus.toLowerCase().includes('failure')) {
-    success[0].status = 'failed';
-  }
-  console.log('\n✅ Mission flow complete.');
+  const failed = success.some(result => result.status === 'failed');
+  const recovered = success.some(result => result.status === 'recovered');
+  const limitedEvidence = success.some(result => result.verification === 'limited_evidence');
+  console.log(failed
+    ? '\n❌ Mission incomplete.'
+    : limitedEvidence
+      ? recovered
+        ? '\n⚠️ Completion reported after recovery · limited evidence.'
+        : '\n⚠️ Completion reported · limited evidence.'
+      : recovered
+        ? '\n⚠️ Mission accomplished after recovery.'
+        : '\n✅ Mission accomplished.');
   return success;
 }
 

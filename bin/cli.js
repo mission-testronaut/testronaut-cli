@@ -107,6 +107,8 @@ const screenshotsEnabled = !args.includes('--no-screenshots');
 args = args.filter(arg => arg !== '--no-screenshots');
 const uploadScreenshots = !args.includes('--no-upload-screenshots');
 args = args.filter(arg => arg !== '--no-upload-screenshots');
+const strictRecoveryFlag = args.includes('--strict-recovery');
+args = args.filter(arg => arg !== '--strict-recovery');
 process.env.TESTRONAUT_SCREENSHOTS = screenshotsEnabled ? '1' : '0';
 
 let sessionMode = 'isolated';
@@ -430,6 +432,11 @@ function buildEffectiveConfig(config = {}, cwd = process.cwd()) {
     tagMatch: config.tagMatch || 'any',
     addTags: normalizeTags([...(config.addTags || []), ...cliAddTags]),
     screenshots: screenshotsEnabled,
+    recovery: {
+      permitted: Array.isArray(config?.recovery?.permitted) ? config.recovery.permitted : null,
+      failBuild: strictRecoveryFlag || config?.recovery?.failBuild === true,
+      source: strictRecoveryFlag ? 'cli' : (config?.recovery?.failBuild != null ? 'config' : 'default'),
+    },
     authenticated: Boolean(config.sessionToken),
     optimization,
     guardrails: {
@@ -487,9 +494,13 @@ function collectReportScreenshotPaths(report) {
   const names = [];
   const seen = new Set();
   for (const mission of Array.isArray(report?.missions) ? report.missions : []) {
-    for (const step of Array.isArray(mission?.steps) ? mission.steps : []) {
-      if (typeof step?.screenshotPath !== 'string') continue;
-      const name = step.screenshotPath.trim().replace(/^\.\//, '').replaceAll('\\', '/');
+    const references = [
+      ...(Array.isArray(mission?.steps) ? mission.steps.map(step => step?.screenshotPath) : []),
+      ...(Array.isArray(mission?.recoveries) ? mission.recoveries.map(recovery => recovery?.screenshot) : []),
+    ];
+    for (const reference of references) {
+      if (typeof reference !== 'string') continue;
+      const name = reference.trim().replace(/^\.\//, '').replaceAll('\\', '/');
       if (!name || seen.has(name)) continue;
       seen.add(name);
       names.push(name);
@@ -888,6 +899,7 @@ Options:
   --dry-run                 Show the resolved mission plan without launching a browser
   --no-screenshots          Remove the screenshot tool for this run
   --no-upload-screenshots   Upload report JSON without its screenshots
+  --strict-recovery         Exit non-zero when any mission passes after recovery
   --json                    Emit machine-readable command/run output
   --quiet                   Suppress informational logs
   --base=<git-ref>          Base ref for Jev suite selection (default: HEAD~1)
@@ -980,6 +992,7 @@ const {
 } = await discoverMissionFiles({ cwd: process.cwd() });
 for (const warning of missionDiscoveryWarnings) console.warn(`⚠️ ${warning}`);
 const tagConfig = await loadConfig(process.cwd());
+const strictRecovery = strictRecoveryFlag || tagConfig?.recovery?.failBuild === true;
 const optimizationPolicy = resolveOptimizationPolicy({ config: tagConfig });
 if (!optimizationPolicy.valid) {
   console.error('❌ Invalid optimization objective or mode in testronaut-config.json.');
@@ -1186,7 +1199,7 @@ const runFile = async (filePath) => {
         durationMs: Math.max(0, missionFileEndTime - missionFileStartTime),
       });
       const missionResults = Array.isArray(result) ? result : [result];
-      return !missionResults.some(item => item?.status === 'failed');
+      return !missionResults.some(item => item?.status === 'failed' || (strictRecovery && item?.status === 'recovered'));
     }
     console.error(`❌ Mission does not export executeMission(): ${filePath}`);
   } catch (err) {
@@ -1256,7 +1269,7 @@ const { provider: llmProvider, model: llmModel } = resolveProviderModel({ cwd: p
 
 
 const report = {
-  schemaVersion: 2,
+  schemaVersion: 3,
   runId,
   cli: { version: CLI_VERSION },
   startTime: startTime.toISOString(),
@@ -1271,6 +1284,7 @@ const report = {
   summary: {
     totalMissions: flatMissions.length,
     passed: flatMissions.filter(m => m.status === 'passed').length,
+    recovered: flatMissions.filter(m => m.status === 'recovered').length,
     failed: flatMissions.filter(m => m.status === 'failed').length,
   },
   missions: flatMissions
@@ -1319,7 +1333,7 @@ fs.writeFileSync(path.join(outputDir, `${runId}.json`), JSON.stringify(report, n
 const htmlReportPath = path.join(outputDir, `${runId}.html`);
 generateHtmlReport(report, htmlReportPath);
 if (jsonOutput) writeOutput(report);
-else terminalUi.summary({ ...report.summary, durationMs: report.durationMs, reportPath: path.relative(process.cwd(), htmlReportPath) });
+else terminalUi.summary({ ...report.summary, strictRecovery, durationMs: report.durationMs, reportPath: path.relative(process.cwd(), htmlReportPath) });
 
   try {
     if (!process.env.TN_KEEP_TMP && fs.existsSync(TMP_DIR)) {

@@ -41,8 +41,12 @@ export function generateHtmlReport(report, outputPath) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
-  const badge = (status) =>
+  const badge = (status, verification) =>
+    status === 'passed' && verification === 'verified' ? '✅ Passed · independently verified' :
+    status === 'passed' && verification === 'evidence_recorded' ? '✅ Passed · evidence recorded' :
+    status === 'passed' && verification === 'limited_evidence' ? '⚠️ Passed · limited evidence' :
     status === 'passed' ? '✅ Passed' :
+    status === 'recovered' ? '⚠️ Passed after recovery' :
     status === 'failed' ? '❌ Failed' : (status || '—');
   const providerKey = String(llm.provider ?? '').trim().toLowerCase() === 'claude'
     ? 'anthropic'
@@ -103,10 +107,15 @@ export function generateHtmlReport(report, outputPath) {
     const missionModelUsage = summarizeModelTokens(steps);
     const stepItems = steps.map((step, idx) => {
       const events = Array.isArray(step.events) ? step.events : [];
-      const ok = /✅|Passed|Mission Success/i.test(step.result || '');
+      const dialogs = Array.isArray(step.dialogs) ? step.dialogs : [];
+      const ok = /Mission accomplished|Mission Success|Action confirmed/i.test(step.result || '');
+      const progressing = /Progressing|Replotting course|Awaiting mission verdict|^✅ Passed$/i.test(step.result || '');
+      const reported = /Completion reported|limited evidence/i.test(step.result || '');
       const resultRaw = step.result || '—';
-      const resultTooltip = resultRaw.includes('⚠️ Turn Issues')
+      const resultTooltip = /Navigation issue|Turn Issues/.test(resultRaw)
         ? 'Turn had tool/action issues (e.g., selector/timeouts). It may not indicate a product bug.'
+        : progressing
+          ? 'Intermediate activity only; this does not indicate mission completion.'
         : '';
       const retryAttempt = step.retryAttempt || 1; // includes initial
       const retryLimit = step.retryLimit; // number of retries allowed (excludes initial)
@@ -121,6 +130,36 @@ export function generateHtmlReport(report, outputPath) {
       const imgTag = step.screenshotPath
         ? `<img src="${esc(step.screenshotPath)}" alt="screenshot turn ${esc(step.turn ?? idx)}">`
         : '';
+      const dialogCards = dialogs.map(dialog => {
+        if (dialog.event === 'dialog_rule_expired') {
+          return `<article class="dialog-card dialog-timeout">
+            <div class="dialog-card-label">Report visualization · response timeout</div>
+            <strong>${esc(dialog.expectedType || 'dialog')} rule expired</strong>
+            <span>No matching dialog appeared before ${esc(dialog.ruleId || 'the prepared response')} expired.</span>
+          </article>`;
+        }
+        const type = String(dialog.type || 'dialog');
+        const accepted = dialog.action === 'accept';
+        const acceptLabel = type === 'beforeunload' ? 'Leave' : 'Accept';
+        const dismissLabel = type === 'beforeunload' ? 'Stay' : 'Dismiss';
+        return `<article class="dialog-card ${dialog.matched ? 'dialog-expected' : 'dialog-unexpected'}">
+          <div class="dialog-card-label">Report visualization · not a literal browser screenshot</div>
+          <div class="dialog-window">
+            <div class="dialog-title"><span class="dialog-icon">!</span><strong>Browser-native ${esc(type)}</strong></div>
+            <div class="dialog-message">${esc(dialog.message || '(browser supplied no message)')}</div>
+            ${type === 'prompt' ? `<div class="dialog-input">${dialog.inputProvided ? '•••••••• · input provided' : dialog.defaultValueProvided ? '•••••••• · default value present' : 'No input provided'}</div>` : ''}
+            <div class="dialog-actions">
+              <span class="dialog-button ${accepted ? 'chosen' : ''}">${esc(acceptLabel)}</span>
+              <span class="dialog-button ${!accepted ? 'chosen' : ''}">${esc(dismissLabel)}</span>
+            </div>
+          </div>
+          <div class="dialog-meta">
+            <span>${dialog.matched ? '✓ Expected response matched' : '⚠ Unexpected dialog; fail-closed response'}</span>
+            <span>Outcome: ${esc(dialog.outcome || 'unknown')}</span>
+            ${dialog.pageUrl ? `<span>Page: ${esc(dialog.pageUrl)}</span>` : ''}
+          </div>
+        </article>`;
+      }).join('');
       const stepJev = step.jevShadow?.status === 'ok'
         ? ` • Jev: ${formatTokens(step.jevShadow.usage?.input_tokens)} in / ${formatTokens(step.jevShadow.usage?.output_tokens)} out`
         : step.jevShadow
@@ -143,14 +182,15 @@ export function generateHtmlReport(report, outputPath) {
         : '';
 
       return `
-        <details class="step" ${ok ? '' : 'open'}>
+        <details class="step" ${ok || progressing || reported ? '' : 'open'}>
           <summary>
             <span class="turn">${step.isClosureTurn ? 'Closure' : `Turn ${esc((step.turn ?? idx) + 1)}`}${esc(attemptLabel)}${stepDuration}</span>
             ${humanInput}
             ${planSpan}
-            <span class="step-result ${ok ? 'ok' : 'bad'}" ${resultTooltip ? `title="${esc(resultTooltip)}"` : ''}>${esc(resultRaw)}</span>
+            <span class="step-result ${ok ? 'ok' : reported ? 'warn' : progressing ? '' : 'bad'}" ${resultTooltip ? `title="${esc(resultTooltip)}"` : ''}>${esc(resultRaw)}</span>
             <span class="tokens">${esc(step.model || llm.model || 'Model')} tokens: ${esc(step.tokensUsed ?? '—')} (${esc(step.inputTokens ?? '—')} in / ${esc(step.outputTokens ?? '—')} out)${routeLabel}${stepJev}</span>
           </summary>
+          ${dialogCards ? `<div class="dialog-evidence">${dialogCards}</div>` : ''}
           <pre class="events">${esc(events.join('\n')) || '(no events)'}</pre>
           ${imgTag}
         </details>
@@ -160,19 +200,26 @@ export function generateHtmlReport(report, outputPath) {
     const type = String(m.submissionType || 'mission').toLowerCase();
     const typeLabel = (type === 'premission' || type === 'postmission') ? type : 'mission';
     const prettyTitle = `${esc(m.missionName || 'Mission')} — ${typeLabel}${m.submissionName ? `: ${esc(m.submissionName)}` : ''}`;
-    const statusClass = m.status === 'failed' ? 'bad' : (m.status === 'passed' ? 'ok' : '');
+    const statusClass = m.status === 'failed' ? 'bad' : (m.status === 'recovered' || m.verification === 'limited_evidence' ? 'warn' : (m.status === 'passed' ? 'ok' : ''));
+    const recoveries = Array.isArray(m.recoveries) ? m.recoveries : [];
+    const recoveryItems = recoveries.length ? `
+      <div class="recoveries">
+        <h4>Recoveries</h4>
+        ${recoveries.map(recovery => `<div class="recovery"><strong>Turn ${esc(Number(recovery.turn ?? 0) + 1)} · ${esc(recovery.action)}</strong><span>${esc(recovery.reason)}</span>${recovery.evidence ? `<span>${esc(recovery.evidence)}</span>` : ''}${recovery.screenshot ? `<img src="${esc(recovery.screenshot)}" alt="Recovery evidence">` : ''}</div>`).join('')}
+      </div>` : '';
 
     return `
       <details class="mission-submission">
         <summary>
           <span class="name">${prettyTitle}</span>
-          <span class="status ${statusClass}">${badge(m.status)}</span>
+          <span class="status ${statusClass}">${badge(m.status, m.verification)}</span>
           <span class="meta">steps: ${steps.length} • duration: ${mDurationSec}s • ${esc(tokenMeta(missionModelUsage, missionJevUsage))}</span>
           <span class="toolbar">
             <button class="btn-mini toggle" data-scope="submission" aria-label="Expand">▼</button>
           </span>
         </summary>
         <div class="steps">
+          ${recoveryItems}
           ${stepItems || '<div class="empty">No steps recorded.</div>'}
         </div>
       </details>
@@ -186,10 +233,21 @@ export function generateHtmlReport(report, outputPath) {
     return acc;
   }, {});
 
-  const groupStatus = (subs) => subs.some(s => s.status === 'failed') ? 'failed' : 'passed';
+  const groupStatus = (subs) => subs.some(s => s.status === 'failed')
+    ? 'failed'
+    : subs.some(s => s.status === 'recovered') ? 'recovered' : 'passed';
 
   const missionGroupBlock = (missionName, subs) => {
     const status = groupStatus(subs);
+    const verification = status === 'passed'
+      ? subs.some(s => s.verification === 'limited_evidence')
+        ? 'limited_evidence'
+        : subs.every(s => s.verification === 'verified')
+          ? 'verified'
+          : subs.some(s => s.verification === 'evidence_recorded')
+            ? 'evidence_recorded'
+            : undefined
+      : undefined;
     const totalSteps = subs.reduce((n, s) => n + (Array.isArray(s.steps) ? s.steps.length : 0), 0);
     const startTimes = subs.map(s => s.startTime || 0).filter(Boolean);
     const endTimes = subs.map(s => s.endTime || 0).filter(Boolean);
@@ -213,7 +271,7 @@ export function generateHtmlReport(report, outputPath) {
         <summary>
           <span class="name">${esc(missionName)}</span>
           <span class="mission-tags">${tags.map(tag => `<span class="tag-small" style="${tagStyle(tag)}">${esc(tag)}</span>`).join('')}</span>
-          <span class="status ${status === 'failed' ? 'bad' : 'ok'}">${badge(status)}</span>
+          <span class="status ${status === 'failed' ? 'bad' : status === 'recovered' || verification === 'limited_evidence' ? 'warn' : 'ok'}">${badge(status, verification)}</span>
           <span class="meta">${sourceFiles.length ? `${sourceFiles.map(esc).join(', ')} • ` : ''}submissions: ${subs.length} • steps: ${totalSteps} • duration: ${groupDur}s • ${esc(tokenMeta(groupModelUsage, groupJevUsage))}</span>
           <span class="toolbar">
             <button class="btn-mini toggle" data-scope="mission" aria-label="Expand">▼</button>
@@ -234,9 +292,10 @@ export function generateHtmlReport(report, outputPath) {
     const st = groupStatus(grouped[name]);
     acc.total += 1;
     acc.passed += st === 'passed' ? 1 : 0;
+    acc.recovered += st === 'recovered' ? 1 : 0;
     acc.failed += st === 'failed' ? 1 : 0;
     return acc;
-  }, { total: 0, passed: 0, failed: 0 });
+  }, { total: 0, passed: 0, recovered: 0, failed: 0 });
 
   const html = `<!DOCTYPE html>
 <html>
@@ -379,9 +438,14 @@ export function generateHtmlReport(report, outputPath) {
     .name{ flex:1; }
     .status.ok{ color: var(--ok); font-weight:700; }
     .status.bad{ color: var(--bad); font-weight:700; }
+    .status.warn{ color: var(--amber); font-weight:700; }
     .meta{ color: var(--text-muted); font-size:12px; }
 
     .steps{ padding: 0 12px 12px; }
+    .recoveries{ margin:12px 0; padding:12px; border:1px solid rgba(251,191,36,.4); border-radius:12px; background:rgba(251,191,36,.1); }
+    .recoveries h4{ margin:0 0 8px; color:var(--amber); }
+    .recovery{ display:grid; gap:4px; margin-top:8px; color:var(--text-muted); }
+    .recovery strong{ color:var(--text); }
     .step summary{
       background: rgba(255,255,255,.04);
       border:1px solid var(--hairline);
@@ -400,6 +464,7 @@ export function generateHtmlReport(report, outputPath) {
       white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
     }
     .step-result.ok{ color: var(--ok); font-weight:700; }
+    .step-result.warn{ color: var(--amber); font-weight:700; }
     .step-result.bad{ color: var(--bad); font-weight:700; }
     .tokens{ color: var(--text-muted); font-size:12px; margin-left:auto; font-variant-numeric: tabular-nums; }
 
@@ -411,6 +476,27 @@ export function generateHtmlReport(report, outputPath) {
       max-height:320px; overflow:auto; white-space:pre-wrap;
       border: 1px solid var(--hairline-strong);
     }
+
+    .dialog-evidence{display:grid;gap:12px;margin:12px 0 0;}
+    .dialog-card{
+      display:grid;gap:10px;padding:12px;border:1px solid rgba(96,165,250,.34);
+      border-radius:12px;background:linear-gradient(145deg,rgba(15,23,42,.96),rgba(30,41,59,.92));
+    }
+    .dialog-card.dialog-unexpected,.dialog-card.dialog-timeout{border-color:rgba(251,191,36,.48);}
+    .dialog-card-label{font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#93c5fd;}
+    .dialog-window{
+      width:min(100%,520px);margin:auto;padding:18px;border-radius:13px;color:#e5e7eb;
+      background:#343540;border:1px solid rgba(255,255,255,.14);box-shadow:0 18px 40px rgba(0,0,0,.35);
+    }
+    .dialog-title{display:flex;align-items:center;gap:9px;font-size:14px;}
+    .dialog-icon{display:grid;place-items:center;width:22px;height:22px;border-radius:50%;background:#f59e0b;color:#111827;font-weight:900;}
+    .dialog-message{padding:18px 0;font-size:15px;line-height:1.45;white-space:pre-wrap;}
+    .dialog-input{padding:9px 11px;border:2px solid #22d3ee;border-radius:8px;background:#171821;color:#cbd5e1;font:12px ui-monospace,monospace;}
+    .dialog-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:16px;}
+    .dialog-button{padding:7px 15px;border-radius:8px;background:#454753;border:1px solid rgba(255,255,255,.13);font-size:12px;font-weight:750;}
+    .dialog-button.chosen{color:#07111e;background:#22d3ee;border-color:#67e8f9;box-shadow:0 0 0 2px rgba(34,211,238,.18);}
+    .dialog-meta{display:flex;gap:8px;flex-wrap:wrap;color:var(--text-muted);font-size:11px;}
+    .dialog-meta span{padding:4px 7px;border:1px solid var(--hairline);border-radius:999px;background:rgba(255,255,255,.035);}
 
     img{
       display:block; max-width:100%;
@@ -497,6 +583,7 @@ export function generateHtmlReport(report, outputPath) {
   <div class="summary">
     <div class="pill">Missions: ${esc(summary.totalMissions ?? totals.total)}</div>
     <div class="pill ok">Passed: ${esc(summary.passed ?? totals.passed)}</div>
+    <div class="pill warn">Recovered: ${esc(summary.recovered ?? totals.recovered)}</div>
     <div class="pill bad">Failed: ${esc(summary.failed ?? totals.failed)}</div>
     ${optimization?.configured ? `<div class="pill">Optimization: ${esc(optimization.objective)} (${esc(optimization.mode)})</div>` : ''}
     ${Object.entries(reportModelUsage.byModel).length > 1

@@ -56,7 +56,7 @@ describe('domControl helpers', () => {
       expect(result).not.toContain('<style');
       expect(result).not.toContain('<meta');
       expect(result).not.toContain('<link');
-      expect(result).not.toContain('<iframe');
+      expect(result).toContain('<iframe src="frame.html"></iframe>');
       expect(result).not.toContain('<canvas');
       expect(result).not.toContain('<svg');
       expect(result).not.toContain('<!-- comment -->');
