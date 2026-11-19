@@ -29,3 +29,17 @@ describe('runtime dependency compatibility', () => {
     expect(inquirer.engines.node).toContain('^20.17.0');
   });
 });
+
+describe('development dependency compatibility', () => {
+  it('uses the reviewed fast-uri release through the Periapsis AJV toolchain', () => {
+    const periapsis = lock.packages['node_modules/periapsis'];
+    const ajv = lock.packages['node_modules/ajv'];
+    const fastUri = lock.packages['node_modules/fast-uri'];
+
+    expect(pkg.devDependencies.periapsis).toBe('^2.1.2');
+    expect(periapsis.dependencies.ajv).toBe('^8.17.1');
+    expect(ajv.dependencies['fast-uri']).toBe('^3.0.1');
+    expect(fastUri.version).toBe('3.1.9');
+    expect(fastUri.dev).toBe(true);
+  });
+});
