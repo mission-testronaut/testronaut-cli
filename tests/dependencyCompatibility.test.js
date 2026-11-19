@@ -13,10 +13,10 @@ describe('runtime dependency compatibility', () => {
   });
 
   it('keeps the manifest, lockfile root, and installed Playwright versions aligned', () => {
-    expect(pkg.dependencies.playwright).toBe('^1.63.0');
+    expect(pkg.dependencies.playwright).toBe('1.64.1');
     expect(lock.packages[''].dependencies.playwright).toBe(pkg.dependencies.playwright);
-    expect(lock.packages['node_modules/playwright'].version).toBe('1.63.0');
-    expect(lock.packages['node_modules/playwright-core'].version).toBe('1.63.0');
+    expect(lock.packages['node_modules/playwright'].version).toBe('1.64.1');
+    expect(lock.packages['node_modules/playwright-core'].version).toBe('1.64.1');
   });
 
   it('declares the minimum Node runtime required by Inquirer 14', () => {
