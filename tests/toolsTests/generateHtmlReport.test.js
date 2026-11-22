@@ -88,6 +88,21 @@ describe('generateHtmlReport', () => {
     expect(html).toContain('Turn 1 • 1.25s');
   });
 
+  it('renders viewer-local timestamps while retaining exact UTC values', () => {
+    const outPath = path.join(tmpDir, 'timestamps.html');
+    generateHtmlReport({
+      startTime: '2026-11-22T18:03:27.488Z',
+      endTime: 'invalid',
+      missions: [],
+    }, outPath);
+    const html = fs.readFileSync(outPath, 'utf8');
+    expect(html).toContain('datetime="2026-11-22T18:03:27.488Z"');
+    expect(html).toContain('title="Exact UTC: 2026-11-22T18:03:27.488Z"');
+    expect(html).toContain("new Intl.DateTimeFormat(undefined");
+    expect(html).toContain("timeZoneName: 'short'");
+    expect(html).toContain('<strong>End:</strong> —');
+  });
+
   it('writes an HTML report containing mission and retry metadata', () => {
     const report = {
       runId: 'run_test',
