@@ -61,7 +61,7 @@ npm install -g testronaut
 Then initialize your project:
 
 ```bash
-testronaut --init
+testronaut init
 ```
 
 Run the sample mission:
@@ -74,7 +74,7 @@ testronaut missions/welcome.mission.js
 
 **One-off / no install** (use `npx` to run without installing):
 ```bash
-npx testronaut --init
+npx testronaut init
 npx testronaut welcome.mission.js
 
 # Paths work too, which enables shell tab completion
@@ -146,11 +146,14 @@ Choose your preferred LLM at init or via environment variables.
 
 ```bash
 # During init
-testronaut --init
+testronaut init
 
 # Or override anytime
 TESTRONAUT_PROVIDER=gemini TESTRONAUT_MODEL=gemini-3.8-flash testronaut
 ```
+
+Run `testronaut init` again to change the configured model or provider. Other
+project settings and the existing `.env` file are preserved.
 
 ### Token-rate override
 

@@ -5,7 +5,7 @@
  * -------
  * Purpose:
  *   Single entry point for the Testronaut CLI:
- *   - Parses flags (e.g., --model, --turns, --init, help).
+ *   - Parses commands and flags (e.g., init/--init, --model, --turns, help).
  *   - Runs mission files (single or all), aggregates results, and writes HTML/JSON reports.
  *   - Provides subcommands: login, upload (report + screenshots), serve/view (static file server).
  *
@@ -13,7 +13,7 @@
  *   --model <id> / --model=<id>         → sets TESTRONAUT_MODEL env (wins over config file)
  *   --provider <id> / --provider=<id>   → sets TESTRONAUT_PROVIDER env (wins over config file)
  *   --turns <n> / --turns=<n>           → sets TESTRONAUT_TURNS env (wins over config file)
- *   --init                               → scaffolds project + optional Playwright browsers
+ *   init / --init                        → scaffolds project + optional Playwright browsers
  *   --dev                                → use staging API base URL
  *   --help                               → prints help
  *
@@ -158,6 +158,10 @@ function isPromptExitError(error) {
 
 function formatCliError(error) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function hasInitCommand(argsList) {
+  return argsList[0] === 'init' || argsList.includes('--init');
 }
 
 const cliName = detectCliName();
@@ -391,6 +395,7 @@ export const __test__ = {
   isDirectInvocation,
   isPromptExitError,
   formatCliError,
+  hasInitCommand,
   resolveMissionPath,
   collectReportScreenshotNames,
   collectReportScreenshotPaths,
@@ -874,12 +879,13 @@ Usage:
   ${cliName} list           List discovered missions and tags without running them
   ${cliName} select         Ask Jev which missions are relevant to the current git diff (dry-run only)
   ${cliName} config         Show effective configuration and value sources
+  ${cliName} init           Initialize or update project configuration
   ${cliName} upload [file]  Upload the latest report or a selected report file/run ID
   ${cliName} serve        Serve & open the most recent HTML report (read-only)
   ${cliName} view         Alias of 'serve'
 
 Options:
-  --init                    Scaffold project folders and a welcome mission
+  --init                    Alias of 'init'
   --turns=<n>               Override max turns for this run (e.g., --turns=30)
   --debug[=<bool>]          Enable verbose debug logs (or set TESTRONAUT_DEBUG=1)
   --provider=<id>           Override LLM provider (openai, gemini, or anthropic)
@@ -918,13 +924,13 @@ Examples:
   ${cliName} select --base=origin/main
   ${cliName} upload
   ${cliName} serve
-  ${cliName} --init
+  ${cliName} init
   ${cliName} --tag authentication --tag smoke
   ${cliName} --add-tag staging --add-tag full-test-run
 `;
 
 async function main() {
-if (args.includes('--init')) {
+if (hasInitCommand(args)) {
   await initializeTestronautProject();
   await createWelcomeMission();
 

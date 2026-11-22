@@ -40,6 +40,107 @@ import { DEFAULT_OPENAI_MODEL, OPENAI_MODELS } from '../llm/openAI/models.js';
 import { ANTHROPIC_MODELS, DEFAULT_ANTHROPIC_MODEL } from '../llm/anthropic/models.js';
 import { defaultRateLimitConfig } from '../tools/rateLimitDefaults.js';
 
+const PROVIDERS = [
+  { title: 'OpenAI (GPT family)', value: 'openai' },
+  { title: 'Google Gemini', value: 'gemini' },
+  { title: 'Anthropic Claude', value: 'anthropic' },
+];
+
+async function selectProvider(currentProvider = 'openai') {
+  const { llmProvider } = await prompts({
+    type: 'select',
+    name: 'llmProvider',
+    message: 'Which LLM provider would you like to use?',
+    choices: PROVIDERS,
+    initial: Math.max(0, PROVIDERS.findIndex(choice => choice.value === currentProvider)),
+  });
+  return llmProvider;
+}
+
+async function selectModel(provider, currentModel) {
+  if (provider === 'openai') {
+    const currentModels = OPENAI_MODELS.filter(model => !model.legacy);
+    const legacyModels = OPENAI_MODELS.filter(model => model.legacy);
+    const choices = [
+      ...currentModels.map(model => ({
+        title: `${model.label} (${model.description})`,
+        value: model.id,
+      })),
+      { title: '── Legacy models ──', disabled: true },
+      ...legacyModels.map(model => ({
+        title: `${model.label} (${model.description})`,
+        value: model.id,
+      })),
+    ];
+    const selectedIndex = choices.findIndex(choice => choice.value === currentModel);
+    const defaultIndex = choices.findIndex(choice => choice.value === DEFAULT_OPENAI_MODEL);
+    const { openaiModel } = await prompts({
+      type: 'select',
+      name: 'openaiModel',
+      message: 'Select an OpenAI model for agentic workflows (function/tool calling):',
+      choices,
+      initial: selectedIndex >= 0 ? selectedIndex : defaultIndex,
+    });
+
+    if (openaiModel?.startsWith('gpt-5')) {
+      console.log(`
+ℹ️  GPT-5 availability and rate limits depend on your OpenAI account and project.
+`);
+    }
+    return openaiModel;
+  }
+
+  if (provider === 'gemini') {
+    const models = geminiModels();
+    const { geminiModel } = await prompts({
+      type: 'select',
+      name: 'geminiModel',
+      message: 'Select a Google Gemini model:',
+      choices: [
+        { title: 'Gemini 3.8 Flash (latest stable, recommended)', value: 'gemini-3.8-flash' },
+        { title: 'Gemini 3.7 Flash (previous stable)', value: 'gemini-3.7-flash' },
+        { title: 'Gemini 3.6 Flash (stable, token-efficient)', value: 'gemini-3.6-flash' },
+        { title: 'Gemini 3.5 Flash-Lite (fastest, cost-efficient)', value: 'gemini-3.5-flash-lite' },
+        { title: 'Gemini 3.1 Pro Preview (complex reasoning)', value: 'gemini-3.1-pro-preview' },
+        { title: 'Gemini 2.5 Pro (legacy)', value: 'gemini-2.5-pro' },
+        { title: 'Gemini 2.5 Flash (legacy)', value: 'gemini-2.5-flash' },
+        { title: 'Gemini 2.5 Flash-Lite (legacy)', value: 'gemini-2.5-flash-lite' },
+      ],
+      initial: pickInitialIndex(models, currentModel, 'gemini-3.8-flash'),
+    });
+    return geminiModel;
+  }
+
+  if (provider === 'anthropic') {
+    const models = anthropicModels();
+    const { anthropicModel } = await prompts({
+      type: 'select',
+      name: 'anthropicModel',
+      message: 'Select an Anthropic Claude model:',
+      choices: ANTHROPIC_MODELS.map(model => ({
+        title: `${model.label} (${model.description})`,
+        value: model.id,
+      })),
+      initial: pickInitialIndex(models, currentModel, DEFAULT_ANTHROPIC_MODEL),
+    });
+    return anthropicModel;
+  }
+}
+
+function addSelectedModelRateLimit(config) {
+  const defaults = defaultRateLimitConfig(config.provider, config.model);
+  config.rateLimits = {
+    ...defaults,
+    ...(config.rateLimits || {}),
+    models: {
+      ...(config.rateLimits?.models || {}),
+      ...(config.rateLimits?.models?.[config.model]
+        ? {}
+        : defaults.models),
+    },
+  };
+}
+
 export async function initializeTestronautProject() {
   // ─────────────────────────────────────────────
   // STEP 0: Resolve important paths
@@ -61,101 +162,23 @@ export async function initializeTestronautProject() {
   }
 
   // ─────────────────────────────────────────────
-  // STEP 2: Interactive setup (first run only)
+  // STEP 2: Interactive setup
   // ─────────────────────────────────────────────
   if (!config.initialized) {
     // 2a) Provider selection
-    const { llmProvider } = await prompts({
-      type: 'select',
-      name: 'llmProvider',
-      message: 'Which LLM provider would you like to use?',
-      choices: [
-        { title: 'OpenAI (GPT family)', value: 'openai' },
-        { title: 'Google Gemini', value: 'gemini' },
-        { title: 'Anthropic Claude', value: 'anthropic' },
-      ],
-      // If user re-runs init before writing config, preselect known value.
-      initial: Math.max(0, ['openai', 'gemini', 'anthropic'].indexOf(config.provider ?? 'openai'))
-    });
+    const llmProvider = await selectProvider(config.provider);
 
     // Persist provider explicitly to config.
     config.provider = llmProvider;
 
     // 2b) Provider-specific model selection
-    if (llmProvider === 'openai') {
-      const currentModels = OPENAI_MODELS.filter(model => !model.legacy);
-      const legacyModels = OPENAI_MODELS.filter(model => model.legacy);
-      const choices = [
-        ...currentModels.map(model => ({
-          title: `${model.label} (${model.description})`,
-          value: model.id,
-        })),
-        { title: '── Legacy models ──', disabled: true },
-        ...legacyModels.map(model => ({
-          title: `${model.label} (${model.description})`,
-          value: model.id,
-        })),
-      ];
-      const selectedIndex = choices.findIndex(choice => choice.value === config.model);
-      const defaultIndex = choices.findIndex(choice => choice.value === DEFAULT_OPENAI_MODEL);
-      const { openaiModel } = await prompts({
-        type: 'select',
-        name: 'openaiModel',
-        message: 'Select an OpenAI model for agentic workflows (function/tool calling):',
-        choices,
-        // Keep a prior selection highlighted; otherwise default to GPT-5.6.
-        initial: selectedIndex >= 0 ? selectedIndex : defaultIndex,
-      });
-
-      config.model = openaiModel;
-
-      // API access and rate limits vary by OpenAI account and project.
-      if (openaiModel?.startsWith('gpt-5')) {
-        console.log(`
-ℹ️  GPT-5 availability and rate limits depend on your OpenAI account and project.
-`);
-      }
-    } else if (llmProvider === 'gemini') {
-      const models = geminiModels();
-      const { geminiModel } = await prompts({
-        type: 'select',
-        name: 'geminiModel',
-        message: 'Select a Google Gemini model:',
-        choices: [
-          { title: 'Gemini 3.8 Flash (latest stable, recommended)', value: 'gemini-3.8-flash' },
-          { title: 'Gemini 3.7 Flash (previous stable)', value: 'gemini-3.7-flash' },
-          { title: 'Gemini 3.6 Flash (stable, token-efficient)', value: 'gemini-3.6-flash' },
-          { title: 'Gemini 3.5 Flash-Lite (fastest, cost-efficient)', value: 'gemini-3.5-flash-lite' },
-          { title: 'Gemini 3.1 Pro Preview (complex reasoning)', value: 'gemini-3.1-pro-preview' },
-          { title: 'Gemini 2.5 Pro (legacy)', value: 'gemini-2.5-pro' },
-          { title: 'Gemini 2.5 Flash (legacy)', value: 'gemini-2.5-flash' },
-          { title: 'Gemini 2.5 Flash-Lite (legacy)', value: 'gemini-2.5-flash-lite' },
-        ],
-        // Keep prior selection if present; otherwise use the latest stable model.
-        initial: pickInitialIndex(models, config.model, 'gemini-3.8-flash')
-      });
-
-      config.model = geminiModel;
-    } else if (llmProvider === 'anthropic') {
-      const models = anthropicModels();
-      const { anthropicModel } = await prompts({
-        type: 'select',
-        name: 'anthropicModel',
-        message: 'Select an Anthropic Claude model:',
-        choices: ANTHROPIC_MODELS.map(model => ({
-          title: `${model.label} (${model.description})`,
-          value: model.id,
-        })),
-        initial: pickInitialIndex(models, config.model, DEFAULT_ANTHROPIC_MODEL),
-      });
-      config.model = anthropicModel;
-    }
+    config.model = await selectModel(llmProvider, config.model);
 
     // ─────────────────────────────────────────────
     // STEP 3: Merge defaults without clobbering user-provided fields
     // ─────────────────────────────────────────────
     const defaults = defaultConfig(config.projectName || path.basename(root));
-    config.initialized = true; // mark as initialized so subsequent runs skip prompts
+    config.initialized = true; // subsequent runs offer focused reconfiguration
     config.outputDir = config.outputDir || defaults.outputDir;
     config.projectName = config.projectName || defaults.projectName;
     config.maxTurns = config.maxTurns ?? defaults.maxTurns;
@@ -165,7 +188,7 @@ export async function initializeTestronautProject() {
     config.dom = { ...defaults.dom, ...(config.dom || {}) };
     config.resourceGuard = { ...defaults.resourceGuard, ...(config.resourceGuard || {}) };
     config.humanInput = { ...defaults.humanInput, ...(config.humanInput || {}) };
-    config.rateLimits = config.rateLimits || defaultRateLimitConfig(config.provider, config.model);
+    addSelectedModelRateLimit(config);
 
     // ─────────────────────────────────────────────
     // STEP 4: Persist config and scaffold .env (first run only)
@@ -226,8 +249,44 @@ export async function initializeTestronautProject() {
     // Create a small starter mission for a smooth first run.
     createWelcomeMission();
   } else {
-    // Already initialized: keep init idempotent and non-destructive.
-    console.log('🔁 Already initialized. Skipping setup.');
+    const { reconfigure } = await prompts({
+      type: 'select',
+      name: 'reconfigure',
+      message: `Already initialized with ${config.provider}/${config.model}. What would you like to do?`,
+      choices: [
+        { title: 'Change model', value: 'model' },
+        { title: 'Change provider and model', value: 'provider' },
+        { title: 'Keep current settings', value: 'keep' },
+      ],
+      initial: 0,
+    });
+
+    if (reconfigure === 'model' || reconfigure === 'provider') {
+      const previousProvider = config.provider;
+      const previousModel = config.model;
+      const provider = reconfigure === 'provider'
+        ? await selectProvider(config.provider)
+        : config.provider;
+      const model = provider && await selectModel(
+        provider,
+        provider === previousProvider ? config.model : undefined,
+      );
+
+      if (provider && model) {
+        config.provider = provider;
+        config.model = model;
+        addSelectedModelRateLimit(config);
+        fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+        console.log(`✅ Updated model: ${previousProvider}/${previousModel} → ${provider}/${model}`);
+        if (provider !== previousProvider) {
+          console.log(`🔐 Add the ${provider} API key to .env if it is not already present.`);
+        }
+      } else {
+        console.log('↩️  No changes made.');
+      }
+    } else {
+      console.log('↩️  Keeping current settings.');
+    }
   }
 
   // ─────────────────────────────────────────────

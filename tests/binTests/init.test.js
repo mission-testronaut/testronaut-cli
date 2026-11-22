@@ -165,7 +165,7 @@ describe('initializeTestronautProject', () => {
     expect(shared.calls).toBe(2);
   });
 
-  it('is idempotent: when initialized, it skips prompts and does not overwrite .env', async () => {
+  it('is idempotent when an initialized user keeps the current settings', async () => {
     const temp = makeTempProject();
     process.chdir(temp);
 
@@ -187,12 +187,13 @@ describe('initializeTestronautProject', () => {
     const envPath = path.join(temp, '.env');
     fs.writeFileSync(envPath, 'DO_NOT_TOUCH=1\n', 'utf8');
 
+    shared.answers.push({ reconfigure: 'keep' });
+
     // Also ensure folders are missing to verify folder creation still happens
     // (initialize should still ensure dirs even when skipping prompts)
     await initializeTestronautProject();
 
-    // Prompts should not have been called
-    expect(shared.calls).toBe(0);
+    expect(shared.calls).toBe(1);
 
     // .env untouched
     const envTxt = fs.readFileSync(envPath, 'utf8');
@@ -207,6 +208,44 @@ describe('initializeTestronautProject', () => {
     expect(cfg.initialized).toBe(true);
     expect(cfg.provider).toBe('openai');
     expect(cfg.model).toBe('gpt-4o');
+  });
+
+  it('lets an initialized user change models without touching other settings or .env', async () => {
+    const temp = makeTempProject();
+    process.chdir(temp);
+
+    const configPath = path.join(temp, 'testronaut-config.json');
+    fs.writeFileSync(configPath, JSON.stringify({
+      initialized: true,
+      provider: 'openai',
+      model: 'gpt-4o',
+      outputDir: 'custom-reports',
+      projectName: 'demo',
+      maxTurns: 37,
+      rateLimits: {
+        tier: 'tier-2',
+        safetyMargin: 0.8,
+        models: { 'gpt-4o': { fallbackTPM: 123456 } },
+      },
+    }, null, 2));
+    fs.writeFileSync(path.join(temp, '.env'), 'DO_NOT_TOUCH=1\n');
+
+    shared.answers.push({ reconfigure: 'model' });
+    shared.answers.push({ openaiModel: 'gpt-4.1-mini' });
+
+    await initializeTestronautProject();
+
+    const cfg = readJson(configPath);
+    expect(cfg.provider).toBe('openai');
+    expect(cfg.model).toBe('gpt-4.1-mini');
+    expect(cfg.outputDir).toBe('custom-reports');
+    expect(cfg.maxTurns).toBe(37);
+    expect(cfg.rateLimits.tier).toBe('tier-2');
+    expect(cfg.rateLimits.safetyMargin).toBe(0.8);
+    expect(cfg.rateLimits.models['gpt-4o']).toEqual({ fallbackTPM: 123456 });
+    expect(cfg.rateLimits.models['gpt-4.1-mini']).toBeDefined();
+    expect(fs.readFileSync(path.join(temp, '.env'), 'utf8')).toBe('DO_NOT_TOUCH=1\n');
+    expect(shared.calls).toBe(2);
   });
 
   it('preserves pre-existing fields and merges defaults without clobbering', async () => {
