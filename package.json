@@ -1,6 +1,6 @@
 {
   "name": "testronaut",
-  "version": "2.1.11",
+  "version": "2.1.12",
   "main": "./runner/testronaut.js",
   "bin": {
     "testronaut": "bin/cli.js"
