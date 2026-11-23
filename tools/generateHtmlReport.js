@@ -41,6 +41,12 @@ export function generateHtmlReport(report, outputPath) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+  const reportTime = value => {
+    const date = value == null ? null : new Date(value);
+    if (!date || Number.isNaN(date.valueOf())) return '—';
+    const iso = date.toISOString();
+    return `<time class="report-timestamp" datetime="${esc(iso)}" title="Exact UTC: ${esc(iso)}">${esc(iso)}</time>`;
+  };
   const badge = (status, verification) =>
     status === 'passed' && verification === 'verified' ? '✅ Passed · independently verified' :
     status === 'passed' && verification === 'evidence_recorded' ? '✅ Passed · evidence recorded' :
@@ -551,8 +557,8 @@ export function generateHtmlReport(report, outputPath) {
         <div class="run-meta">
           <div class="provider-meta"><span class="provider-logo" title="${esc(provider.name)}" aria-label="${esc(provider.name)}">${provider.logo}</span><strong>${esc((reportModels.length ? reportModels : [llm.model ?? '—']).join(' + '))}</strong>${reportJevUsage.evaluations ? ` <span aria-hidden="true">+</span> <span class="provider-logo" title="Jev" aria-label="Jev">${jevLogo}</span><strong>Jev</strong>` : ''}</div>
           <div><strong>Run ID:</strong> ${esc(runId ?? '—')}</div>
-          <div><strong>Start:</strong> ${esc(startTime ?? '—')}</div>
-          <div><strong>End:</strong> ${esc(endTime ?? '—')}</div>
+          <div><strong>Start:</strong> ${reportTime(startTime)}</div>
+          <div><strong>End:</strong> ${reportTime(endTime)}</div>
           <div><strong>Duration:</strong> ${durationSec}s</div>
           <div><strong>CLI version:</strong> ${esc(cli.version ?? '—')}</div>
         </div>
@@ -619,6 +625,19 @@ export function generateHtmlReport(report, outputPath) {
     Try removing a tag, switching to “Any,” or showing nonmatching missions.
   </div>
   <script>
+    document.querySelectorAll('.report-timestamp').forEach((element) => {
+      const date = new Date(element.dateTime);
+      if (Number.isNaN(date.valueOf())) return;
+      try {
+        element.textContent = new Intl.DateTimeFormat(undefined, {
+          year: 'numeric', month: 'short', day: 'numeric',
+          hour: 'numeric', minute: '2-digit', second: '2-digit',
+          timeZoneName: 'short'
+        }).format(date);
+      } catch (_) {
+        // The exact ISO fallback remains visible in older browsers.
+      }
+    });
   (function () {
     var analyticsToggle = document.getElementById('analytics-toggle');
     var analyticsBody = document.getElementById('analytics-body');
