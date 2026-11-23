@@ -56,6 +56,14 @@ describe('cli helpers', () => {
     expect(__test__.formatCliError('request failed')).toBe('request failed');
   });
 
+  it('recognizes init as a command and --init as its flag alias', () => {
+    expect(__test__.hasInitCommand(['init'])).toBe(true);
+    expect(__test__.hasInitCommand(['--init'])).toBe(true);
+    expect(__test__.hasInitCommand(['--quiet', '--init'])).toBe(true);
+    expect(__test__.hasInitCommand(['welcome.mission.js'])).toBe(false);
+    expect(__test__.hasInitCommand(['welcome.mission.js', 'init'])).toBe(false);
+  });
+
   it('guessMimeType returns expected types', () => {
     const { guessMimeType } = __test__;
     expect(guessMimeType('file.html')).toContain('text/html');

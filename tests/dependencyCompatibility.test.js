@@ -59,6 +59,15 @@ describe('runtime dependency compatibility', () => {
 });
 
 describe('development dependency compatibility', () => {
+  it('keeps the Node.js type definitions aligned with the lockfile', () => {
+    const nodeTypes = lock.packages['node_modules/@types/node'];
+
+    expect(pkg.devDependencies['@types/node']).toBe('^26.5.0');
+    expect(lock.packages[''].devDependencies['@types/node']).toBe(pkg.devDependencies['@types/node']);
+    expect(nodeTypes.version).toBe('26.6.6');
+    expect(nodeTypes.devOptional).toBe(true);
+  });
+
   it('uses the reviewed fast-uri release through the Periapsis AJV toolchain', () => {
     const periapsis = lock.packages['node_modules/periapsis'];
     const ajv = lock.packages['node_modules/ajv'];
