@@ -7,6 +7,18 @@ const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
 const lock = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
 
 describe('runtime dependency compatibility', () => {
+  it('keeps the Anthropic SDK and its telemetry API aligned with the lockfile', () => {
+    const anthropic = lock.packages['node_modules/@anthropic-ai/sdk'];
+    const telemetry = lock.packages['node_modules/@opentelemetry/api'];
+
+    expect(pkg.dependencies['@anthropic-ai/sdk']).toBe('^1.11.0');
+    expect(lock.packages[''].dependencies['@anthropic-ai/sdk'])
+      .toBe(pkg.dependencies['@anthropic-ai/sdk']);
+    expect(anthropic.version).toBe('1.11.0');
+    expect(anthropic.dependencies['@opentelemetry/api']).toBe('^1.4.1');
+    expect(telemetry.version).toBe('1.10.0');
+  });
+
   it('keeps dotenv aligned across the manifest and lockfile', () => {
     const dotenv = lock.packages['node_modules/dotenv'];
 
