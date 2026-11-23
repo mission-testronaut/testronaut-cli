@@ -104,6 +104,32 @@ describe('CLI inspection commands', () => {
     expect(report.missions[0].durationMs).toEqual(expect.any(Number));
   });
 
+  it('preserves existing environment values and parses quoted .env values', () => {
+    const cwd = makeProject();
+    fs.writeFileSync(path.join(cwd, '.env'), [
+      'MISSION_DESTINATION=https://from-file.example.test',
+      'MISSION_LABEL="login # smoke"',
+    ].join('\n'));
+    fs.writeFileSync(path.join(cwd, 'missions', 'login.mission.js'), [
+      'const destination = process.env.MISSION_DESTINATION;',
+      'const label = process.env.MISSION_LABEL;',
+      'export const tags = ["authentication"];',
+      'export async function executeMission() {',
+      '  return { missionName: `${label}: ${destination}`, status: "passed", steps: [] };',
+      '}',
+    ].join('\n'));
+
+    const result = spawnSync(process.execPath, [cliPath, '--tags', 'authentication', '--json', '--quiet'], {
+      cwd,
+      encoding: 'utf8',
+      env: { ...process.env, MISSION_DESTINATION: 'https://from-shell.example.test' },
+    });
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout).missions[0].missionName)
+      .toBe('login # smoke: https://from-shell.example.test');
+  });
+
   it('records shared-auth session mode in the report', () => {
     const cwd = makeProject();
     fs.writeFileSync(path.join(cwd, 'missions', 'login.mission.js'), [

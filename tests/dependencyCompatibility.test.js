@@ -7,6 +7,15 @@ const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
 const lock = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
 
 describe('runtime dependency compatibility', () => {
+  it('keeps dotenv aligned across the manifest and lockfile', () => {
+    const dotenv = lock.packages['node_modules/dotenv'];
+
+    expect(pkg.dependencies.dotenv).toBe('^18.0.10');
+    expect(lock.packages[''].dependencies.dotenv).toBe(pkg.dependencies.dotenv);
+    expect(dotenv.version).toBe('18.0.10');
+    expect(dotenv.engines.node).toBe('>=12');
+  });
+
   it('records the Node runtime required by the installed Playwright version', () => {
     const playwright = lock.packages['node_modules/playwright'];
     expect(playwright.engines.node).toBe('>=20');
