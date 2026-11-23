@@ -34,7 +34,17 @@ describe('AnthropicProvider', () => {
       model: 'claude-sonnet-5', messages: [{ role: 'user', content: 'Go' }],
       tools: [{ type: 'function', function: { name: 'navigate', description: 'Navigate', parameters: { type: 'object' } } }],
     });
-    expect(create).toHaveBeenCalledWith(expect.objectContaining({ model: 'claude-sonnet-5', max_tokens: 8192 }));
+    expect(create).toHaveBeenLastCalledWith({
+      model: 'claude-sonnet-5',
+      max_tokens: 8192,
+      system: undefined,
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'Go' }] }],
+      tools: [{
+        name: 'navigate',
+        description: 'Navigate',
+        input_schema: { type: 'object' },
+      }],
+    });
     expect(result.message).toEqual(fromAnthropicMessage({ content: [{ type: 'text', text: 'Working' }, { type: 'tool_use', id: 'toolu_1', name: 'navigate', input: { url: 'https://example.com' } }] }));
     expect(result.usage.total_tokens).toBe(20);
   });
