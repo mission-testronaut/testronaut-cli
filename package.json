@@ -60,7 +60,7 @@
   "devDependencies": {
     "@types/node": "^26.5.0",
     "periapsis": "^2.1.2",
-    "vitest": "^4.1.11"
+    "vitest": "^5.1.1"
   },
   "homepage": "https://testronaut.app"
 }
